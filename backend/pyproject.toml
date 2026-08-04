@@ -1,0 +1,26 @@
+[project]
+name = "ai-tiny-world-backend"
+version = "0.1.0"
+description = "AI Tiny World — FastAPI backend skeleton"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "loguru>=0.7",
+    "sqlalchemy>=2.0.43",
+    "alembic>=1.13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

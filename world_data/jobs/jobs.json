@@ -1,0 +1,49 @@
+{
+  "version": "1.0.0",
+  "jobs": [
+    {
+      "job_id": "job_farm_field",
+      "name": "农场劳作",
+      "location_id": "village_farm",
+      "interactable_id": "farm_field",
+      "duration_minutes": 120,
+      "wage": 30,
+      "energy_cost_per_hour": 4,
+      "products": [{"item_id": "wheat", "quantity": 1}],
+      "description": "浇水、播种或收获，晨露农场的日常农活"
+    },
+    {
+      "job_id": "job_shop_attendant",
+      "name": "商店值班",
+      "location_id": "village_shop",
+      "interactable_id": "shop_counter",
+      "duration_minutes": 240,
+      "wage": 60,
+      "energy_cost_per_hour": 2,
+      "products": [],
+      "description": "在杂货店柜台招呼客人、整理货架"
+    },
+    {
+      "job_id": "job_delivery",
+      "name": "送货跑腿",
+      "location_id": "village_plaza",
+      "interactable_id": "fountain",
+      "duration_minutes": 90,
+      "wage": 24,
+      "energy_cost_per_hour": 3,
+      "products": [],
+      "description": "把货物从广场送到各家各户"
+    },
+    {
+      "job_id": "job_town_clerk",
+      "name": "政务登记",
+      "location_id": "town_hall",
+      "interactable_id": "town_hall_desk",
+      "duration_minutes": 180,
+      "wage": 48,
+      "energy_cost_per_hour": 1,
+      "products": [],
+      "description": "在政务厅整理档案、登记公告"
+    }
+  ]
+}

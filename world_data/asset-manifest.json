@@ -1,0 +1,68 @@
+{
+  "manifest_version": "1.0",
+  "map_version": "1.0.0",
+  "tile_width": 16,
+  "tile_height": 16,
+  "assets": [
+    {
+      "alias": "tiny_farm_tiles",
+      "file": "maps/tileset.png",
+      "kind": "image",
+      "tile_width": 16,
+      "tile_height": 16,
+      "columns": 12,
+      "rows": 11,
+      "tile_count": 132,
+      "license": "CC0 1.0 Universal",
+      "attribution": "Kenney (www.kenney.nl), Tiny Farm pack 1.0",
+      "note": "12x11 packed sheet, no margin/spacing (from Tilemap/tilemap_packed.png)"
+    },
+    {
+      "alias": "tiny_farm_tileset",
+      "file": "maps/tiny_farm.tsj",
+      "kind": "tiled_tileset",
+      "tile_width": 16,
+      "tile_height": 16,
+      "columns": 12,
+      "tile_count": 132,
+      "image": "maps/tileset.png",
+      "license": "CC0 1.0 Universal",
+      "attribution": "Kenney (www.kenney.nl), Tiny Farm pack 1.0"
+    },
+    {
+      "alias": "markers_tiles",
+      "file": "maps/markers.png",
+      "kind": "image",
+      "tile_width": 16,
+      "tile_height": 16,
+      "columns": 1,
+      "rows": 1,
+      "tile_count": 1,
+      "license": "Generated for this project (MIT)",
+      "note": "Magenta marker tile used by collision / navigation layers"
+    },
+    {
+      "alias": "markers_tileset",
+      "file": "maps/markers.tsj",
+      "kind": "tiled_tileset",
+      "tile_width": 16,
+      "tile_height": 16,
+      "columns": 1,
+      "tile_count": 1,
+      "image": "maps/markers.png",
+      "license": "Generated for this project (MIT)"
+    },
+    {
+      "alias": "tiny_world_map",
+      "file": "maps/tiny_world.tmj",
+      "kind": "tiled_map",
+      "width": 64,
+      "height": 40,
+      "tile_width": 16,
+      "tile_height": 16,
+      "tilesets": ["tiny_farm_tileset", "markers_tileset"],
+      "generator": "tools/build_map.py",
+      "license": "Map layout generated for this project (MIT); tiles CC0 Kenney"
+    }
+  ]
+}

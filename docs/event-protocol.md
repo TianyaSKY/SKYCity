@@ -1,0 +1,75 @@
+# 事件协议 (event-protocol)
+
+版本：1.0.0
+
+## 1. 统一事件信封
+
+所有事件（HTTP 返回、WebSocket 推送、存档重放）使用同一信封：
+
+```json
+{
+  "event_id": "evt_000081",
+  "sequence": 81,
+  "world_id": "world_001",
+  "world_time": 510,
+  "type": "agent_move_started",
+  "payload": {},
+  "trace_id": "trc_000001"
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `event_id` | string | 全局唯一，单调（`evt_` + 6 位序号） |
+| `sequence` | int | 世界内单调递增序号（从 1 开始，永不复用） |
+| `world_id` | string | 世界 ID |
+| `world_time` | int | 事件发生时世界时间（游戏分钟） |
+| `type` | string | 事件类型（见 §3） |
+| `payload` | object | 类型相关的载荷 |
+| `trace_id` | string | 溯源 ID（M8）：调度→观察→LLM→工具→Service→事务→事件→WS 同值 |
+
+## 2. 排序与去重
+
+- 消费者按 `sequence` 升序处理；`world_time` 相同也以 sequence 定序。
+- 前端记录已处理的最大 sequence；收到 ≤ 已处理的 → 丢弃（重放去重）；
+  收到跳跃（gap）→ 触发全量快照重拉。
+- WebSocket 连接建立后**先发完整快照**（type=`world_snapshot`），再推增量。
+
+## 3. 事件类型（第一批）
+
+| type | 载荷要点 | 触发方 |
+|---|---|---|
+| `world_snapshot` | 完整世界状态（agents/clock/weather/locations） | 连接建立/重连 |
+| `world_time_changed` | `{world_time}` | 时钟推进 |
+| `world_paused` | `{reason?}` | 暂停 |
+| `world_resumed` | `{}` | 恢复 |
+| `world_speed_changed` | `{speed}` | 调速 |
+| `agent_state_changed` | `{agent_id, state: {...}}` | 状态/需求变化 |
+| `agent_move_started` | `{agent_id, from: [c,r], to: [c,r], duration_minutes, speed_multiplier}` | 移动开始 |
+| `agent_move_completed` | `{agent_id, at: [c,r]}` | 移动完成 |
+| `agent_wait_started` | `{agent_id, minutes, reason}` | 等待开始 |
+| `agent_wait_completed` | `{agent_id}` | 等待结束 |
+| `world_event_created` | `{agent_id?, text, importance}` | 世界内叙事事件 |
+| `conversation_message` | `{from_agent_id, to_agent_id, message, intent}` | 对话消息 |
+| `conversation_started` | `{a, b}` | 会话开始 |
+| `conversation_ended` | `{a, b, reason}` | 会话结束 |
+| `agent_talked` | `{from_agent_id, message}` | 气泡显示 |
+
+（M5 追加：`item_purchased` / `item_sold` / `work_started` / `work_completed` /
+`money_changed` / `inventory_changed`；M6 追加：`memory_created` /
+`relationship_changed` / `daily_reflection`；M7 追加：`god_action_applied` /
+`weather_changed`；M9 追加：`world_saved` / `world_restored`。）
+
+## 4. 事件持久化
+
+- 所有事件写入 `world_events` 表（可追溯、可重放）。
+- 存档 = 初始快照 + 按 sequence 的事件序列（重放不依赖 LLM）。
+- `GET /api/worlds/{id}/events?after_sequence=N` 用于补齐遗漏。
+
+## 5. 事件产生规则
+
+- 一切世界状态变更必须产生事件（trace 可溯）。
+- 同一事务内产生的事件共享 `trace_id` 与 `world_time`，sequence 递增。
+- 前端仅消费事件渲染，不反向推导状态。

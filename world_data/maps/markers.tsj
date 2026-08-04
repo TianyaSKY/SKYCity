@@ -1,0 +1,16 @@
+{
+  "columns": 1,
+  "image": "markers.png",
+  "imageheight": 16,
+  "imagewidth": 16,
+  "margin": 0,
+  "name": "markers",
+  "spacing": 0,
+  "tilecount": 1,
+  "tiledversion": "1.10.2",
+  "tileheight": 16,
+  "tiles": [],
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}

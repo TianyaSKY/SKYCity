@@ -1,0 +1,16 @@
+{
+  "columns": 12,
+  "image": "tileset.png",
+  "imageheight": 176,
+  "imagewidth": 192,
+  "margin": 0,
+  "name": "tiny_farm",
+  "spacing": 0,
+  "tilecount": 132,
+  "tiledversion": "1.10.2",
+  "tileheight": 16,
+  "tiles": [],
+  "tilewidth": 16,
+  "type": "tileset",
+  "version": "1.10"
+}
