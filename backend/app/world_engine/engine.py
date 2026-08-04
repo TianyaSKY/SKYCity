@@ -1,0 +1,541 @@
+"""WorldEngine: runtime registry, tick loop, world lifecycle, snapshots, WS fan-out.
+
+One WorldRuntime (clock + scheduler + event bus + ws clients) per world_id.
+The engine is created in the FastAPI lifespan; its asyncio task ticks every
+0.1 real seconds. All DB work inside the tick loop is sync SQLite (fast).
+
+Sync DB mutations in HTTP handlers run on the same event loop via async
+endpoints; WebSocket pushes are queued by the EventBus and drained by
+``flush_pending`` (async) after each mutation.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from loguru import logger
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, sessionmaker
+from starlette.websockets import WebSocket
+
+from app.database.models.agents import Agent
+from app.database.models.locations import WorldLocation
+from app.database.models.world_events import WorldEvent
+from app.database.models.worlds import World
+from app.domain.agent import AgentActionMove, AgentActionWait, AgentSnapshot
+from app.domain.event import WorldEventEnvelope
+from app.domain.location import LocationSnapshot
+from app.domain.world import WorldSnapshot, WorldSnapshotPayload
+from app.services.world_config_loader import ParsedWorldConfig
+from app.world_engine.clock import WorldClock
+from app.world_engine.event_bus import EventBus
+from app.world_engine.scheduler import Scheduler
+
+TICK_INTERVAL = 0.1  # real seconds per engine tick
+
+_HOME_SUFFIX = "_home"
+
+
+@dataclass
+class WorldRuntime:
+    """In-memory state for one running world."""
+
+    world_id: str
+    clock: WorldClock
+    scheduler: Scheduler
+    event_bus: EventBus
+    ws_clients: set[WebSocket] = field(default_factory=set)
+
+
+class WorldEngine:
+    """Registry of world runtimes + the background tick loop."""
+
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        world_config: ParsedWorldConfig,
+        world_data_dir: Path | None = None,
+    ) -> None:
+        self._session_factory = session_factory
+        self.world_config = world_config
+        self.world_data_dir = world_data_dir
+        self._runtimes: dict[str, WorldRuntime] = {}
+        self._task: asyncio.Task | None = None
+        # ActionExecutionService is wired after construction (it needs the engine).
+        self.action_service: Any = None
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle
+    # ------------------------------------------------------------------ #
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._tick_loop(), name="world-engine-tick")
+
+    async def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+            self._task = None
+
+    def load_existing(self) -> None:
+        """Restore runtimes for worlds persisted in the DB (restart-safe)."""
+        session = self._session_factory()
+        try:
+            worlds = session.scalars(select(World).order_by(World.world_id)).all()
+            for world in worlds:
+                self._ensure_runtime(
+                    world.world_id,
+                    clock=WorldClock(world.world_time, world.speed, world.paused),
+                    session=session,
+                )
+            if worlds:
+                logger.info(
+                    "World engine resumed {} existing world(s)", len(worlds)
+                )
+        except Exception:  # noqa: BLE001 - DB may be empty/migrating; engine still works
+            logger.exception("Failed to resume existing worlds; starting empty")
+        finally:
+            session.close()
+
+    def runtime_ids(self) -> list[str]:
+        return sorted(self._runtimes)
+
+    def get_runtime(self, world_id: str) -> WorldRuntime | None:
+        return self._runtimes.get(world_id)
+
+    # ------------------------------------------------------------------ #
+    # Runtime construction
+    # ------------------------------------------------------------------ #
+
+    def _ensure_runtime(
+        self, world_id: str, clock: WorldClock | None = None, session: Session | None = None
+    ) -> WorldRuntime:
+        existing = self._runtimes.get(world_id)
+        if existing is not None:
+            return existing
+        if self.action_service is None:
+            raise RuntimeError("WorldEngine.action_service must be wired before runtimes are created")
+        event_bus = EventBus(world_id)
+        scheduler = Scheduler(world_id)
+        if session is not None:
+            event_bus.init_sequence(session)
+        runtime = WorldRuntime(
+            world_id=world_id,
+            clock=clock or WorldClock(),
+            scheduler=scheduler,
+            event_bus=event_bus,
+        )
+        scheduler.register("move_completed", self.action_service.handle_move_completed)
+        scheduler.register("wait_completed", self.action_service.handle_wait_completed)
+        scheduler.register("capacity_recheck", self.action_service.handle_capacity_recheck)
+        self._runtimes[world_id] = runtime
+        return runtime
+
+    # ------------------------------------------------------------------ #
+    # World lifecycle
+    # ------------------------------------------------------------------ #
+
+    def create_world(self, name: str | None = None) -> WorldRuntime:
+        """Create a new world seeded with locations + agents, return its runtime."""
+        session = self._session_factory()
+        try:
+            number = self._next_world_number(session)
+            world_id = f"world_{number:03d}"
+            world = World(
+                world_id=world_id,
+                name=name or f"世界 {number:03d}",
+                world_time=480,
+                speed=1,
+                paused=False,
+                weather="clear",
+            )
+            session.add(world)
+            for loc in self.world_config.locations:
+                session.add(
+                    WorldLocation(
+                        world_id=world_id,
+                        location_id=loc.location_id,
+                        name=loc.name,
+                        location_type=loc.location_type,
+                        col=loc.col,
+                        row=loc.row,
+                        capacity=loc.capacity,
+                        open_hour=loc.open_hour,
+                        close_hour=loc.close_hour,
+                    )
+                )
+            for spawn in self.world_config.spawn_points:
+                session.add(self._build_agent(world_id, spawn))
+            session.commit()
+        finally:
+            session.close()
+        runtime = self._ensure_runtime(world_id, clock=WorldClock(480, 1, False))
+        logger.info("Created world {}", world_id)
+        return runtime
+
+    def delete_runtime(self, world_id: str) -> None:
+        """Remove an in-memory runtime (no DB delete in M2)."""
+        self._runtimes.pop(world_id, None)
+
+    def _next_world_number(self, session: Session) -> int:
+        ids = session.scalars(select(World.world_id)).all()
+        numbers = [
+            int(parts[1])
+            for world_id in ids
+            if (parts := world_id.split("_", 1)) and len(parts) == 2 and parts[1].isdigit()
+        ]
+        return (max(numbers) if numbers else 0) + 1
+
+    def _build_agent(self, world_id: str, spawn: Any) -> Agent:
+        identity = self._load_identity(spawn.agent_id)
+        home_id = f"{spawn.agent_id.removeprefix('agent_')}{_HOME_SUFFIX}"
+        home_exists = any(loc.location_id == home_id for loc in self.world_config.locations)
+        return Agent(
+            world_id=world_id,
+            agent_id=spawn.agent_id,
+            name=identity.get("name") or spawn.agent_id,
+            age=int(identity.get("age") or 0),
+            occupation=str(identity.get("occupation") or ""),
+            background=str(identity.get("background") or ""),
+            values=list(identity.get("values") or []),
+            long_term_goals=list(identity.get("long_term_goals") or []),
+            speaking_style=str(identity.get("speaking_style") or ""),
+            personality=dict(identity.get("personality") or {}),
+            col=spawn.col,
+            row=spawn.row,
+            direction=spawn.direction,
+            location_id=home_id if home_exists else None,
+            hunger=0,
+            energy=100,
+            money=50,
+            action_type=None,
+            action_started_at=None,
+            action_ends_at=None,
+            action_data=None,
+        )
+
+    def _load_identity(self, agent_id: str) -> dict[str, Any]:
+        if self.world_data_dir is None:
+            return {}
+        path = self.world_data_dir / "identities" / f"{agent_id}.json"
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except FileNotFoundError:
+            logger.warning("Identity card missing: {}", path)
+            return {}
+        except json.JSONDecodeError:
+            logger.warning("Identity card invalid JSON: {}", path)
+            return {}
+
+    # ------------------------------------------------------------------ #
+    # Publish (used by HTTP routes; queues + persists, caller flushes)
+    # ------------------------------------------------------------------ #
+
+    def publish(
+        self,
+        world_id: str,
+        type_: str,
+        payload: dict | None = None,
+        trace_id: str | None = None,
+        world_time: int | None = None,
+    ) -> WorldEventEnvelope | None:
+        """Persist one event for a world; returns its envelope (None if unknown world)."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return None
+        session = self._session_factory()
+        try:
+            if world_time is None:
+                world_time = runtime.clock.world_time
+            envelope = runtime.event_bus.publish(session, world_time, type_, payload, trace_id)
+            session.commit()
+            return envelope
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------ #
+    # Control mutations (pause / resume / speed)
+    # ------------------------------------------------------------------ #
+
+    def set_paused(self, world_id: str, paused: bool) -> tuple[bool, WorldEventEnvelope | None]:
+        """Pause/resume a world. Returns (found, envelope_or_None); envelope is
+        None when the state did not change (idempotent call)."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return False, None
+        session = self._session_factory()
+        try:
+            world = session.get(World, world_id)
+            if world is None:
+                return False, None
+            if world.paused == paused:
+                return True, None
+            world.paused = paused
+            runtime.clock.paused = paused
+            session.commit()
+            envelope = self.publish(world_id, "world_paused" if paused else "world_resumed", {})
+            return True, envelope
+        finally:
+            session.close()
+
+    def set_speed(self, world_id: str, speed: int) -> tuple[bool, WorldEventEnvelope | None]:
+        """Change world speed. Returns (found, envelope_or_None); envelope is
+        None when the speed did not change."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return False, None
+        session = self._session_factory()
+        try:
+            world = session.get(World, world_id)
+            if world is None:
+                return False, None
+            if world.speed == speed:
+                return True, None
+            world.speed = speed
+            runtime.clock.speed = speed
+            session.commit()
+            envelope = self.publish(world_id, "world_speed_changed", {"speed": speed})
+            return True, envelope
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------ #
+    # Tick loop
+    # ------------------------------------------------------------------ #
+
+    async def _tick_loop(self) -> None:
+        while True:
+            await asyncio.sleep(TICK_INTERVAL)
+            for runtime in list(self._runtimes.values()):
+                try:
+                    self._tick_runtime(runtime)
+                    await self._flush_pending(runtime)
+                except Exception:  # noqa: BLE001 - one world must not kill the loop
+                    logger.exception("Tick failed for world {}", runtime.world_id)
+
+    def _tick_runtime(self, runtime: WorldRuntime) -> None:
+        """Advance one world's clock and fire due scheduler actions.
+
+        Frozen world (paused): neither clock nor scheduler run.
+        """
+        if runtime.clock.paused:
+            return
+        crossed = runtime.clock.tick(TICK_INTERVAL)
+        if not crossed:
+            return
+        session = self._session_factory()
+        try:
+            world = session.get(World, runtime.world_id)
+            if world is None:
+                return
+            for world_time in crossed:
+                world.world_time = world_time
+                runtime.event_bus.publish(
+                    session, world_time, "world_time_changed", {"world_time": world_time}
+                )
+            session.commit()
+            due = runtime.scheduler.load_due(session, runtime.clock.world_time)
+            for action in due:
+                runtime.scheduler.dispatch(session, action)
+            session.commit()
+        finally:
+            session.close()
+
+    async def _flush_pending(self, runtime: WorldRuntime) -> None:
+        """Send every queued envelope to connected WebSocket clients."""
+        envelopes = runtime.event_bus.take_pending()
+        if not envelopes:
+            return
+        if not runtime.ws_clients:
+            return
+        dead: list[WebSocket] = []
+        for client in list(runtime.ws_clients):
+            try:
+                for envelope in envelopes:
+                    await client.send_json(envelope.model_dump())
+            except Exception:  # noqa: BLE001 - broken client; drop it
+                dead.append(client)
+        for client in dead:
+            runtime.ws_clients.discard(client)
+
+    async def flush_pending_now(self, world_id: str) -> None:
+        """Flush queued envelopes to WS clients (HTTP handlers, after a mutation)."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return
+        await self._flush_pending(runtime)
+
+    # ------------------------------------------------------------------ #
+    # Snapshots
+    # ------------------------------------------------------------------ #
+
+    def snapshot(self, world_id: str) -> dict[str, Any] | None:
+        """Full world state payload (same shape WS sends as world_snapshot)."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return None
+        session = self._session_factory()
+        try:
+            world = session.get(World, world_id)
+            if world is None:
+                return None
+            agents = session.scalars(
+                select(Agent).where(Agent.world_id == world_id).order_by(Agent.agent_id)
+            ).all()
+            locations = session.scalars(
+                select(WorldLocation)
+                .where(WorldLocation.world_id == world_id)
+                .order_by(WorldLocation.location_id)
+            ).all()
+            world_time = world.world_time
+            payload = WorldSnapshotPayload(
+                world=WorldSnapshot(
+                    world_id=world_id,
+                    world_time=world_time,
+                    speed=world.speed,
+                    paused=world.paused,
+                    weather=world.weather,
+                    day=world_time // 1440 + 1,
+                ),
+                agents=[self._agent_snapshot(agent, world_time) for agent in agents],
+                locations=[self._location_snapshot(loc, world_time) for loc in locations],
+                latest_sequence=runtime.event_bus.sequence,
+            )
+            return payload.model_dump(by_alias=True)
+        finally:
+            session.close()
+
+    def snapshot_envelope(self, world_id: str) -> dict[str, Any] | None:
+        """The world_snapshot envelope sent on WS connect (not persisted)."""
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return None
+        payload = self.snapshot(world_id)
+        if payload is None:
+            return None
+        sequence = runtime.event_bus.sequence
+        return {
+            "event_id": f"evt_{sequence:06d}",
+            "sequence": sequence,
+            "world_id": world_id,
+            "world_time": runtime.clock.world_time,
+            "type": "world_snapshot",
+            "payload": payload,
+            "trace_id": f"trc_{sequence:06d}",
+        }
+
+    def _agent_snapshot(self, agent: Agent, world_time: int) -> AgentSnapshot:
+        action = None
+        if agent.action_type == "move":
+            data = agent.action_data or {}
+            action = AgentActionMove(
+                type="move",
+                from_=list(data.get("from") or [agent.col, agent.row]),
+                to=list(data.get("to") or [agent.col, agent.row]),
+                started_at=agent.action_started_at or world_time,
+                ends_at=agent.action_ends_at or world_time,
+                reason=data.get("reason"),
+            )
+        elif agent.action_type == "wait":
+            data = agent.action_data or {}
+            action = AgentActionWait(
+                type="wait",
+                ends_at=agent.action_ends_at or world_time,
+                reason=data.get("reason"),
+            )
+        return AgentSnapshot(
+            agent_id=agent.agent_id,
+            name=agent.name,
+            col=agent.col,
+            row=agent.row,
+            location_id=agent.location_id,
+            hunger=agent.hunger,
+            energy=agent.energy,
+            money=agent.money,
+            action=action,
+        )
+
+    def _location_snapshot(self, loc: WorldLocation, world_time: int) -> LocationSnapshot:
+        return LocationSnapshot(
+            location_id=loc.location_id,
+            name=loc.name,
+            location_type=loc.location_type,
+            col=loc.col,
+            row=loc.row,
+            capacity=loc.capacity,
+            open_hour=loc.open_hour,
+            close_hour=loc.close_hour,
+            open=is_location_open(loc.location_type, loc.open_hour, loc.close_hour, world_time),
+        )
+
+    # ------------------------------------------------------------------ #
+    # Event log query
+    # ------------------------------------------------------------------ #
+
+    def events_after(self, world_id: str, after_sequence: int = 0) -> list[WorldEventEnvelope]:
+        """Envelopes with sequence > after_sequence, in order (gap recovery)."""
+        session = self._session_factory()
+        try:
+            rows = session.scalars(
+                select(WorldEvent)
+                .where(
+                    WorldEvent.world_id == world_id,
+                    WorldEvent.sequence > after_sequence,
+                )
+                .order_by(WorldEvent.sequence)
+            ).all()
+            return [
+                WorldEventEnvelope(
+                    event_id=row.event_id,
+                    sequence=row.sequence,
+                    world_id=row.world_id,
+                    world_time=row.world_time,
+                    type=row.type,
+                    payload=row.payload or {},
+                    trace_id=row.trace_id,
+                )
+                for row in rows
+            ]
+        finally:
+            session.close()
+
+
+def is_location_open(
+    location_type: str, open_hour: int, close_hour: int, world_time: int
+) -> bool:
+    """R8: houses and plazas are always open; others honour [open_hour, close_hour)."""
+    if location_type in ("house", "plaza"):
+        return True
+    hour = (world_time % 1440) // 60
+    return open_hour <= hour < close_hour
+
+
+def next_open_time(open_hour: int, close_hour: int, world_time: int) -> int:
+    """World_time of the next opening, strictly after ``world_time`` (R8 waits)."""
+    if open_hour == 0 and close_hour == 24:
+        return world_time
+    today_start = world_time - (world_time % 1440)
+    candidate = today_start + open_hour * 60
+    if candidate <= world_time:
+        candidate += 1440
+    return candidate
+
+
+def count_location_occupants(session: Session, world_id: str, location_id: str) -> int:
+    """Agents currently inside a location (capacity check, R15)."""
+    return int(
+        session.scalar(
+            select(func.count())
+            .select_from(Agent)
+            .where(Agent.world_id == world_id, Agent.location_id == location_id)
+        )
+        or 0
+    )

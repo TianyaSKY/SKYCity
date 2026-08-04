@@ -1,9 +1,21 @@
-"""Database models package.
+"""Database models package: every ORM model used by the world engine.
 
-Placeholder for M2: model classes (worlds, agents, ...) will be added here.
-The declarative Base is re-exported so alembic and future models import from one place.
+Importing this package registers all tables on Base.metadata so alembic
+autogenerate and create_all see the full schema.
 """
 
+from app.database.models.agents import Agent
+from app.database.models.locations import WorldLocation
+from app.database.models.scheduled_actions import ScheduledAction
+from app.database.models.world_events import WorldEvent
+from app.database.models.worlds import World
 from app.database.session import Base
 
-__all__ = ["Base"]
+__all__ = [
+    "Agent",
+    "Base",
+    "ScheduledAction",
+    "World",
+    "WorldEvent",
+    "WorldLocation",
+]

@@ -10,9 +10,12 @@ from app.config.settings import get_settings
 settings = get_settings()
 
 # SQLite is file-local: multiple threads (FastAPI worker threads) may touch the
-# same connection; check_same_thread=False is the standard opt-out.
+# same connection; check_same_thread=False is the standard opt-out, and the
+# busy timeout avoids "database is locked" under concurrent reads/writes.
 _connect_args = (
-    {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+    {"check_same_thread": False, "timeout": 30}
+    if settings.database_url.startswith("sqlite")
+    else {}
 )
 
 engine = create_engine(settings.database_url, connect_args=_connect_args)

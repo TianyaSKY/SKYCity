@@ -12,8 +12,8 @@ const openHours = computed(() => {
 });
 
 const worldClock = computed(() => {
-  const hours = Math.floor(store.worldTimeMinutes / 60) % 24;
-  const minutes = store.worldTimeMinutes % 60;
+  const hours = Math.floor(store.worldTime / 60) % 24;
+  const minutes = store.worldTime % 60;
   return `${pad2(hours)}:${pad2(minutes)}`;
 });
 </script>

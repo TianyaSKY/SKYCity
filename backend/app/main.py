@@ -5,14 +5,20 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from app.api.websocket import router as websocket_router
+from app.api.worlds import router as worlds_router
 from app.config.settings import get_settings
+from app.database.session import SessionLocal
+from app.services.action_execution_service import ActionExecutionService
 from app.services.world_config_loader import WorldConfigError, load_world_config
+from app.world_engine.engine import WorldEngine
 
 settings = get_settings()
 
@@ -29,7 +35,11 @@ def _configure_logging(level: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: configure logging and preload world config; fail fast if map is missing."""
+    """Startup: configure logging, preload world config, start the world engine.
+
+    The engine owns the game clock, the event bus, and WebSocket delivery; it
+    is the single source of truth for world state (see docs/architecture.md).
+    """
     _configure_logging(settings.log_level)
     try:
         world = load_world_config(settings)
@@ -37,8 +47,22 @@ async def lifespan(app: FastAPI):
         logger.critical("Failed to load world config: {}", exc)
         raise RuntimeError(f"World data unavailable: {exc}") from exc
     app.state.world_config = world
+
+    engine = WorldEngine(
+        session_factory=SessionLocal,
+        world_config=world,
+        world_data_dir=settings.world_data_dir,
+    )
+    service = ActionExecutionService(engine, SessionLocal)
+    engine.action_service = service
+    app.state.engine = engine
+    app.state.action_service = service
+
+    await engine.start()
+    engine.load_existing()
     logger.info("{} ready (map v{})", settings.app_name, world.map_version)
     yield
+    await engine.stop()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -59,7 +83,10 @@ async def _validation_exception_handler(
     logger.warning("Request {} validation error: {}", request_id, exc.errors())
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors(), "request_id": request_id},
+        content={
+            "detail": jsonable_encoder(exc.errors()),
+            "request_id": request_id,
+        },
     )
 
 
@@ -83,6 +110,9 @@ def health() -> dict[str, str]:
         "map_version": app.state.world_config.map_version,
     }
 
+
+app.include_router(worlds_router)
+app.include_router(websocket_router)
 
 # World data served verbatim for the frontend (maps, tilesets, images).
 app.mount(
