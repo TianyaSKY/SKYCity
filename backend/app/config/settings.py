@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     # M6: stronger model used for the no-tool daily reflection prompt.
     llm_reflect_model: str = "gpt-4o-mini"
+    # M8: stability / cost control.
+    llm_max_concurrent: int = 2  # global cap on concurrent LLM calls
+    world_daily_token_budget: int = 0  # per-world daily LLM token budget; 0 = unlimited
+    observation_cache_window_minutes: int = 10  # skip identical observations within this window
+    backoff_max_delay: int = 120  # cap on the degrade backoff schedule (game minutes)
 
     @field_validator("cors_origins", mode="before")
     @classmethod

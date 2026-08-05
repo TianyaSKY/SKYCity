@@ -59,6 +59,10 @@ class Agent(Base):
     # LLM decision loop (M3): in-flight guard + consecutive failure counter.
     is_deciding: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # M8: stability / cost control observability.
+    last_decision_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_token_usage: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    daily_call_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Agent(world_id={self.world_id!r}, agent_id={self.agent_id!r}, at=({self.col},{self.row}))"

@@ -12,11 +12,13 @@ handler spawns an asyncio task (or, under a sync test driver, runs inline).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import re
 import uuid
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.context import AgentToolContext
@@ -27,6 +29,7 @@ from app.config.settings import Settings, get_settings
 from app.database.models.agents import Agent
 from app.database.models.llm_runs import LLMRun
 from app.database.models.scheduled_actions import ScheduledAction
+from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
@@ -37,10 +40,50 @@ DEGRADE_DELAY = 20  # after an LLM failure
 DEGRADE_WAIT_MINUTES = 15  # fallback action while the LLM is down
 MAX_CONSECUTIVE_FAILURES = 5
 
+# M8: cadence used when a decision is skipped (observation cache / budget).
+SKIP_DECIDE_DELAY = 15  # cache hit: re-evaluate shortly
+BUDGET_SKIP_DELAY = 30  # world LLM budget exhausted: dormant rhythm
+
+# M8 T8: one text event emitted (once per day) when the world budget runs out.
+BUDGET_EXHAUSTED_TEXT = "世界今日 LLM 预算已用尽，智能体转入休眠节奏"
+
 CLAMPED_WAIT_MINUTES = (1, 240)
 
 # M5 R12: how long an exhausted agent is forced to rest before re-deciding.
 FORCED_REST_MINUTES = 60
+
+# --------------------------------------------------------------------------- #
+# M8 T8-1: global LLM concurrency cap.
+#
+# One semaphore shared by every DecisionService instance. asyncio primitives
+# are loop-bound, and the sync test driver runs each decision in its own
+# ``asyncio.run`` loop — so the semaphore is keyed by the running loop: within
+# one loop the cap is global, across loops (sequential test decisions) a fresh
+# semaphore with the same limit is used. ``reflect`` shares the same cap.
+# --------------------------------------------------------------------------- #
+_LLM_SEMAPHORE: asyncio.Semaphore | None = None
+_LLM_SEMAPHORE_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _llm_semaphore() -> asyncio.Semaphore:
+    """The loop-keyed global semaphore enforcing ``llm_max_concurrent``."""
+    global _LLM_SEMAPHORE, _LLM_SEMAPHORE_LOOP
+    loop = asyncio.get_running_loop()
+    if _LLM_SEMAPHORE is None or _LLM_SEMAPHORE_LOOP is not loop:
+        _LLM_SEMAPHORE = asyncio.Semaphore(get_settings().llm_max_concurrent)
+        _LLM_SEMAPHORE_LOOP = loop
+    return _LLM_SEMAPHORE
+
+
+def _is_transient(exc: Exception) -> bool:
+    """M8 T8-4: errors worth one automatic retry (timeout / transport)."""
+    if isinstance(exc, asyncio.TimeoutError) or isinstance(exc, OSError):
+        return True
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover - httpx is a hard dependency
+        return False
+    return isinstance(exc, httpx.HTTPError)
 
 
 class DecisionService:
@@ -57,6 +100,10 @@ class DecisionService:
         self._session_factory = session_factory
         self._settings = settings or get_settings()
         self._provider = provider if provider is not None else get_provider(self._settings)
+        # M8 T8-5: per-agent observation cache: (obs_hash, world_time).
+        self._observation_cache: dict[tuple[str, str], tuple[str, int]] = {}
+        # M8 T8: per (world, day) flag: the budget-exhausted event was emitted.
+        self._budget_notified: set[tuple[str, int]] = set()
 
     # ------------------------------------------------------------------ #
     # Scheduler handler
@@ -104,6 +151,7 @@ class DecisionService:
             if agent is None or agent.action_type is not None or agent.is_deciding:
                 return
             agent.is_deciding = True
+            agent.last_decision_at = world.world_time  # M8: decide-start timestamp
             session.commit()
         finally:
             session.close()
@@ -173,19 +221,27 @@ class DecisionService:
             memory_service=self.engine.memory_service,
         )
 
+        # M8: observation cache (T8-5) + world daily budget (T8) gates run
+        # before any LLM call; a skip schedules its own follow-up decision.
+        session = self._session_factory()
         try:
-            result = await asyncio.wait_for(
-                self._provider.decide(
-                    observation=observation, context=context, trace_id=trace_id
-                ),
-                timeout=self._settings.llm_timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            self._degrade(world_id, agent_id, trace_id, "timeout", "LLM 决策超时")
-            return
-        except Exception as exc:  # noqa: BLE001 - any provider failure degrades
-            self._degrade(world_id, agent_id, trace_id, type(exc).__name__, str(exc))
-            return
+            world = session.get(World, world_id)
+            runtime = self.engine.get_runtime(world_id)
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if world is None or runtime is None or agent is None:
+                return
+            if not self._observation_or_budget_gate(
+                session, runtime, world, agent, observation, world.world_time
+            ):
+                return
+        finally:
+            session.close()
+
+        result = await self._call_decision(
+            observation, context, trace_id, world_id, agent_id
+        )
+        if result is None:
+            return  # retry exhausted: _degrade recorded the failure + backoff
 
         session = self._session_factory()
         try:
@@ -193,6 +249,17 @@ class DecisionService:
             runtime = self.engine.get_runtime(world_id)
             if world is None or runtime is None:
                 return
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if agent is not None:
+                # M8: daily cost counters; a success resets the failure streak
+                # (the degrade backoff formula keys off consecutive_failures).
+                agent.daily_call_count = (agent.daily_call_count or 0) + 1
+                agent.daily_token_usage = (
+                    (agent.daily_token_usage or 0)
+                    + result.input_tokens
+                    + result.output_tokens
+                )
+                agent.consecutive_failures = 0
             # Record BEFORE executing the tool; success is patched afterwards.
             run = LLMRun(
                 world_id=world_id,
@@ -238,6 +305,153 @@ class DecisionService:
             session.close()
 
     # ------------------------------------------------------------------ #
+    # M8 T8: pre-LLM gates + provider call with retry-once
+    # ------------------------------------------------------------------ #
+
+    def _observation_or_budget_gate(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        agent: Agent,
+        observation: str,
+        world_time: int,
+    ) -> bool:
+        """Run before any LLM call; returns True to proceed, False to skip.
+
+        Two skips schedule their own follow-up decision (and commit):
+        - observation cache hit (T8-5): identical observation while idle and
+          inside the cache window -> re-evaluate in SKIP_DECIDE_DELAY.
+        - world daily token budget exhausted (T8): -> dormant cadence.
+        """
+        # Hash the observation WITHOUT the clock time: the clock ticks every
+        # minute, so a raw hash would never match. Day/weather stay in, so a
+        # real world change still breaks the cache.
+        normalized = re.sub(r"\d{2}:\d{2}", "", observation)
+        obs_hash = hashlib.md5(normalized.encode("utf-8")).hexdigest()
+        cached = self._observation_cache.get((world.world_id, agent.agent_id))
+        window = self._settings.observation_cache_window_minutes
+        if (
+            cached is not None
+            and cached[0] == obs_hash
+            and agent.action_type is None
+            and window > 0
+            and world_time - cached[1] < window
+        ):
+            runtime.scheduler.schedule(
+                session,
+                agent.agent_id,
+                "agent_decide",
+                world_time + SKIP_DECIDE_DELAY,
+                {"origin": "cache"},
+            )
+            session.commit()
+            return False
+        self._observation_cache[(world.world_id, agent.agent_id)] = (obs_hash, world_time)
+
+        budget = self._settings.world_daily_token_budget
+        if budget > 0:
+            day_start = world_time - (world_time % 1440)
+            spent = int(
+                session.scalar(
+                    select(
+                        func.coalesce(
+                            func.sum(LLMRun.input_tokens + LLMRun.output_tokens), 0
+                        )
+                    ).where(
+                        LLMRun.world_id == world.world_id,
+                        LLMRun.world_time >= day_start,
+                    )
+                )
+                or 0
+            )
+            if spent >= budget:
+                self._handle_budget_exhausted(
+                    session, runtime, world, agent, world_time
+                )
+                return False
+        return True
+
+    def _handle_budget_exhausted(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        agent: Agent,
+        world_time: int,
+    ) -> None:
+        """World LLM budget spent: skip the call, keep agents on a slow
+        cadence, and announce the dormancy once per day (deduped)."""
+        day = world_time // 1440
+        if (world.world_id, day) not in self._budget_notified:
+            self._budget_notified.add((world.world_id, day))
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "world_event_created",
+                {
+                    "agent_id": agent.agent_id,
+                    "text": BUDGET_EXHAUSTED_TEXT,
+                    "importance": "normal",
+                },
+            )
+        runtime.scheduler.schedule(
+            session,
+            agent.agent_id,
+            "agent_decide",
+            world_time + BUDGET_SKIP_DELAY,
+            {"origin": "budget"},
+        )
+        session.commit()
+
+    async def _call_decision(
+        self,
+        observation: str,
+        context: AgentToolContext,
+        trace_id: str,
+        world_id: str,
+        agent_id: str,
+    ) -> DecisionResult | None:
+        """Provider decide under the global semaphore, with retry-once.
+
+        Transient errors (timeout / transport) retry once; the retry reuses
+        the same observation (cheaper). A final failure degrades and returns
+        None. The semaphore bounds concurrent LLM calls process-wide.
+        """
+        sem = _llm_semaphore()
+        await sem.acquire()
+        try:
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    return await asyncio.wait_for(
+                        self._provider.decide(
+                            observation=observation,
+                            context=context,
+                            trace_id=trace_id,
+                        ),
+                        timeout=self._settings.llm_timeout_seconds,
+                    )
+                except Exception as exc:  # noqa: BLE001 - any failure degrades
+                    if attempt == 1 and _is_transient(exc):
+                        logger.warning(
+                            "LLM transient failure (retry once) world={} agent={} "
+                            "type={}: {}",
+                            world_id,
+                            agent_id,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        continue
+                    self._degrade(
+                        world_id, agent_id, trace_id, type(exc).__name__, str(exc)
+                    )
+                    return None
+        finally:
+            sem.release()
+
+    # ------------------------------------------------------------------ #
     # Tool execution + scheduling
     # ------------------------------------------------------------------ #
 
@@ -257,19 +471,24 @@ class DecisionService:
         if reflect is None:
             return None
         trace_id = f"trc_reflect_{uuid.uuid4().hex[:12]}"
+        sem = _llm_semaphore()
+        await sem.acquire()
         try:
-            summary = await asyncio.wait_for(
-                reflect(digest=digest, context=None, trace_id=trace_id),
-                timeout=self._settings.llm_timeout_seconds,
-            )
-        except Exception:  # noqa: BLE001 - a failed reflection is not fatal
-            logger.exception(
-                "Reflection failed world={} agent={} trace={}",
-                world_id,
-                agent_id,
-                trace_id,
-            )
-            return None
+            try:
+                summary = await asyncio.wait_for(
+                    reflect(digest=digest, context=None, trace_id=trace_id),
+                    timeout=self._settings.llm_timeout_seconds,
+                )
+            except Exception:  # noqa: BLE001 - a failed reflection is not fatal
+                logger.exception(
+                    "Reflection failed world={} agent={} trace={}",
+                    world_id,
+                    agent_id,
+                    trace_id,
+                )
+                return None
+        finally:
+            sem.release()
         summary = (summary or "").strip()
         return summary or None
 
@@ -436,6 +655,8 @@ class DecisionService:
             agent.consecutive_failures = min(
                 (agent.consecutive_failures or 0) + 1, MAX_CONSECUTIVE_FAILURES
             )
+            # M8: a failed provider call still counts against the daily budget.
+            agent.daily_call_count = (agent.daily_call_count or 0) + 1
             # M6 T6-3: the failed decision is an observed event worth a
             # low-importance working memory.
             self.engine.memory_recorder.record_llm_failure(
@@ -456,11 +677,17 @@ class DecisionService:
             )
             if not paused:
                 floor = max(self._settings.decision_min_interval, 1)
+                # M8 T8-4: backoff escalation — n consecutive failures -> next
+                # decision in min(backoff_max_delay, DEGRADE_DELAY * 2**(n-1)).
+                n = agent.consecutive_failures
+                backoff = min(
+                    self._settings.backoff_max_delay, DEGRADE_DELAY * (2 ** (n - 1))
+                )
                 runtime.scheduler.schedule(
                     session,
                     agent_id,
                     "agent_decide",
-                    world.world_time + max(DEGRADE_DELAY, floor),
+                    world.world_time + max(backoff, floor),
                     {"origin": "degrade"},
                 )
                 session.commit()

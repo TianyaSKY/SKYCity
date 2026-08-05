@@ -59,6 +59,8 @@ class WorldRuntime:
     ws_clients: set[WebSocket] = field(default_factory=set)
     # M5: hour index of the last applied hourly needs tick (idempotency guard).
     last_hour: int | None = None
+    # M8: day index of the last tick (daily counter reset guard).
+    last_day: int | None = None
 
 
 class WorldEngine:
@@ -261,6 +263,15 @@ class WorldEngine:
         the source event). One failing hook must never break the world, so
         each service is guarded independently.
         """
+        # M8 T8-3: important events boost idle agents' next decision.
+        try:
+            self._maybe_decision_boost(session, envelope)
+        except Exception:  # noqa: BLE001 - a boost bug must not kill the tick
+            logger.exception(
+                "Decision boost failed on event {} (world={})",
+                envelope.type,
+                envelope.world_id,
+            )
         if self.memory_recorder is not None:
             try:
                 self.memory_recorder.on_event(session, envelope)
@@ -278,6 +289,54 @@ class WorldEngine:
                     "Relationship service failed on event {} (world={})",
                     envelope.type,
                     envelope.world_id,
+                )
+
+    def _maybe_decision_boost(
+        self, session: Session, envelope: WorldEventEnvelope
+    ) -> None:
+        """M8 T8-3: important events wake idle agents sooner.
+
+        - ``god_action_applied`` with a target: that agent decides at +1.
+        - public ``world_event_created`` (no agent_id): every idle agent
+          decides at +3, staggered by agent index (no burst).
+        """
+        world = session.get(World, envelope.world_id)
+        if world is None or not world.autonomous:
+            return
+        runtime = self._runtimes.get(envelope.world_id)
+        if runtime is None:
+            return
+        payload = envelope.payload or {}
+        if envelope.type == "god_action_applied":
+            target = payload.get("target_id")
+            if target:
+                agent = session.get(
+                    Agent, {"world_id": envelope.world_id, "agent_id": target}
+                )
+                if agent is not None and agent.action_type is None:
+                    runtime.scheduler.schedule(
+                        session,
+                        target,
+                        "agent_decide",
+                        envelope.world_time + 1,
+                        {"origin": "god_boost"},
+                    )
+        elif envelope.type == "world_event_created" and not payload.get("agent_id"):
+            agents = session.scalars(
+                select(Agent)
+                .where(
+                    Agent.world_id == envelope.world_id,
+                    Agent.action_type.is_(None),
+                )
+                .order_by(Agent.agent_id)
+            ).all()
+            for index, agent in enumerate(agents):
+                runtime.scheduler.schedule(
+                    session,
+                    agent.agent_id,
+                    "agent_decide",
+                    envelope.world_time + 3 + index,
+                    {"origin": "event_boost"},
                 )
 
     # ------------------------------------------------------------------ #
@@ -660,7 +719,21 @@ class WorldEngine:
         if runtime.last_hour is not None and hour != runtime.last_hour:
             self._apply_hourly_needs(session, runtime, world, world_time)
             self._maybe_restock(session, runtime, world, world_time)
+            # M8: daily counters reset at the day boundary (midnight crossing).
+            day = world_time // 1440
+            if runtime.last_day is not None and day != runtime.last_day:
+                self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
+        runtime.last_day = world_time // 1440
+
+    def _reset_daily_counters(self, session: Session, world_id: str) -> None:
+        """M8: zero every agent's daily LLM call/token counters (day change)."""
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world_id)
+        ).all()
+        for agent in agents:
+            agent.daily_token_usage = 0
+            agent.daily_call_count = 0
 
     def _apply_hourly_needs(
         self,
