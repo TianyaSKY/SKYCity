@@ -899,7 +899,7 @@ class WorldEngine:
         world_time: int,
     ) -> None:
         """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, sleep +20/h,
-        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +1/h."""
+        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
@@ -913,7 +913,7 @@ class WorldEngine:
                 agent.mood = min(100, agent.mood + 2)
             elif agent.action_type == "sleep":
                 agent.energy = min(100, agent.energy + 20)
-                agent.mood = min(100, agent.mood + 1)
+                agent.mood = min(100, agent.mood + 10)
             if agent.hunger >= 100:
                 agent.energy = max(0, agent.energy - 1)  # R11 extra drain
             if (agent.hunger, agent.energy, agent.mood) != before:
