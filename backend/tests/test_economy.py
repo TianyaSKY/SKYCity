@@ -872,3 +872,73 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     assert linxia["inventory"] == [{"item_id": "bread", "quantity": 4}]
 
     eng._runtimes.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Hunger-response branch of the fake provider (multi-day robustness)
+# --------------------------------------------------------------------------- #
+
+def test_hungry_agent_eats_bread_first(world_config) -> None:
+    eng = make_engine(world_config, wire_decisions=True)
+    runtime = eng.create_world("饥饿世界", autonomous=True)
+    world_id = runtime.world_id
+
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        agent.hunger = 90
+        # give her bread
+        from app.database.models.inventories import Inventory
+        session.add(Inventory(world_id=world_id, agent_id="agent_linxia", item_id="bread", quantity=2))
+        session.commit()
+    finally:
+        session.close()
+
+    advance_minutes(eng, world_id, 6)
+
+    session = SessionLocal()
+    try:
+        runs = session.scalars(
+            select(LLMRun).where(LLMRun.world_id == world_id, LLMRun.agent_id == "agent_linxia")
+        ).all()
+        assert runs, "linxia made a decision"
+        assert runs[-1].tool_name == "use_item"
+        assert runs[-1].tool_arguments["item_id"] == "bread"
+        assert runs[-1].success == 1
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent.hunger == 60  # bread restores 30
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
+def test_hungry_agent_buys_bread_at_shop(world_config) -> None:
+    eng = make_engine(world_config, wire_decisions=True)
+    runtime = eng.create_world("饥饿世界2", autonomous=True)
+    world_id = runtime.world_id
+
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        agent.hunger = 95
+        agent.col, agent.row = 23, 12  # park her at the shop
+        agent.location_id = "village_shop"
+        session.commit()
+    finally:
+        session.close()
+
+    advance_minutes(eng, world_id, 6)
+
+    session = SessionLocal()
+    try:
+        runs = session.scalars(
+            select(LLMRun).where(LLMRun.world_id == world_id, LLMRun.agent_id == "agent_linxia")
+        ).all()
+        assert runs[-1].tool_name == "buy_item"
+        assert runs[-1].tool_arguments["item_id"] == "bread"
+        assert runs[-1].success == 1
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent.money == 50 - 12
+    finally:
+        session.close()
+    eng._runtimes.clear()

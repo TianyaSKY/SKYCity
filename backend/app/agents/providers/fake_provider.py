@@ -92,6 +92,9 @@ TALK_DISTANCE = 3
 # An agent that has already sent this many messages in the current
 # conversation stops chatting and says goodbye.
 MAX_SENT_BEFORE_LEAVE = 2
+# At this hunger the agent drops everything and seeks food (branch 1.5).
+HUNGER_THRESHOLD = 80
+BREAD_PRICE = 12
 
 _SECTION_HEADER = "【上次工具结果】"
 _FAILED_MARKER = "结果: 失败"
@@ -158,6 +161,61 @@ class FakeDecisionProvider:
                         "intent": "chat",
                     }
                 return self._result(agent_id, tool_name, tool_arguments, started)
+
+        # 1.5. Hunger response (multi-day robustness): at high hunger the agent
+        # eats, buys food, or goes to earn money — before socializing. No
+        # script consumption.
+        hunger = self._hunger(observation)
+        if hunger >= HUNGER_THRESHOLD:
+            if self._has_item(observation, "bread"):
+                return self._result(
+                    agent_id,
+                    "use_item",
+                    {"item_id": "bread", "reason": "肚子饿了，吃点面包"},
+                    started,
+                )
+            if self._at_shop(observation):
+                money = self._money(observation)
+                if money >= BREAD_PRICE:
+                    return self._result(
+                        agent_id,
+                        "buy_item",
+                        {"item_id": "bread", "quantity": 1, "reason": "买点面包充饥"},
+                        started,
+                    )
+                if self._last_tool_failed(observation):
+                    return self._result(
+                        agent_id,
+                        "wait",
+                        {"minutes": 30, "reason": "商店没货，等补货"},
+                        started,
+                    )
+                return self._result(
+                    agent_id,
+                    "wait",
+                    {"minutes": 15, "reason": "钱不够，休息想想办法"},
+                    started,
+                )
+            if self._money(observation) >= BREAD_PRICE:
+                return self._result(
+                    agent_id,
+                    "move",
+                    {"destination_id": "village_shop", "reason": "去商店买吃的"},
+                    started,
+                )
+            if self._at_farm(observation):
+                return self._result(
+                    agent_id,
+                    "work",
+                    {"job_id": "job_farm_field", "reason": "干活挣钱买吃的"},
+                    started,
+                )
+            return self._result(
+                agent_id,
+                "move",
+                {"destination_id": "village_farm", "reason": "去农场干活挣钱"},
+                started,
+            )
 
         # 2. Initiate: greet the nearest idle agent within earshot, unless a
         # conversation is already active with them or the pair is in cooldown.
@@ -268,6 +326,32 @@ class FakeDecisionProvider:
             return False
         section = observation[idx : idx + 500]
         return _FAILED_MARKER in section
+
+    # ------------------------------------------------------------------ #
+    # Hunger-response parsing (observation section formats)
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _hunger(observation: str) -> int:
+        match = re.search(r"饥饿:\s*(\d+)/100", observation)
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
+    def _money(observation: str) -> int:
+        match = re.search(r"金钱:\s*(\d+)", observation)
+        return int(match.group(1)) if match else 0
+
+    @staticmethod
+    def _has_item(observation: str, item_id: str) -> bool:
+        return re.search(rf"（{re.escape(item_id)}）×(\d+)", observation) is not None
+
+    @staticmethod
+    def _at_shop(observation: str) -> bool:
+        return "所在位置: 村庄杂货店" in observation
+
+    @staticmethod
+    def _at_farm(observation: str) -> bool:
+        return "所在位置: 晨露农场" in observation
 
     @staticmethod
     def _last_tool_result(
