@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from app.api.saves import router as saves_router
 from app.api.websocket import router as websocket_router
 from app.api.worlds import router as worlds_router
 from app.config.settings import get_settings
@@ -21,6 +22,7 @@ from app.services.agent_decision_service import DecisionService
 from app.services.conversation_service import ConversationService
 from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
+from app.services.save_service import SaveService
 from app.services.world_config_loader import WorldConfigError, load_world_config
 from app.world_engine.engine import WorldEngine
 
@@ -67,12 +69,15 @@ async def lifespan(app: FastAPI):
     engine.conversation_service = conversation_service
     god_service = GodActionService(engine, SessionLocal)
     engine.god_action_service = god_service
+    save_service = SaveService(engine, SessionLocal)
+    engine.save_service = save_service
     app.state.engine = engine
     app.state.action_service = service
     app.state.economy_service = economy_service
     app.state.decision_service = decision_service
     app.state.conversation_service = conversation_service
     app.state.god_action_service = god_service
+    app.state.save_service = save_service
 
     await engine.start()
     engine.load_existing()
@@ -129,6 +134,7 @@ def health() -> dict[str, str]:
 
 app.include_router(worlds_router)
 app.include_router(websocket_router)
+app.include_router(saves_router)
 
 # World data served verbatim for the frontend (maps, tilesets, images).
 app.mount(

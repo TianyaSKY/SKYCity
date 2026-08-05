@@ -14,6 +14,7 @@ from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.memories import Memory
 from app.database.models.relationships import Relationship
+from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.transactions import Transaction
@@ -34,6 +35,7 @@ __all__ = [
     "LLMRun",
     "Memory",
     "Relationship",
+    "Save",
     "ScheduledAction",
     "Store",
     "StoreProduct",

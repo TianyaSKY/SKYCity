@@ -504,8 +504,16 @@ export const useWorldStore = defineStore('world', {
       const minutes = state.worldTime % 60;
       return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
     },
-    isOpen: (state) => (locationId: string): boolean =>
-      state.locations.find((l) => l.location_id === locationId)?.open ?? false,
+    isOpen: (state) => (locationId: string): boolean => {
+      const loc = state.locations.find((l) => l.location_id === locationId);
+      if (!loc) return false;
+      // Mirrors backend is_location_open (R8): houses and plazas never
+      // close; everything else honours [open_hour, close_hour) against the
+      // world clock (worldTime = minutes since midnight).
+      if (loc.location_type === 'house' || loc.location_type === 'plaza') return true;
+      const hour = (state.worldTime % 1440) / 60;
+      return loc.open_hour <= hour && hour < loc.close_hour;
+    },
     weatherLabel(state): string {
       return WEATHER_LABELS[state.weather] ?? WEATHER_LABELS.sunny;
     },

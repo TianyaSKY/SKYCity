@@ -24,6 +24,7 @@ from app.database.models import (
     LLMRun,
     Memory,
     Relationship,
+    Save,
     ScheduledAction,
     Store,
     StoreProduct,
@@ -57,6 +58,8 @@ def _clean_db(_database_schema) -> None:
             ScheduledAction,
             # M7 god action audit children.
             GodAction,
+            # M9 save rows (FK worlds; deleted before worlds).
+            Save,
             # M6 memory/relationship children.
             Memory,
             Relationship,

@@ -62,6 +62,11 @@ class EventBus:
         )
         self._sequence = int(current or 0)
 
+    def restore_sequence(self, sequence: int) -> None:
+        """M9: seed the counter so the restored world continues the saved
+        world's sequence (first new event = saved max + 1)."""
+        self._sequence = int(sequence)
+
     # ------------------------------------------------------------------ #
     # Publish
     # ------------------------------------------------------------------ #

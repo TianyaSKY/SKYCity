@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "pinia": "^3.0.1",
@@ -14,9 +16,13 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@vitejs/plugin-vue": "^5.2.4",
+    "@vue/test-utils": "^2.4.11",
+    "jsdom": "^30.0.1",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
+    "vitest": "^4.1.10",
     "vue-tsc": "^2.2.10"
   }
 }

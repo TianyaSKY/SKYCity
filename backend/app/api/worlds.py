@@ -11,6 +11,7 @@ from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest, ActionSuccess
 from app.schemas.god_actions import GodActionRequest, GodActionResponse
+from app.schemas.saves import RestoreRequest, RestoreResponse, SaveResponse
 from app.schemas.snapshots import (
     AutonomousRequest,
     CreateWorldRequest,
@@ -238,6 +239,44 @@ async def god_action(
     )
     await engine.flush_pending_now(world_id)
     return GodActionResponse(**result)
+
+
+@router.post("/restore", response_model=RestoreResponse, status_code=201)
+async def restore_world(request: Request, body: RestoreRequest) -> RestoreResponse:
+    """M9: rebuild a NEW world from a save and start it running."""
+    runtime = _engine(request).save_service.restore(body.save_id)
+    session = SessionLocal()
+    try:
+        world = session.get(World, runtime.world_id)
+    finally:
+        session.close()
+    if world is None:  # pragma: no cover - restore just created the row
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return RestoreResponse(
+        world_id=world.world_id,
+        save_id=body.save_id,
+        world_time=world.world_time,
+        speed=world.speed,
+        paused=world.paused,
+        autonomous=world.autonomous,
+    )
+
+
+@router.post("/{world_id}/save", response_model=SaveResponse, status_code=201)
+async def save_world(request: Request, world_id: str) -> SaveResponse:
+    """M9: serialize the world's full state into a save row."""
+    result = _engine(request).save_service.save(world_id)
+    return SaveResponse(
+        save_id=result.save_id,
+        world_id=result.world_id,
+        created_at=result.created_at,
+    )
+
+
+@router.get("/{world_id}/replay")
+async def replay_world(request: Request, world_id: str) -> dict:
+    """M9: initial snapshot + every event envelope, sequence ascending."""
+    return _engine(request).save_service.replay(world_id)
 
 
 @router.get("/{world_id}/events")
