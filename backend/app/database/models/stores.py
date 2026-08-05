@@ -49,6 +49,8 @@ class StoreProduct(Base):
     store_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     item_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     sell_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    # M12: anchor price promos reset to each day (base = non-promo price).
+    base_sell_price: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     buy_price: Mapped[int] = mapped_column(Integer, nullable=False)
     stock: Mapped[int] = mapped_column(Integer, nullable=False)
     stock_cap: Mapped[int] = mapped_column(Integer, nullable=False)

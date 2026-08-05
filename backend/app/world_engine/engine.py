@@ -12,6 +12,7 @@ endpoints; WebSocket pushes are queued by the EventBus and drained by
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -23,12 +24,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
-from app.database.models.agents import Agent
+from app.database.models.agents import Agent, INITIAL_MOOD
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
 from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.transactions import Transaction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.domain.agent import AgentActionMove, AgentActionWait, AgentActionWork, AgentSnapshot
@@ -45,7 +47,20 @@ from app.world_engine.scheduler import Scheduler
 
 TICK_INTERVAL = 0.1  # real seconds per engine tick
 
+# M12 D6: daily cost of living, deducted at 00:00 (floor 0, never debt).
+UPKEEP_PER_DAY = 5
+
 _HOME_SUFFIX = "_home"
+
+
+def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
+    """M12 D5: deterministic 20% chance of a promo day for one product.
+
+    Hash-based (not random) so ``advance_minutes`` fast-forwards in tests
+    reproduce exactly the same promo set as a live run.
+    """
+    digest = hashlib.md5(f"{world_id}:{store_id}:{item_id}:{day}".encode()).hexdigest()
+    return int(digest[:8], 16) % 10 < 2
 
 
 @dataclass
@@ -497,7 +512,8 @@ class WorldEngine:
             location_id=home_id if home_exists else None,
             hunger=0,
             energy=100,
-            money=50,
+            mood=INITIAL_MOOD,
+            money=int(identity.get("initial_money") or 50),
             action_type=None,
             action_started_at=None,
             action_ends_at=None,
@@ -517,6 +533,9 @@ class WorldEngine:
                     name=seed["name"],
                     category=seed["category"],
                     hunger_restore=seed["hunger_restore"],
+                    mood_restore=seed["mood_restore"],
+                    work_bonus=seed["work_bonus"],
+                    yield_bonus=seed["yield_bonus"],
                     base_price=seed["base_price"],
                 )
             )
@@ -535,6 +554,7 @@ class WorldEngine:
                         store_id=store_seed["store_id"],
                         item_id=product["item_id"],
                         sell_price=product["sell_price"],
+                        base_sell_price=product["sell_price"],
                         buy_price=product["buy_price"],
                         stock=product["stock_cap"],  # R15: full stock at open
                         stock_cap=product["stock_cap"],
@@ -785,8 +805,10 @@ class WorldEngine:
             day = world_time // 1440
             if runtime.last_day is not None and day != runtime.last_day:
                 # M10: dividends settle before the daily counters reset (same
-                # transaction, same commit).
+                # transaction, same commit). M12 D6: upkeep is deducted
+                # between dividends and the counter reset.
                 self._pay_dividends(session, runtime, world, world_time)
+                self._apply_daily_upkeep(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
         runtime.last_day = world_time // 1440
@@ -813,6 +835,53 @@ class WorldEngine:
         if self.stock_service is not None:
             self.stock_service.pay_dividends(session, runtime, world, world_time)
 
+    def _apply_daily_upkeep(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """M12 D6: daily cost of living at 00:00.
+
+        Every agent pays UPKEEP_PER_DAY out of money (floor 0 — R7: no
+        credit, never into debt). Recorded as an ``upkeep`` transaction plus
+        a money_changed event.
+        """
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world.world_id)
+        ).all()
+        for agent in agents:
+            if agent.money <= 0:
+                continue  # R7: never into debt
+            pay = min(agent.money, UPKEEP_PER_DAY)
+            agent.money -= pay
+            session.add(
+                Transaction(
+                    world_id=world.world_id,
+                    agent_id=agent.agent_id,
+                    type="upkeep",
+                    amount=-pay,
+                    balance_after=agent.money,
+                    item_id=None,
+                    quantity=None,
+                    reason="每日生活开销",
+                    world_time=world_time,
+                    trace_id="",
+                )
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "money_changed",
+                {
+                    "agent_id": agent.agent_id,
+                    "amount": -pay,
+                    "balance": agent.money,
+                    "reason": "每日生活开销",
+                },
+            )
+
     def _reset_daily_counters(self, session: Session, world_id: str) -> None:
         """M8: zero every agent's daily LLM call/token counters (day change)."""
         agents = session.scalars(
@@ -829,30 +898,42 @@ class WorldEngine:
         world: World,
         world_time: int,
     ) -> None:
-        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, hunger==100 -1/h."""
+        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, sleep +20/h,
+        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +1/h."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
         for agent in agents:
-            before = (agent.hunger, agent.energy)
+            before = (agent.hunger, agent.energy, agent.mood)
             agent.hunger = min(100, agent.hunger + 1)
             agent.energy = max(0, agent.energy - 1)
+            agent.mood = max(0, agent.mood - 1)
             if agent.action_type == "wait":
                 agent.energy = min(100, agent.energy + 5)
+                agent.mood = min(100, agent.mood + 2)
+            elif agent.action_type == "sleep":
+                agent.energy = min(100, agent.energy + 20)
+                agent.mood = min(100, agent.mood + 1)
             if agent.hunger >= 100:
                 agent.energy = max(0, agent.energy - 1)  # R11 extra drain
-            if (agent.hunger, agent.energy) != before:
+            if (agent.hunger, agent.energy, agent.mood) != before:
                 runtime.event_bus.publish(
                     session,
                     world_time,
                     "needs_changed",
-                    {"agent_id": agent.agent_id, "hunger": agent.hunger, "energy": agent.energy},
+                    {
+                        "agent_id": agent.agent_id,
+                        "hunger": agent.hunger,
+                        "energy": agent.energy,
+                        "mood": agent.mood,
+                    },
                 )
-            # R11/R12: hunger maxed or energy drained -> high-priority decision.
+            # R11/R12/M12: hunger maxed, energy drained or mood low ->
+            # high-priority decision.
             if (
                 world.autonomous
                 and agent.action_type is None
-                and (agent.hunger >= 100 or agent.energy <= 0)
+                and (agent.hunger >= 100 or agent.energy <= 0 or agent.mood <= 20)
             ):
                 runtime.scheduler.schedule(
                     session,
@@ -892,6 +973,33 @@ class WorldEngine:
                 )
             ).all()
             for product in products:
+                # M12 D5: daily promo roll — 20% off for the whole day,
+                # otherwise back to the base price.
+                day = world_time // 1440
+                promo = _promo_roll(world.world_id, store.store_id, product.item_id, day)
+                new_price = (
+                    max(1, round(product.base_sell_price * 0.8))
+                    if promo
+                    else product.base_sell_price
+                )
+                if new_price != product.sell_price:
+                    product.sell_price = new_price
+                    item = session.get(
+                        Item,
+                        {"world_id": world.world_id, "item_id": product.item_id},
+                    )
+                    runtime.event_bus.publish(
+                        session,
+                        world_time,
+                        "store_price_changed",
+                        {
+                            "store_id": store.store_id,
+                            "item_id": product.item_id,
+                            "item_name": item.name if item is not None else product.item_id,
+                            "sell_price": new_price,
+                            "promo": promo,
+                        },
+                    )
                 target = min(product.stock_cap, product.stock + product.restock_daily)
                 gained = target - product.stock
                 if gained > 0:
@@ -1031,6 +1139,7 @@ class WorldEngine:
             location_id=agent.location_id,
             hunger=agent.hunger,
             energy=agent.energy,
+            mood=agent.mood,
             money=agent.money,
             action=action,
             inventory=[
@@ -1042,7 +1151,7 @@ class WorldEngine:
         """M7: one agent's detail — identity card + state + inventory + action.
 
         Contract shape: {agent_id, name, identity: {...}, col, row, location_id,
-        hunger, energy, money, inventory, action, is_deciding,
+        hunger, energy, mood, money, inventory, action, is_deciding,
         consecutive_failures}. Returns None when the world or agent is missing.
         """
         runtime = self._runtimes.get(world_id)

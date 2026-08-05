@@ -162,14 +162,38 @@ class EconomyService:
             return
         world_time = runtime.clock.world_time
 
+        # M12 C4: held tools/inputs boost wage and yield (sum by held
+        # quantity across the agent's inventory; no held items -> 0 bonus).
+        items = {
+            item.item_id: item
+            for item in session.scalars(
+                select(Item).where(Item.world_id == action.world_id)
+            ).all()
+        }
+        bonus_pct = 0
+        yield_extra = 0
+        inventory_rows = session.scalars(
+            select(Inventory).where(
+                Inventory.world_id == action.world_id,
+                Inventory.agent_id == action.agent_id,
+            )
+        ).all()
+        for row in inventory_rows:
+            item = items.get(row.item_id)
+            if item is None:
+                continue
+            bonus_pct += item.work_bonus * row.quantity
+            yield_extra += item.yield_bonus * row.quantity
+
         energy_spent = max(int(job.energy_cost_per_hour * job.duration_minutes / 60), 0)
         agent.energy = max(0, agent.energy - energy_spent)  # R14
-        agent.money += job.wage  # R10
+        wage = job.wage * (100 + bonus_pct) // 100  # R10 + M12 work bonus
+        agent.money += wage
 
         produced: list[dict[str, Any]] = []
         for product in job.products_json or []:
             item_id = str(product.get("item_id") or "")
-            quantity = int(product.get("quantity") or 0)
+            quantity = int(product.get("quantity") or 0) + yield_extra
             if not item_id or quantity <= 0:
                 continue
             if session.get(Item, {"world_id": action.world_id, "item_id": item_id}) is None:
@@ -191,14 +215,14 @@ class EconomyService:
             )
             session.add(employment)
         employment.hours_worked += job.duration_minutes / 60.0
-        employment.total_earned += job.wage
+        employment.total_earned += wage
 
         session.add(
             Transaction(
                 world_id=action.world_id,
                 agent_id=action.agent_id,
                 type="work_wage",
-                amount=job.wage,
+                amount=wage,
                 balance_after=agent.money,
                 item_id=None,
                 quantity=None,
@@ -216,7 +240,7 @@ class EconomyService:
                 "agent_id": action.agent_id,
                 "job_id": job_id,
                 "job_name": job.name,
-                "wage": job.wage,
+                "wage": wage,
                 "products": produced,
                 "energy_spent": energy_spent,
             },
@@ -228,7 +252,7 @@ class EconomyService:
             "money_changed",
             {
                 "agent_id": action.agent_id,
-                "amount": job.wage,
+                "amount": wage,
                 "balance": agent.money,
                 "reason": f"完成工作 {job.name} 获得工资",
             },
@@ -501,7 +525,8 @@ class EconomyService:
         reason: str | None = None,
         trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Consume one food item to restore hunger (R14)."""
+        """Consume one usable item: food restores hunger, M12 mood items
+        restore mood (both may apply for hybrid items)."""
         session = self._session_factory()
         try:
             runtime = self.engine.get_runtime(world_id)
@@ -520,7 +545,7 @@ class EconomyService:
             item = session.get(Item, {"world_id": world_id, "item_id": item_id})
             if item is None:
                 return False, None, MSG_ITEM_MISSING
-            if item.hunger_restore <= 0:
+            if item.hunger_restore <= 0 and item.mood_restore <= 0:
                 return False, None, MSG_NOT_FOOD
             inventory = session.get(
                 Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -530,7 +555,10 @@ class EconomyService:
 
             hunger_before = agent.hunger
             hunger_after = max(0, hunger_before - item.hunger_restore)
+            mood_before = agent.mood
+            mood_after = min(100, mood_before + item.mood_restore)
             agent.hunger = hunger_after
+            agent.mood = mood_after
             inventory.quantity -= 1
             if inventory.quantity <= 0:
                 session.delete(inventory)
@@ -545,6 +573,8 @@ class EconomyService:
                     "item_name": item.name,
                     "hunger_before": hunger_before,
                     "hunger_after": hunger_after,
+                    "mood_before": mood_before,
+                    "mood_after": mood_after,
                 },
                 trace_id,
             )
@@ -552,7 +582,12 @@ class EconomyService:
                 session,
                 world.world_time,
                 "needs_changed",
-                {"agent_id": agent_id, "hunger": agent.hunger, "energy": agent.energy},
+                {
+                    "agent_id": agent_id,
+                    "hunger": agent.hunger,
+                    "energy": agent.energy,
+                    "mood": agent.mood,
+                },
                 trace_id,
             )
             runtime.event_bus.publish(

@@ -200,7 +200,12 @@ def test_hourly_needs_tick_and_idempotency(engine: WorldEngine) -> None:
         if e.type == "needs_changed" and e.payload["agent_id"] == "agent_linxia"
     ]
     assert needs, "needs_changed must be emitted on the hourly tick"
-    assert needs[0].payload == {"agent_id": "agent_linxia", "hunger": 11, "energy": 49}
+    assert needs[0].payload == {
+        "agent_id": "agent_linxia",
+        "hunger": 11,
+        "energy": 49,
+        "mood": 99,
+    }
 
 
 def test_hourly_wait_recovers_energy(engine: WorldEngine) -> None:
@@ -654,6 +659,8 @@ def test_use_food_restores_hunger(engine: WorldEngine) -> None:
         "item_name": "面包",
         "hunger_before": 50,
         "hunger_after": 20,
+        "mood_before": 100,
+        "mood_after": 100,
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
@@ -663,7 +670,7 @@ def test_use_food_restores_hunger(engine: WorldEngine) -> None:
     events = engine.events_after(world_id, 0)
     assert any(
         e.type == "needs_changed"
-        and e.payload == {"agent_id": "agent_linxia", "hunger": 20, "energy": 100}
+        and e.payload == {"agent_id": "agent_linxia", "hunger": 20, "energy": 100, "mood": 100}
         for e in events
     )
     assert any(

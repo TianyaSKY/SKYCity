@@ -73,6 +73,7 @@ class AgentSnapshot(BaseModel):
     location_id: str | None = None
     hunger: int
     energy: int
+    mood: int
     money: int
     action: AgentAction | None = None
     inventory: list[InventoryEntrySnapshot] = Field(default_factory=list)

@@ -99,6 +99,21 @@ class RelationshipService:
                     session, world_id, agent_id, target_id, {"trust": 3},
                     world_time=envelope.world_time,
                 )
+        elif event_type == "item_given":
+            # M12 B3: a gift deepens both sides of the relationship (sender
+            # feels generous, recipient feels appreciated).
+            from_id = payload.get("from_agent_id")
+            to_id = payload.get("to_agent_id")
+            if not from_id or not to_id:
+                return
+            self.apply_deltas(
+                session, world_id, from_id, to_id,
+                {"affection": 3, "familiarity": 2}, world_time=envelope.world_time,
+            )
+            self.apply_deltas(
+                session, world_id, to_id, from_id,
+                {"familiarity": 2}, world_time=envelope.world_time,
+            )
         # Everything else (money_changed income, work_completed,
         # world_event_created incl. talk rejections, ...) leaves
         # relationships untouched in M6.

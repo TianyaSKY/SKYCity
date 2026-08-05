@@ -22,6 +22,7 @@ from app.database.models.jobs import Job
 from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.stocks import Stock, StockHolding
 from app.database.models.worlds import World
 from app.world_engine.engine import is_location_open
 
@@ -78,6 +79,10 @@ def _action_text(agent: Agent, world_time: int) -> str:
         data = agent.action_data or {}
         remaining = (agent.action_ends_at or world_time) - world_time
         return f"等待中（{data.get('reason') or '休息'}，剩余 {max(remaining, 0)} 分钟）"
+    if agent.action_type == "sleep":
+        data = agent.action_data or {}
+        remaining = (agent.action_ends_at or world_time) - world_time
+        return f"睡觉中（{data.get('reason') or '休息'}，剩余 {max(remaining, 0)} 分钟）"
     return agent.action_type
 
 
@@ -147,7 +152,7 @@ def build_observation(
             f"{_format_clock(world_time)} 天气: {weather}"
         )
         lines.append(
-            f"【自身状态】饥饿: {agent.hunger}/100 精力: {agent.energy}/100 "
+            f"【自身状态】饥饿: {agent.hunger}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
         )
 
@@ -218,13 +223,27 @@ def build_observation(
         lines.append("【可见人物】")
         if same_location:
             for other in same_location:
-                lines.append(f"- {other.name}: {_action_text(other, world_time)}")
+                # agent_id is required verbatim for talk's target_agent_id —
+                # the model cannot derive it from the Chinese name.
+                lines.append(f"- {other.name}（{other.agent_id}）: {_action_text(other, world_time)}")
         else:
             lines.append("（当前地点没有其他人）")
 
         lines.append("【可做的事】")
         lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
         lines.append("- wait(minutes, reason): 原地等待 1~240 分钟")
+        lines.append("- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 20 点精力（比 wait 快）")
+        if same_location:
+            lines.append(
+                "- talk(target_agent_id, message, intent): 与【可见人物】中的人对话，"
+                "target_agent_id 必须用其括号里的完整 id"
+            )
+            lines.append(
+                "- transfer_money(target_agent_id, amount, reason): 给【可见人物】里的智能体转账金币（需在附近）"
+            )
+            lines.append(
+                "- give_item(target_agent_id, item_id, quantity=1, reason): 把背包里的物品送给【可见人物】里的智能体"
+            )
 
         # M5: shop products at the current store (up to 6) + jobs offered here.
         if agent.location_id is not None:
@@ -241,9 +260,25 @@ def build_observation(
                     .limit(MAX_SHOP_PRODUCTS)
                 ).all()
                 for product in products:
+                    item = session.get(
+                        Item, {"world_id": world_id, "item_id": product.item_id}
+                    )
+                    tags: list[str] = []
+                    if item is not None:
+                        if item.hunger_restore > 0:
+                            tags.append(f"饱腹{item.hunger_restore}")
+                        if item.mood_restore > 0:
+                            tags.append(f"心情{item.mood_restore}")
+                        if item.work_bonus > 0:
+                            tags.append(f"工资+{item.work_bonus}%")
+                        if item.yield_bonus > 0:
+                            tags.append("增产")
+                    if product.sell_price < product.base_sell_price:
+                        tags.append("促销")
+                    suffix = f"（{' '.join(tags)}）" if tags else ""
                     lines.append(
                         f"- buy_item({product.item_id}): {item_names.get(product.item_id, product.item_id)} "
-                        f"{product.sell_price}金币（库存{product.stock}）"
+                        f"{product.sell_price}金币（库存{product.stock}）{suffix}"
                     )
             jobs = session.scalars(
                 select(Job).where(
@@ -256,6 +291,31 @@ def build_observation(
                 )
         lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
         lines.append("- use_item(item_id, reason): 食用背包里的食物恢复饥饿")
+
+        # M10: town-wide stock quotes + own holdings (always visible: the
+        # market is village news, not tied to the agent's location).
+        lines.append("【股票行情】")
+        stocks = session.scalars(
+            select(Stock).where(Stock.world_id == world_id).order_by(Stock.stock_id)
+        ).all()
+        holdings = {
+            h.stock_id: h.shares
+            for h in session.scalars(
+                select(StockHolding).where(
+                    StockHolding.world_id == world_id,
+                    StockHolding.agent_id == agent.agent_id,
+                )
+            ).all()
+        }
+        for stock in stocks:
+            delta = stock.price - stock.prev_price
+            lines.append(
+                f"- buy_stock({stock.stock_id}, reason, shares=1): {stock.name} 现价{stock.price}金币"
+                f"（昨收{stock.prev_price}，{'涨+' if delta >= 0 else '跌'}{abs(delta)}）"
+                f"——你持有 {holdings.get(stock.stock_id, 0)} 股"
+            )
+        lines.append("- sell_stock(stock_id, reason, shares=1): 卖出持股变现（不能超卖）")
+        lines.append("- 股价每小时随商店/农场经营变动，每日按业绩分红（分红到账看 money_changed）")
 
         lines.append("【上次工具结果】")
         if last_run is None:

@@ -31,6 +31,10 @@ def load_items(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]
             "name": str(entry.get("name") or entry["item_id"]),
             "category": str(entry.get("category") or "material"),
             "hunger_restore": int(entry.get("hunger_restore") or 0),
+            # M12: mood restore / work wage bonus % / extra yield per unit.
+            "mood_restore": int(entry.get("mood_restore") or 0),
+            "work_bonus": int(entry.get("work_bonus") or 0),
+            "yield_bonus": int(entry.get("yield_bonus") or 0),
             "base_price": int(entry.get("base_price") or 0),
         }
         for entry in data.get("items", [])
@@ -85,6 +89,7 @@ def load_stores(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
             }
         )
     return tuple(stores)
+
 
 @lru_cache(maxsize=4)
 def load_stocks(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:

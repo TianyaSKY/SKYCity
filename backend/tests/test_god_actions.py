@@ -617,7 +617,7 @@ def test_agent_detail_contract(world_config: ParsedWorldConfig) -> None:
     assert detail is not None
     assert set(detail) == {
         "agent_id", "name", "identity", "col", "row", "location_id",
-        "hunger", "energy", "money", "inventory", "action",
+        "hunger", "energy", "mood", "money", "inventory", "action",
         "is_deciding", "consecutive_failures",
     }
     assert detail["agent_id"] == "agent_linxia"
@@ -643,6 +643,49 @@ def test_agent_detail_contract(world_config: ParsedWorldConfig) -> None:
 
     assert eng.agent_detail(world_id, "agent_nobody") is None
     assert eng.agent_detail("world_does_not_exist", "agent_linxia") is None
+    eng._runtimes.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Location detail API
+# --------------------------------------------------------------------------- #
+
+
+def test_location_detail_contract(world_config: ParsedWorldConfig) -> None:
+    eng = make_engine(world_config)
+    runtime = eng.create_world("神谕档案")
+    world_id = runtime.world_id
+
+    # Teleport 林夏 into the shop so occupants are non-empty.
+    god(eng, world_id, command_type="teleport",
+        target_id="agent_linxia", parameters={"location_id": "village_shop"})
+
+    detail = eng.location_detail(world_id, "village_shop")
+    assert detail is not None
+    assert set(detail) == {
+        "location_id", "name", "location_type", "col", "row", "capacity",
+        "open_hour", "close_hour", "open", "occupants", "products", "jobs",
+    }
+    assert detail["name"] == "村庄杂货店"
+    assert detail["location_type"] == "store"
+    assert detail["capacity"] == 8
+    assert detail["open"] is True  # world starts at 08:00, shop opens 08:00
+    assert any(o["agent_id"] == "agent_linxia" for o in detail["occupants"])
+    bread = next(p for p in detail["products"] if p["item_id"] == "bread")
+    assert bread["name"] == "面包"
+    assert bread["sell_price"] > 0
+    assert bread["stock"] > 0
+    assert any(j["job_id"] == "job_shop_attendant" for j in detail["jobs"])
+
+    farm = eng.location_detail(world_id, "village_farm")
+    assert farm is not None
+    assert farm["products"] == []
+    assert farm["occupants"] == []
+    assert any(j["job_id"] == "job_farm_field" for j in farm["jobs"])
+    assert all(set(j) == {"job_id", "name", "wage", "duration_minutes"} for j in farm["jobs"])
+
+    assert eng.location_detail(world_id, "nowhere") is None
+    assert eng.location_detail("world_does_not_exist", "village_shop") is None
     eng._runtimes.clear()
 
 
@@ -680,6 +723,20 @@ def test_rest_god_actions_and_agent_detail(client: TestClient) -> None:
     assert detail["identity"]["name"] == "林夏"
     assert detail["money"] == 100
     assert detail["consecutive_failures"] == 0
+
+    # Location detail endpoint exposes occupants + store products + jobs.
+    loc = client.get(f"/api/worlds/{world_id}/locations/village_shop")
+    assert loc.status_code == 200
+    loc = loc.json()
+    assert loc["name"] == "村庄杂货店"
+    assert set(loc) == {
+        "location_id", "name", "location_type", "col", "row", "capacity",
+        "open_hour", "close_hour", "open", "occupants", "products", "jobs",
+    }
+    assert any(p["item_id"] == "bread" and p["stock"] > 0 for p in loc["products"])
+    assert any(j["job_id"] == "job_shop_attendant" for j in loc["jobs"])
+    assert client.get(f"/api/worlds/{world_id}/locations/nowhere").status_code == 404
+    assert client.get("/api/worlds/does_not_exist/locations/village_shop").status_code == 404
 
     # weather through the HTTP contract; weather_changed event persisted.
     weather = client.post(
