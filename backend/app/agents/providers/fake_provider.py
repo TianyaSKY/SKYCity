@@ -25,11 +25,13 @@ observation service renders as ``结果: 成功/失败（…）``.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any
 
 from app.agents.providers.base import DecisionResult
+from app.services.conversation_service import MSG_TARGET_BUSY
 
 # Per-agent scripts. agent_chenyu deliberately opens with a move to a
 # nonexistent location ("ghost_town") that the world rules reject, then
@@ -79,6 +81,8 @@ _SECTION_HEADER = "【上次工具结果】"
 _FAILED_MARKER = "结果: 失败"
 _MESSAGES_HEADER = "【收到的消息】"
 _MESSAGE_LINE = re.compile(r"^-\s*(.+?)（([^（）]+), (\w+)）：(.+)$")
+# e.g. 工具: talk | 参数: {...} | 结果: 失败（对方正在忙）
+_TOOL_RESULT_LINE = re.compile(r"工具: (\w+) \| 参数: (.+?) \| 结果: (\w+)（(.+?)）")
 
 
 class FakeDecisionProvider:
@@ -144,6 +148,19 @@ class FakeDecisionProvider:
         engine = getattr(context, "engine", None)
         conversation_service = getattr(engine, "conversation_service", None)
         if conversation_service is not None:
+            # 1b. A reply rejected because the target was busy is retried
+            # (T3-9-style recovery): the target frees up when its action ends,
+            # and the retry delivers the message instead of wedging the
+            # conversation open and silent forever.
+            last = self._last_tool_result(observation)
+            if (
+                last is not None
+                and last[0] == "talk"
+                and last[1] is not None
+                and last[2] == MSG_TARGET_BUSY
+            ):
+                return self._result(agent_id, "talk", last[1], started)
+
             targets = engine.idle_agents_near(
                 context.world_id, agent_id, TALK_DISTANCE
             )
@@ -235,6 +252,27 @@ class FakeDecisionProvider:
             return False
         section = observation[idx : idx + 500]
         return _FAILED_MARKER in section
+
+    @staticmethod
+    def _last_tool_result(
+        observation: str,
+    ) -> tuple[str, dict[str, Any] | None, str | None] | None:
+        """(tool_name, arguments, failure_reason) for the last tool result line,
+        or None when the last tool succeeded / there is no recorded run."""
+        idx = observation.find(_SECTION_HEADER)
+        if idx < 0:
+            return None
+        match = _TOOL_RESULT_LINE.search(observation[idx : idx + 500])
+        if match is None:
+            return None
+        tool_name, arguments_json, status, detail = match.groups()
+        if status != "失败":
+            return None
+        try:
+            arguments = json.loads(arguments_json)
+        except (ValueError, TypeError):
+            arguments = None
+        return tool_name, arguments if isinstance(arguments, dict) else None, detail
 
     @staticmethod
     def _unread_messages(
