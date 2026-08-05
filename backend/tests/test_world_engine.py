@@ -10,8 +10,11 @@ from pathlib import Path
 
 import pytest
 
+from sqlalchemy import select
+
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
+from app.database.models.locations import WorldLocation
 from app.database.session import SessionLocal
 from app.services.action_execution_service import (
     MSG_BUSY,
@@ -138,7 +141,7 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     finally:
         session.close()
 
-    assert len(agents) == 5
+    assert len(agents) == 6
     by_id = {a.agent_id: a for a in agents}
     assert by_id["agent_linxia"].col == LINXIA_SPAWN[0]
     assert by_id["agent_linxia"].row == LINXIA_SPAWN[1]
@@ -229,6 +232,42 @@ def test_snapshot_serializes_inflight_move_action(engine: WorldEngine) -> None:
     assert "from_" not in action
 
 
+def test_snapshot_serializes_inflight_work_action(engine: WorldEngine) -> None:
+    """An in-flight work shift must surface in the snapshot with the job name
+    resolved, so clients can label the task without a second lookup."""
+    from app.services.economy_service import EconomyService
+
+    engine.economy_service = EconomyService(engine, SessionLocal)
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.location_id = "village_farm"
+        agent.col, agent.row = 47, 24
+        session.commit()
+    finally:
+        session.close()
+
+    ok, _, reason = engine.economy_service.work_start(
+        world_id, "agent_linxia", "job_farm_field", reason="干农活"
+    )
+    assert ok is True, reason
+
+    payload = engine.snapshot(world_id)
+    assert payload is not None
+    linxia = next(a for a in payload["agents"] if a["agent_id"] == "agent_linxia")
+    action = linxia["action"]
+    assert action is not None
+    assert action["type"] == "work"
+    assert action["job_id"] == "job_farm_field"
+    assert action["job_name"] == "农场劳作"
+    assert action["started_at"] == payload["world"]["world_time"]
+    assert action["ends_at"] == action["started_at"] + 120
+    assert action["reason"] == "干农活"
+
+
 def test_move_to_missing_destination_rejected(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     ok, envelope, reason = engine.action_service.execute_move(
@@ -238,12 +277,80 @@ def test_move_to_missing_destination_rejected(engine: WorldEngine) -> None:
     assert reason == MSG_NO_DESTINATION
 
 
+def test_delete_world_api() -> None:
+    """DELETE /api/worlds/{id} removes the world and cascades all state."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as client:
+        response = client.post("/api/worlds", json={"name": "删除测试"})
+        assert response.status_code == 201, response.text
+        world_id = response.json()["world_id"]
+
+        # children exist before the delete
+        session = SessionLocal()
+        try:
+            assert (
+                session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+                is not None
+            )
+        finally:
+            session.close()
+
+        response = client.delete(f"/api/worlds/{world_id}")
+        assert response.status_code == 200, response.text
+        assert response.json() == {"ok": True}
+
+        response = client.get(f"/api/worlds/{world_id}")
+        assert response.status_code == 404
+
+        session = SessionLocal()
+        try:
+            from app.database.models.world_events import WorldEvent
+
+            assert (
+                session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+                is None
+            )
+            assert (
+                session.scalar(
+                    select(WorldEvent).where(WorldEvent.world_id == world_id)
+                )
+                is None
+            )
+        finally:
+            session.close()
+
+        # deleting a missing world -> 404
+        response = client.delete(f"/api/worlds/{world_id}")
+        assert response.status_code == 404
+
+
 def test_move_with_no_path_rejected(engine: WorldEngine) -> None:
-    # agent_wangfang spawns in the farm compound, which the map's walkable
-    # network does not connect to the rest of the town (R6: 无可行路径).
+    # R6: a destination outside the walkable network is rejected with
+    # MSG_NO_PATH. (0,0) is plain grass, far from any road.
     runtime = engine.create_world()
+    session = SessionLocal()
+    try:
+        session.add(
+            WorldLocation(
+                world_id=runtime.world_id,
+                location_id="off_road",
+                name="野地",
+                location_type="field",
+                col=0,
+                row=0,
+                capacity=4,
+                open_hour=0,
+                close_hour=24,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
     ok, envelope, reason = engine.action_service.execute_move(
-        runtime.world_id, "agent_wangfang", "village_shop"
+        runtime.world_id, "agent_wangfang", "off_road"
     )
     assert ok is False and envelope is None
     assert reason == MSG_NO_PATH
@@ -347,6 +454,78 @@ def test_wait_is_interruptible_by_move(engine: WorldEngine) -> None:
     assert envelope.type == "agent_move_started"
     row = agent_row(engine, runtime.world_id, "agent_linxia")
     assert row.action_type == "move"
+
+
+# --------------------------------------------------------------------------- #
+# Sleep lifecycle (R1 interruptible, R14 +20/h)
+# --------------------------------------------------------------------------- #
+
+
+def test_sleep_completes(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_chenyu", minutes=120, reason="睡一觉"
+    )
+    assert ok is True and reason is None
+    assert envelope.type == "agent_sleep_started"
+    assert envelope.payload["minutes"] == 120
+
+    advance_minutes(engine, runtime.world_id, 121)
+    row = agent_row(engine, runtime.world_id, "agent_chenyu")
+    assert row.action_type is None
+    types = [e.type for e in engine.events_after(runtime.world_id, 0)]
+    assert "agent_sleep_completed" in types
+
+
+def test_sleep_recovers_energy_faster_than_wait(engine: WorldEngine) -> None:
+    """R14: sleep +20/h (net +19 after the -1 base), wait only +5/h."""
+    runtime = engine.create_world()
+    session = SessionLocal()
+    try:
+        agent = session.get(
+            Agent, {"world_id": runtime.world_id, "agent_id": "agent_linxia"}
+        )
+        agent.energy = 30
+        session.commit()
+    finally:
+        session.close()
+
+    ok, _, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_linxia", minutes=240
+    )
+    assert ok is True, reason
+    advance_minutes(engine, runtime.world_id, 121)  # crosses >= 2 hour boundaries
+    row = agent_row(engine, runtime.world_id, "agent_linxia")
+    assert row.energy >= 30 + 2 * 19, f"sleep recovered too little: {row.energy}"
+
+
+def test_sleep_is_interruptible_by_move(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    ok, _, _ = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_linxia", minutes=240
+    )
+    assert ok is True
+    # R1: sleep can be interrupted -> a move replaces it.
+    ok, envelope, _ = engine.action_service.execute_move(
+        runtime.world_id, "agent_linxia", "village_shop"
+    )
+    assert ok is True
+    assert envelope.type == "agent_move_started"
+    row = agent_row(engine, runtime.world_id, "agent_linxia")
+    assert row.action_type == "move"
+
+
+def test_sleep_rejected_while_moving(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    ok, _, _ = engine.action_service.execute_move(
+        runtime.world_id, "agent_linxia", "village_shop"
+    )
+    assert ok is True
+    ok, _, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_linxia", minutes=120
+    )
+    assert ok is False
+    assert reason == MSG_BUSY
 
 
 # --------------------------------------------------------------------------- #

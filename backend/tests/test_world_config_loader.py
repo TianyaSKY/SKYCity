@@ -53,7 +53,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
 
 
 def test_spawn_points(world: ParsedWorldConfig) -> None:
-    assert len(world.spawn_points) == 5
+    assert len(world.spawn_points) == 6
     for spawn in world.spawn_points:
         assert spawn.spawn_id and spawn.agent_id and spawn.direction
 

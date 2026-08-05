@@ -28,6 +28,8 @@ from app.database.models import (
     ScheduledAction,
     Store,
     StoreProduct,
+    Stock,
+    StockHolding,
     Transaction,
     WorldEvent,
 )
@@ -65,6 +67,8 @@ def _clean_db(_database_schema) -> None:
             Relationship,
             # M5 economy children (SQLite does not cascade without PRAGMA FK on).
             Transaction,
+            StockHolding,
+            Stock,
             Inventory,
             Employment,
             StoreProduct,

@@ -1,10 +1,12 @@
 """Real LLM decision provider built on the openai-agents SDK.
 
-One ``Runner.run`` per decision with ``tool_choice="required"`` and
-``parallel_tool_calls=False`` (docs/agent-prompt.md §2), capped at 4 turns so
-the agent cannot loop on tools forever. The first function call in
-``result.new_items`` is extracted; with tool_choice=required the model must
-produce one, so a missing call is a hard DecisionError.
+One ``Runner.run`` per decision with ``tool_choice="required"``,
+``parallel_tool_calls=False`` and ``tool_use_behavior="stop_on_first_tool"``
+(docs/agent-prompt.md §2): the run ends as soon as the first tool executes, so
+exactly one world action per decision regardless of model turn discipline.
+max_turns=4 remains as a safety net for malformed tool calls. The first
+function call in ``result.new_items`` is extracted; with tool_choice=required
+the model must produce one, so a missing call is a hard DecisionError.
 
 Requires OPENAI_API_KEY at construction; without it the runtime selects the
 fake provider instead (providers/__init__.py).
@@ -18,14 +20,18 @@ from functools import lru_cache
 from typing import Any
 
 from loguru import logger
-from agents import Agent, ModelSettings, RunContextWrapper, Runner
+from agents import Agent, ModelSettings, OpenAIProvider as SdkOpenAIProvider, RunContextWrapper, Runner
 from agents.items import ToolCallItem
 
 from app.agents.context import AgentToolContext
 from app.agents.instructions import build_system_prompt
 from app.agents.providers.base import DecisionError, DecisionResult
+from app.agents.tools.commerce import buy_item, sell_item, work
 from app.agents.tools.conversation import talk
+from app.agents.tools.daily_life import sleep, use_item
 from app.agents.tools.movement import move, wait
+from app.agents.tools.stocks import buy_stock, sell_stock
+from app.agents.tools.transfers import give_item, transfer_money
 from app.config.settings import Settings, get_settings
 
 MAX_TURNS = 4
@@ -41,7 +47,14 @@ class OpenAIProvider:
                 "Set OPENAI_API_KEY or use llm_provider='fake'."
             )
         self._settings = settings
-        self._tools = [move, wait, talk]
+        self._tools = [move, wait, talk, work, buy_item, sell_item, use_item, sleep, buy_stock, sell_stock, transfer_money, give_item]
+        # Explicit SDK provider: routes through settings (base_url / key) and
+        # uses chat completions so third-party OpenAI-compatible APIs work.
+        self._sdk_provider = SdkOpenAIProvider(
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+            use_responses=settings.llm_use_responses,
+        )
 
     # ------------------------------------------------------------------ #
     # DecisionProvider
@@ -59,7 +72,11 @@ class OpenAIProvider:
             name=self._agent_name(context.agent_id),
             instructions=self._system_prompt(context.agent_id),
             tools=self._tools,
-            model=self._settings.llm_model,
+            model=self._sdk_provider.get_model(self._settings.llm_model),
+            # One decision = one world action: end the run as soon as the
+            # first tool has executed (agent-prompt.md §2). Without this,
+            # models that keep calling tools burn max_turns and raise.
+            tool_use_behavior="stop_on_first_tool",
             model_settings=ModelSettings(
                 tool_choice="required",
                 parallel_tool_calls=False,
@@ -93,6 +110,10 @@ class OpenAIProvider:
         output_tokens = sum(
             getattr(resp.usage, "output_tokens", 0) or 0 for resp in result.raw_responses
         )
+        # stop_on_first_tool: the SDK already executed the tool, so its output
+        # is the run's final output. The decision service records this instead
+        # of re-executing the tool (re-execution would double the action).
+        tool_output = result.final_output if isinstance(result.final_output, str) else None
         return DecisionResult(
             tool_name=tool_name,
             tool_arguments=arguments,
@@ -101,6 +122,7 @@ class OpenAIProvider:
             output_tokens=output_tokens,
             latency_ms=latency_ms,
             raw_summary=f"[openai:{self._settings.llm_model}] {tool_name} {arguments}",
+            tool_output=tool_output,
         )
 
     # ------------------------------------------------------------------ #
@@ -127,7 +149,7 @@ class OpenAIProvider:
                 "和对明天的期望。直接输出反思内容，不要任何前缀或引用。"
             ),
             tools=[],
-            model=self._settings.llm_reflect_model,
+            model=self._sdk_provider.get_model(self._settings.llm_reflect_model),
         )
         result = await Runner.run(agent, digest, max_turns=1)
         return (result.final_output or "").strip()

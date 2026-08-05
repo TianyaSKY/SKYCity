@@ -41,6 +41,7 @@ async def talk(
         to_agent_id=target_agent_id,
         message=message,
         intent=intent,
+        trace_id=ctx.context.trace_id,
     )
     return json.dumps(
         {

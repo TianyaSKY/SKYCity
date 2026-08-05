@@ -17,6 +17,7 @@ from app.database.models.relationships import Relationship
 from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.stocks import Stock, StockHolding
 from app.database.models.transactions import Transaction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
@@ -39,6 +40,8 @@ __all__ = [
     "ScheduledAction",
     "Store",
     "StoreProduct",
+    "Stock",
+    "StockHolding",
     "Transaction",
     "World",
     "WorldEvent",

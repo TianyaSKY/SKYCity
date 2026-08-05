@@ -7,12 +7,14 @@ test_world_engine.py.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from sqlalchemy import select
 
+from app.agents.providers.base import DecisionResult
 from app.agents.providers.fake_provider import FakeDecisionProvider
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
@@ -65,7 +67,7 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
     session = SessionLocal()
     try:
         # initial decisions scheduled staggered
-        assert pending_decides(session, world_id) == 5
+        assert pending_decides(session, world_id) == 6
     finally:
         session.close()
 
@@ -77,13 +79,13 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) >= 5, f"expected >=5 decision runs, got {len(runs)}"
+        assert len(runs) >= 6, f"expected >=6 decision runs, got {len(runs)}"
         by_agent: dict[str, list[LLMRun]] = {}
         for run in runs:
             by_agent.setdefault(run.agent_id, []).append(run)
         assert set(by_agent) == {
             "agent_linxia", "agent_zhangming", "agent_chenyu",
-            "agent_wangfang", "agent_laozhang",
+            "agent_wangfang", "agent_laozhang", "agent_touzi",
         }
         # linxia moved to the shop per script (first decision)
         linxia_runs = sorted(by_agent["agent_linxia"],
@@ -173,7 +175,7 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) == 5, "every agent degraded"
+        assert len(runs) == 6, "every agent degraded"
         assert all(r.success == 0 for r in runs)
         assert all(r.error_type for r in runs)
         # every agent fell back to a wait action (world kept ticking)
@@ -184,7 +186,7 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
             assert agent.action_type == "wait", f"{agent.agent_id} not degraded to wait"
             assert agent.consecutive_failures >= 1
         # next decisions still scheduled (recovery path)
-        assert pending_decides(session, world_id) >= 5
+        assert pending_decides(session, world_id) >= 6
     finally:
         session.close()
     eng._runtimes.clear()
@@ -245,10 +247,10 @@ def test_paused_autonomous_world_frozen(world_config: ParsedWorldConfig) -> None
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) >= 5, "resume re-armed decisions"
+        assert len(runs) >= 6, "resume re-armed decisions"
         assert {r.agent_id for r in runs} == {
             "agent_linxia", "agent_zhangming", "agent_chenyu",
-            "agent_wangfang", "agent_laozhang",
+            "agent_wangfang", "agent_laozhang", "agent_touzi",
         }
     finally:
         session.close()
@@ -279,3 +281,54 @@ def test_decision_loop_survives_restart(world_config: ParsedWorldConfig) -> None
         session.close()
     eng._runtimes.clear()
     eng2._runtimes.clear()
+
+
+class ToolOutputProvider:
+    """Decision provider mimicking the real OpenAI SDK path: the tool was
+    already executed and ``tool_output`` carries its JSON result. The service
+    must parse it, record the run and re-arm the loop."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def decide(self, *, observation, context, trace_id) -> DecisionResult:
+        self.calls += 1
+        return DecisionResult(
+            tool_name="buy_stock",
+            tool_arguments={"stock_id": "stock_village_shop", "shares": 1, "reason": "投资"},
+            model="fake",
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=1,
+            raw_summary="[tool] buy_stock",
+            tool_output=json.dumps(
+                {"success": True, "reason": None, "event": None}, ensure_ascii=False
+            ),
+        )
+
+
+def test_tool_output_cycle_does_not_crash_and_rearms(world_config: ParsedWorldConfig) -> None:
+    """Regression: a missing ``json`` import crashed every real-LLM decision
+    cycle that carried tool_output, so the loop died after the first decision
+    per agent (no re-arm, silent town). The parse must survive and schedule
+    the next decision."""
+    provider = ToolOutputProvider()
+    eng = make_engine(world_config)
+    eng.decision_service = DecisionService(eng, SessionLocal, provider=provider)
+    runtime = eng.create_world("输出循环", autonomous=True)
+    world_id = runtime.world_id
+
+    advance_minutes(eng, world_id, 5)  # first decision
+    advance_minutes(eng, world_id, 40)  # re-arm after IDLE_DELAY (30)
+
+    session = SessionLocal()
+    try:
+        runs = session.scalars(
+            select(LLMRun).where(LLMRun.world_id == world_id)
+        ).all()
+        assert len(runs) >= 2, "loop must survive the tool_output parse and re-arm"
+        assert all(r.success == 1 for r in runs)
+        assert all(r.tool_name == "buy_stock" for r in runs)
+    finally:
+        session.close()
+    eng._runtimes.clear()

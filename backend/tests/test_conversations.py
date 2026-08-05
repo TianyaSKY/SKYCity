@@ -384,6 +384,9 @@ def test_reply_flow_via_fake_provider(world_config: ParsedWorldConfig) -> None:
     # park the pair at the plaza first, then let the decision loop run
     park_at(eng, world_id, "agent_zhangming", "village_plaza")
     park_at(eng, world_id, "agent_chenyu", "village_plaza")
+    # M10: the new investor spawns at the plaza; park him out of earshot so
+    # the deterministic reply-flow demo still features the intended pair.
+    park_at(eng, world_id, "agent_touzi", "village_farm")
     eng.set_autonomous(world_id, True)
 
     advance_minutes(eng, world_id, 15)

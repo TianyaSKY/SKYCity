@@ -3,8 +3,10 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Annotated
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -18,7 +20,11 @@ class Settings(BaseSettings):
 
     app_name: str = "AI Tiny World"
     database_url: str = "sqlite:///./ai_tiny_world.db"
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    # NoDecode: pydantic-settings >=2.14 force-decodes complex fields from
+    # .env as JSON; the CSV form needs the raw string for the validator below.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default=["http://localhost:5173", "http://127.0.0.1:5173"],
+    )
     world_data_dir: Path = Path("../world_data")
     map_name: str = "tiny_world"
     log_level: str = "INFO"
@@ -32,6 +38,10 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     # M6: stronger model used for the no-tool daily reflection prompt.
     llm_reflect_model: str = "gpt-4o-mini"
+    # Third-party OpenAI-compatible endpoints usually only implement
+    # /chat/completions; the SDK's default Responses API would 404. Keep
+    # chat completions unless the endpoint explicitly supports /responses.
+    llm_use_responses: bool = False
     # M8: stability / cost control.
     llm_max_concurrent: int = 2  # global cap on concurrent LLM calls
     world_daily_token_budget: int = 0  # per-world daily LLM token budget; 0 = unlimited

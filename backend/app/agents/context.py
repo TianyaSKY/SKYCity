@@ -21,3 +21,4 @@ class AgentToolContext:
     agent_id: str
     action_service: ActionExecutionService
     engine: WorldEngine
+    trace_id: str | None = None

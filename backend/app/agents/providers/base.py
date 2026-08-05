@@ -20,7 +20,14 @@ class DecisionError(Exception):
 
 @dataclass(slots=True)
 class DecisionResult:
-    """One provider decision: the tool to call plus audit metadata."""
+    """One provider decision: the tool to call plus audit metadata.
+
+    ``tool_output`` is the tool's executed result (JSON string) when the
+    provider's runtime already executed the tool (the real LLM path runs the
+    SDK agent loop, which executes tools). The decision service consumes it
+    instead of re-executing the tool; None means the tool still needs to run
+    (fake provider / fallback).
+    """
 
     tool_name: str
     tool_arguments: dict
@@ -29,6 +36,7 @@ class DecisionResult:
     output_tokens: int
     latency_ms: int
     raw_summary: str
+    tool_output: str | None = None
 
 
 class DecisionProvider(Protocol):

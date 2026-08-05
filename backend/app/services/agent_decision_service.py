@@ -13,12 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import uuid
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.agents.context import AgentToolContext
@@ -31,6 +32,7 @@ from app.database.models.llm_runs import LLMRun
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
+from app.domain.event import WorldEventEnvelope
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
 # Delay (game minutes) before the next decision after various outcomes.
@@ -48,6 +50,7 @@ BUDGET_SKIP_DELAY = 30  # world LLM budget exhausted: dormant rhythm
 BUDGET_EXHAUSTED_TEXT = "世界今日 LLM 预算已用尽，智能体转入休眠节奏"
 
 CLAMPED_WAIT_MINUTES = (1, 240)
+CLAMPED_SLEEP_MINUTES = (60, 480)
 
 # M5 R12: how long an exhausted agent is forced to rest before re-deciding.
 FORCED_REST_MINUTES = 60
@@ -148,10 +151,25 @@ class DecisionService:
             if runtime is None:
                 return
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
-            if agent is None or agent.action_type is not None or agent.is_deciding:
+            if agent is None or agent.action_type is not None:
                 return
-            agent.is_deciding = True
-            agent.last_decision_at = world.world_time  # M8: decide-start timestamp
+            # Atomic claim. The ORM read-then-write below used to race: two
+            # pending agent_decide rows (decision loop + action-completion
+            # re-arm) can fire in the same tick, and under SQLite snapshots
+            # both cycles saw is_deciding=False -> two concurrent LLM calls
+            # and two tool executions for one agent. A conditional UPDATE
+            # cannot double-claim.
+            claimed = session.execute(
+                update(Agent)
+                .where(
+                    Agent.world_id == world_id,
+                    Agent.agent_id == agent_id,
+                    Agent.is_deciding.is_(False),
+                )
+                .values(is_deciding=True, last_decision_at=world.world_time)
+            )
+            if claimed.rowcount != 1:
+                return
             session.commit()
         finally:
             session.close()
@@ -213,6 +231,7 @@ class DecisionService:
             agent_id=agent_id,
             action_service=self.engine.action_service,
             engine=self.engine,
+            trace_id=trace_id,
         )
         observation = build_observation(
             world_id,
@@ -280,7 +299,32 @@ class DecisionService:
             session.add(run)
             session.commit()
 
-            ok, envelope, reason = self._execute_tool(result, world_id, agent_id, trace_id)
+            # The real LLM provider's SDK loop already executed the tool and
+            # returned its output; re-executing here would double the world
+            # action (second call rejected as mid-action / duplicate). Use the
+            # output when it parses; otherwise fall back to executing (fake
+            # provider / fallback path).
+            ok: bool | None = None
+            envelope = None
+            reason: str | None = None
+            if result.tool_output:
+                try:
+                    parsed = json.loads(result.tool_output)
+                    if isinstance(parsed, dict) and "success" in parsed:
+                        ok = bool(parsed["success"])
+                        reason = parsed.get("reason")
+                        event_data = parsed.get("event")
+                        if isinstance(event_data, dict):
+                            try:
+                                envelope = WorldEventEnvelope.model_validate(event_data)
+                            except Exception:  # noqa: BLE001 - envelope is audit-only
+                                envelope = None
+                except (ValueError, TypeError):
+                    ok = None
+            if ok is None:
+                ok, envelope, reason = self._execute_tool(
+                    result, world_id, agent_id, trace_id
+                )
             run.success = ok
             run.tool_result = {
                 "success": ok,
@@ -530,6 +574,21 @@ class DecisionService:
                 trace_id=trace_id,
             )
             return ok, envelope, reason
+        if result.tool_name == "sleep":
+            minutes = arguments.get("minutes")
+            if minutes is not None:
+                minutes = max(
+                    CLAMPED_SLEEP_MINUTES[0], min(int(minutes), CLAMPED_SLEEP_MINUTES[1])
+                )
+            else:
+                minutes = CLAMPED_SLEEP_MINUTES[0]
+            return service.execute_sleep(
+                world_id,
+                agent_id,
+                minutes=minutes,
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
         # M5 economy tools (work / buy / sell / use) through the rule gate.
         economy_service = self.engine.economy_service
         if economy_service is None:
@@ -577,6 +636,44 @@ class DecisionService:
                 arguments.get("item_id"),
                 reason=arguments.get("reason"),
                 trace_id=trace_id,
+            )
+        # M10 stock tools through the stock rule gate.
+        if result.tool_name in ("buy_stock", "sell_stock"):
+            stock_service = self.engine.stock_service
+            if stock_service is None:
+                return False, None, "股票服务未初始化"
+            shares = arguments.get("shares")
+            shares = 1 if shares is None else max(1, min(int(shares), 9999))
+            fn = (
+                stock_service.buy_stock
+                if result.tool_name == "buy_stock"
+                else stock_service.sell_stock
+            )
+            return fn(
+                world_id,
+                agent_id,
+                arguments.get("stock_id"),
+                shares=shares,
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        # M11 agent-to-agent transfer / give.
+        transfer_service = self.engine.transfer_service
+        if result.tool_name in ("transfer_money", "give_item"):
+            if transfer_service is None:
+                return False, None, "转账服务未初始化"
+            if result.tool_name == "transfer_money":
+                amount = arguments.get("amount")
+                amount = 1 if amount is None else max(1, min(int(amount), 1_000_000))
+                return transfer_service.transfer_money(
+                    world_id, agent_id, arguments.get("target_agent_id"),
+                    amount=amount, reason=arguments.get("reason"), trace_id=trace_id,
+                )
+            quantity = arguments.get("quantity")
+            quantity = 1 if quantity is None else max(1, min(int(quantity), 99))
+            return transfer_service.give_item(
+                world_id, agent_id, arguments.get("target_agent_id"), arguments.get("item_id"),
+                quantity=quantity, reason=arguments.get("reason"), trace_id=trace_id,
             )
         return False, None, f"未知工具: {result.tool_name}"
 

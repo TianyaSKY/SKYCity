@@ -98,6 +98,38 @@ def scheduled_decides(session, world_id: str, agent_id: str) -> list[ScheduledAc
     )
 
 
+def test_decision_routes_sleep_tool(world_config: ParsedWorldConfig) -> None:
+    """The decision service executes a sleep decision through the rule gate."""
+    provider = CountingProvider()
+    eng = make_engine(world_config, provider)
+    runtime = eng.create_world()
+    world_id = runtime.world_id
+    ok, envelope, reason = eng.decision_service._execute_tool(
+        DecisionResult(
+            tool_name="sleep",
+            tool_arguments={"minutes": 120, "reason": "睡一觉"},
+            model="counting",
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=1,
+            raw_summary="[routing] sleep",
+        ),
+        world_id,
+        "agent_linxia",
+        "trc_route_sleep",
+    )
+    assert ok is True and reason is None
+    assert envelope.type == "agent_sleep_started"
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent.action_type == "sleep"
+        assert agent.action_ends_at is not None
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
 def test_llm_semaphore_caps_concurrency(world_config: ParsedWorldConfig) -> None:
     """Four concurrent provider calls never exceed llm_max_concurrent (2)."""
     provider = CountingProvider(delay=0.2)

@@ -367,7 +367,7 @@ def test_replay_endpoint(client: TestClient) -> None:
     assert set(snapshot["world"]) >= {
         "world_id", "world_time", "speed", "paused", "weather", "day",
     }
-    assert len(snapshot["agents"]) == 5
+    assert len(snapshot["agents"]) == 6
     events = replay["events"]
     sequences = [event["sequence"] for event in events]
     assert sequences == sorted(sequences)

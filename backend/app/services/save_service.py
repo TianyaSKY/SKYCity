@@ -41,6 +41,7 @@ from app.database.models.relationships import Relationship
 from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.stocks import Stock, StockHolding
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.world_engine.clock import WorldClock
@@ -187,6 +188,8 @@ class SaveService:
             "jobs": rows(Job),
             "employments": rows(Employment),
             "inventories": rows(Inventory),
+            "stocks": rows(Stock),
+            "stock_holdings": rows(StockHolding),
             "relationships": rows(Relationship),
             "memories": rows(Memory),
             "conversations": rows(Conversation),
@@ -245,6 +248,10 @@ class SaveService:
             )
             session.add(world)
             self._reinsert(session, payload, world_id)
+            # M10: pre-stock saves carry no market; seed it so a restored
+            # world still has a stock market.
+            if "stocks" not in payload and self.engine.stock_service is not None:
+                self.engine.stock_service.seed(session, world_id)
             # Make every inserted row visible to the scheduler queries below
             # (SessionLocal has autoflush=False).
             session.flush()
@@ -331,6 +338,11 @@ class SaveService:
             session.add(Job(world_id=world_id, **self._row_data(row)))
         for row in payload.get("employments", []):
             session.add(Employment(world_id=world_id, **self._row_data(row)))
+        # M10: composite per-world PKs, re-pointed verbatim (no _fresh_pk).
+        for row in payload.get("stocks", []):
+            session.add(Stock(world_id=world_id, **self._row_data(row)))
+        for row in payload.get("stock_holdings", []):
+            session.add(StockHolding(world_id=world_id, **self._row_data(row)))
         for row in payload.get("inventories", []):
             session.add(Inventory(world_id=world_id, **self._row_data(row)))
         for row in payload.get("relationships", []):

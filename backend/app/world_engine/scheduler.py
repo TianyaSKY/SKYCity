@@ -85,8 +85,13 @@ class Scheduler:
         return list(session.scalars(stmt))
 
     def dispatch(self, session: Session, action: ScheduledAction) -> None:
-        """Run the handler for ``action`` (if any) and consume the row."""
+        """Run the handler for ``action`` (if any) and consume the row.
+
+        The row is deleted BEFORE the handler runs so handler-side queue
+        checks (``has_pending``) never see the just-fired action as pending.
+        Handlers only read the action's Python attributes, not its DB row.
+        """
+        session.delete(action)
         handler = self._handlers.get(action.action_type)
         if handler is not None:
             handler(session, action)
-        session.delete(action)

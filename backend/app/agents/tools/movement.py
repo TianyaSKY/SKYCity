@@ -42,6 +42,7 @@ async def move(
         agent_id=ctx.context.agent_id,
         destination_id=destination_id,
         reason=reason,
+        trace_id=ctx.context.trace_id,
     )
     return _result_json(ok, envelope, err)
 
@@ -59,5 +60,6 @@ async def wait(
         agent_id=ctx.context.agent_id,
         minutes=minutes,
         reason=reason,
+        trace_id=ctx.context.trace_id,
     )
     return _result_json(ok, envelope, err)
