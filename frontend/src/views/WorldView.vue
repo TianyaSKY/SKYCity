@@ -10,6 +10,8 @@ import type { ParsedWorldConfig } from '../types/tiled';
 import EventStream from '../components/EventStream.vue';
 import HealthIndicator from '../components/HealthIndicator.vue';
 import LocationPanel from '../components/LocationPanel.vue';
+import ConversationPanel from '../components/ConversationPanel.vue';
+import SpeechBubble from '../components/SpeechBubble.vue';
 import WorldClockBar from '../components/WorldClockBar.vue';
 
 const DEFAULT_AGENT_COLOR = '#9ee6b0';
@@ -41,7 +43,10 @@ onMounted(async () => {
     centerMap();
 
     // Agent layer sits above every tile layer, below the DOM HUD.
-    agentLayer = new AgentLayer((agentId) => store.agentColors[agentId] ?? DEFAULT_AGENT_COLOR);
+    agentLayer = new AgentLayer(
+      (agentId) => store.agentColors[agentId] ?? DEFAULT_AGENT_COLOR,
+      (x, y) => renderer!.worldToScreen(x, y),
+    );
     renderer.world.addChild(agentLayer.container);
     renderer.app.ticker.add(tick);
 
@@ -65,6 +70,12 @@ function tick(): void {
   if (!agentLayer) return;
   bobTime += 1 / 60;
   agentLayer.update(store.worldTime, bobTime);
+  store.pruneBubbles();
+}
+
+/** Reflect conversation highlights + selection on every sprite. */
+function applyHighlights(): void {
+  agentLayer?.applyHighlights(store.activeConversations, store.selectedAgentId);
 }
 
 watch(
@@ -78,8 +89,16 @@ watch(
 
 watch(
   () => store.agents,
-  (agents) => agentLayer?.sync(agents),
+  (agents) => {
+    agentLayer?.sync(agents);
+    applyHighlights();
+  },
   { deep: true },
+);
+
+watch(
+  () => [store.activeConversations, store.selectedAgentId] as const,
+  () => applyHighlights(),
 );
 
 function centerMap(): void {
@@ -126,13 +145,29 @@ function handlePointerLeave(): void {
   store.setPointerTile(null);
 }
 
+/** Screen position for the bubble overlay (null while the sprite is absent). */
+function bubbleScreenPos(agentId: string): { x: number; y: number } | null {
+  return agentLayer?.agentScreenPos(agentId) ?? null;
+}
+
 function handleClick(e: MouseEvent): void {
   if (!camera?.wasTap()) return;
   const tile = tileAt(e);
-  const loc =
-    tile && worldConfig
-      ? (worldConfig.locations.find((l) => l.col === tile.col && l.row === tile.row) ?? null)
-      : null;
+  if (!tile || !worldConfig) {
+    store.selectAgent(null);
+    store.selectLocation(null);
+    return;
+  }
+  // Clicking an agent selects it (conversation panel + talk highlight).
+  const agent = store.agents.find((a) => a.col === tile.col && a.row === tile.row);
+  if (agent) {
+    store.selectLocation(null);
+    store.selectAgent(agent.agent_id);
+    return;
+  }
+  // Otherwise keep the location click behavior (deselect the agent).
+  store.selectAgent(null);
+  const loc = worldConfig.locations.find((l) => l.col === tile.col && l.row === tile.row) ?? null;
   store.selectLocation(loc);
 }
 
@@ -167,6 +202,10 @@ onBeforeUnmount(() => {
     </div>
     <div class="hud hud-bottom">
       <EventStream />
+    </div>
+    <SpeechBubble :bubbles="store.bubbles" :agent-screen-pos="bubbleScreenPos" />
+    <div class="hud hud-right">
+      <ConversationPanel />
     </div>
     <LocationPanel class="hud hud-bottom-left" />
     <div v-if="!store.mapLoaded && !store.mapError" class="status-banner">正在加载世界…</div>
@@ -217,6 +256,12 @@ onBeforeUnmount(() => {
 .hud-bottom-left {
   bottom: 12px;
   left: 12px;
+}
+.hud-right {
+  top: 56px;
+  right: 12px;
+  bottom: 56px;
+  max-width: 320px;
 }
 .tile-readout {
   padding: 4px 10px;

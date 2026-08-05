@@ -17,7 +17,13 @@ export class AgentLayer {
   private readonly agentsById = new Map<string, AgentSnapshot>();
   private readonly animator = new MovementAnimator();
 
-  constructor(private readonly colorOf: (agentId: string) => string) {
+  constructor(
+    private readonly colorOf: (agentId: string) => string,
+    private readonly worldToScreen: (x: number, y: number) => { x: number; y: number } = (x, y) => ({
+      x,
+      y,
+    }),
+  ) {
     this.container = new Container();
     this.container.sortableChildren = true;
   }
@@ -88,6 +94,32 @@ export class AgentLayer {
     }
     this.sprites.clear();
     this.agentsById.clear();
+  }
+
+  /** Screen-space (canvas CSS px) position of an agent's current interpolated feet. */
+  agentScreenPos(agentId: string): { x: number; y: number } | null {
+    const sprite = this.sprites.get(agentId);
+    if (!sprite) return null;
+    return this.worldToScreen(sprite.x, sprite.y);
+  }
+
+  /**
+   * Apply conversation highlight (amber halo) and selection marker to every
+   * sprite. Cheap enough to call on store changes; no per-frame allocation.
+   */
+  applyHighlights(
+    activeConversations: Record<string, { agent_ids: [string, string] }>,
+    selectedId: string | null,
+  ): void {
+    const talking = new Set<string>();
+    for (const conv of Object.values(activeConversations)) {
+      talking.add(conv.agent_ids[0]);
+      talking.add(conv.agent_ids[1]);
+    }
+    for (const [agentId, sprite] of this.sprites) {
+      sprite.setTalkPartner(talking.has(agentId));
+      sprite.setSelected(agentId === selectedId);
+    }
   }
 
   private sortByRow(): void {

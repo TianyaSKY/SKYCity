@@ -24,6 +24,7 @@ from agents.items import ToolCallItem
 from app.agents.context import AgentToolContext
 from app.agents.instructions import build_system_prompt
 from app.agents.providers.base import DecisionError, DecisionResult
+from app.agents.tools.conversation import talk
 from app.agents.tools.movement import move, wait
 from app.config.settings import Settings, get_settings
 
@@ -40,7 +41,7 @@ class OpenAIProvider:
                 "Set OPENAI_API_KEY or use llm_provider='fake'."
             )
         self._settings = settings
-        self._tools = [move, wait]
+        self._tools = [move, wait, talk]
 
     # ------------------------------------------------------------------ #
     # DecisionProvider

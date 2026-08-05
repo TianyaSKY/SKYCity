@@ -117,3 +117,49 @@ export interface WorldEventItem {
   agentId?: string | null;
   importance?: number;
 }
+
+/** One chat line inside a conversation (REST detail + WS conversation_message). */
+export interface ConversationMessage {
+  from_agent_id: string;
+  to_agent_id: string;
+  message: string;
+  intent: string;
+  sent_at: number;
+}
+
+/** One conversation of an agent (GET .../conversations response entry, newest first). */
+export interface ConversationSummary {
+  conversation_id: string;
+  other_agent_id: string;
+  started_at: number | null;
+  ended_at: number | null;
+  end_reason: string | null;
+  messages: ConversationMessage[];
+}
+
+/** Payload of the WS conversation_started event. */
+export interface ConversationStartedPayload {
+  conversation_id: string;
+  agent_ids: [string, string];
+}
+
+/** Payload of the WS conversation_message event. */
+export interface ConversationMessagePayload {
+  conversation_id: string;
+  from_agent_id: string;
+  to_agent_id: string;
+  message: string;
+  intent: string;
+}
+
+/** Payload of the WS conversation_ended event. */
+export interface ConversationEndedPayload {
+  conversation_id: string;
+  reason: string;
+}
+
+/** Discriminated payload of the three conversation WS event types. */
+export type ConversationEventPayload =
+  | ConversationStartedPayload
+  | ConversationMessagePayload
+  | ConversationEndedPayload;

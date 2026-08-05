@@ -220,6 +220,19 @@ class DecisionService:
                 reason=arguments.get("reason"),
                 trace_id=trace_id,
             )
+        if result.tool_name == "talk":
+            conversation_service = self.engine.conversation_service
+            if conversation_service is None:
+                return False, None, "对话服务未初始化"
+            ok, reason, envelope = conversation_service.send_message(
+                world_id,
+                agent_id,
+                arguments.get("target_agent_id"),
+                arguments.get("message"),
+                arguments.get("intent"),
+                trace_id=trace_id,
+            )
+            return ok, envelope, reason
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(

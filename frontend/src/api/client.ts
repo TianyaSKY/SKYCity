@@ -5,7 +5,12 @@
  * actions) plus the world WebSocket endpoint.
  */
 
-import type { ActionResponse, WorldListItem, WorldSnapshotPayload } from '../types/world';
+import type {
+  ActionResponse,
+  ConversationSummary,
+  WorldListItem,
+  WorldSnapshotPayload,
+} from '../types/world';
 
 export interface HealthResponse {
   status: string;
@@ -90,9 +95,24 @@ export function setSpeed(id: string, speed: number): Promise<{ ok: boolean }> {
   });
 }
 
+/** Fetch one agent's conversation history, newest first (limit <= 0 = server default). */
+export function getConversations(
+  worldId: string,
+  agentId: string,
+  limit = 20,
+): Promise<ConversationSummary[]> {
+  const query = limit > 0 ? `?limit=${limit}` : '';
+  return requestJson<ConversationSummary[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/conversations${query}`,
+  );
+}
+
 export interface AgentActionRequest {
-  action_type: 'move' | 'wait' | string;
+  action_type: 'move' | 'wait' | 'talk' | string;
   destination_id?: string;
+  target_agent_id?: string;
+  message?: string;
+  intent?: 'greet' | 'chat' | 'ask' | 'offer' | 'leave' | string;
   reason?: string;
 }
 

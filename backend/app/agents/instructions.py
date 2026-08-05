@@ -32,7 +32,11 @@ _BEHAVIORAL_RULES = """行为规则：
 _TOOL_CONVENTIONS = """工具约定：
 - move(destination_id, reason)：移动到指定地点。destination_id 必须是可见地点列表中的 id。
 - wait(minutes, reason)：原地等待 1~240 分钟。
-- 每个工具都必须提供中文 reason，说明你为什么这么做。
+- talk(target_agent_id, message, intent)：与附近（距离 ≤ 3 格）且空闲的智能体对话；
+  intent 取 greet/chat/ask/offer/leave 之一；对方忙碌或太远时会被拒绝。
+  收到【收到的消息】里的消息时应当回复（intent 用 chat/ask/offer）；如果不想继续聊，
+  用 intent=leave 礼貌告别并结束对话。
+- 每个工具都必须提供中文 reason（talk 的消息用中文），说明你为什么这么做。
 - 一次决策至多发起一次行动；其余情况请选择 wait 并给出理由。"""
 
 

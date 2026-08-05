@@ -13,7 +13,13 @@ import pytest  # noqa: E402
 from sqlalchemy import delete
 
 from app.database import models  # noqa: E402,F401  (populates Base.metadata)
-from app.database.models import LLMRun, ScheduledAction, WorldEvent
+from app.database.models import (
+    Conversation,
+    ConversationMessage,
+    LLMRun,
+    ScheduledAction,
+    WorldEvent,
+)
 from app.database.models.agents import Agent
 from app.database.models.locations import WorldLocation
 from app.database.models.worlds import World
@@ -35,7 +41,16 @@ def _clean_db(_database_schema) -> None:
     so world numbering and event sequences restart at 1."""
     session = SessionLocal()
     try:
-        for model in (LLMRun, WorldEvent, ScheduledAction, Agent, WorldLocation, World):
+        for model in (
+            LLMRun,
+            WorldEvent,
+            ScheduledAction,
+            Agent,
+            WorldLocation,
+            ConversationMessage,
+            Conversation,
+            World,
+        ):
             session.execute(delete(model))
         session.commit()
     finally:

@@ -14,15 +14,22 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action_type: Literal["move", "wait"]
+    action_type: Literal["move", "wait", "talk"]
     destination_id: str | None = None
     minutes: int | None = Field(default=None, ge=1)
     reason: str | None = None
+    target_agent_id: str | None = None
+    message: str | None = Field(default=None, max_length=200)
+    intent: Literal["greet", "chat", "ask", "offer", "leave"] | None = None
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "ActionRequest":
         if self.action_type == "move" and not self.destination_id:
             raise ValueError("move requires destination_id")
+        if self.action_type == "talk" and not self.target_agent_id:
+            raise ValueError("talk requires target_agent_id")
+        if self.action_type == "talk" and not self.message:
+            raise ValueError("talk requires message")
         return self
 
 

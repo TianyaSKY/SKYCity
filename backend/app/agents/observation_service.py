@@ -14,12 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.conversations import ConversationMessage
 from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.worlds import World
 from app.world_engine.engine import is_location_open
 
 MAX_OBSERVATION_CHARS = 2000
+
+# M4: up to this many unread messages appear in one observation.
+MAX_UNREAD_MESSAGES = 3
 
 _WEATHER_NAMES = {
     "clear": "晴朗",
@@ -132,6 +136,38 @@ def build_observation(
             f"【自身状态】饥饿: {agent.hunger}/100 精力: {agent.energy}/100 "
             f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
         )
+
+        # M4: unread talk messages for this agent, newest unread first. The
+        # line carries the sender's agent id so providers can reply without a
+        # name->id lookup; once shown they are marked read (the agent saw them).
+        unread = list(
+            session.scalars(
+                select(ConversationMessage)
+                .where(
+                    ConversationMessage.world_id == world_id,
+                    ConversationMessage.to_agent_id == agent_id,
+                    ConversationMessage.read.is_(False),
+                )
+                .order_by(
+                    ConversationMessage.sent_at.desc(),
+                    ConversationMessage.message_id.desc(),
+                )
+                .limit(MAX_UNREAD_MESSAGES)
+            )
+        )
+        name_by_id = {a.agent_id: a.name for a in others}
+        lines.append("【收到的消息】")
+        if unread:
+            for row in unread:
+                sender_name = name_by_id.get(row.from_agent_id, row.from_agent_id)
+                lines.append(
+                    f"- {sender_name}（{row.from_agent_id}, {row.intent}）：{row.message}"
+                )
+            for row in unread:
+                row.read = True
+            session.commit()  # the agent has seen these messages
+        else:
+            lines.append("（没有新消息）")
 
         lines.append("【可见地点】")
         for loc in locations:

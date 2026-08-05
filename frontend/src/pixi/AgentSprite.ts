@@ -36,9 +36,11 @@ function mixHex(a: number, b: number, t: number): number {
 
 export class AgentSprite extends Container {
   private readonly shadow: Graphics;
+  private readonly talkRing: Graphics;
   private readonly body: Graphics;
   private readonly head: Graphics;
   private readonly waitDot: Graphics;
+  private readonly selectionMark: Graphics;
   private readonly baseColor: number;
   private readonly movingColor: number;
   private readonly waitingColor: number;
@@ -51,15 +53,26 @@ export class AgentSprite extends Container {
     this.waitingColor = mixHex(this.baseColor, 0x000000, 0.25);
 
     this.shadow = new Graphics();
+    this.talkRing = new Graphics();
     this.body = new Graphics();
     this.head = new Graphics();
     this.waitDot = new Graphics();
+    this.selectionMark = new Graphics();
 
     this.shadow.ellipse(0, 0, 8, 4).fill({ color: 0x000000, alpha: 0.25 });
+    this.talkRing.circle(0, -16, 9).stroke({ color: 0xffd54a, width: 1.5, alpha: 0.9 });
+    this.talkRing.visible = false;
+    this.selectionMark
+      .moveTo(0, -30)
+      .lineTo(-4, -24.5)
+      .lineTo(4, -24.5)
+      .closePath()
+      .fill({ color: 0xffffff, alpha: 0.95 });
+    this.selectionMark.visible = false;
     this.waitDot.circle(0, -21, 1.6).fill({ color: 0xffffff, alpha: 0.9 });
     this.waitDot.visible = false;
     this.redrawBody();
-    this.addChild(this.shadow, this.body, this.head, this.waitDot);
+    this.addChild(this.shadow, this.talkRing, this.body, this.head, this.waitDot, this.selectionMark);
   }
 
   private redrawBody(): void {
@@ -85,5 +98,15 @@ export class AgentSprite extends Container {
     this.visual = visual;
     this.waitDot.visible = visual === 'waiting';
     this.redrawBody();
+  }
+
+  /** Show/hide the amber halo while the agent is in an active conversation. */
+  setTalkPartner(active: boolean): void {
+    this.talkRing.visible = active;
+  }
+
+  /** Show/hide the white marker above the head when the agent is selected. */
+  setSelected(selected: boolean): void {
+    this.selectionMark.visible = selected;
   }
 }

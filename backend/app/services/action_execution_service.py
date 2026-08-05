@@ -113,6 +113,19 @@ class ActionExecutionService:
         """Dispatch a validated action request. Returns (ok, envelope, reason)."""
         if request.action_type == "move":
             return self.execute_move(world_id, agent_id, request.destination_id, request.reason, trace_id)
+        if request.action_type == "talk":
+            conversation_service = self.engine.conversation_service
+            if conversation_service is None:
+                return False, None, "对话服务未初始化"
+            ok, reason, envelope = conversation_service.send_message(
+                world_id,
+                agent_id,
+                request.target_agent_id,
+                request.message,
+                request.intent,
+                trace_id,
+            )
+            return ok, envelope, reason
         return self.execute_wait(world_id, agent_id, request.minutes, request.reason, trace_id)
 
     # ------------------------------------------------------------------ #
@@ -278,6 +291,14 @@ class ActionExecutionService:
             "agent_move_completed",
             {"agent_id": action.agent_id, "at": [destination.col, destination.row]},
         )
+
+        # M4 R9: moving out of earshot ends the mover's active conversations.
+        # Commit first so a separate session sees the new position.
+        session.commit()
+        if self.engine.conversation_service is not None:
+            self.engine.conversation_service.end_if_distance_exceeded(
+                action.world_id, action.agent_id
+            )
 
         if not is_location_open(destination.location_type, destination.open_hour, destination.close_hour, world_time):
             # R8: allowed to walk there, but the venue is shut -> wait at the door.

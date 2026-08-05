@@ -136,7 +136,11 @@ def test_t39_failure_then_adjust(world_config: ParsedWorldConfig) -> None:
             )
         ).all()
         assert len(chenyu_runs) >= 2
-        recovery = chenyu_runs[-1]
+        # M4 relaxation: assert the SECOND decision (chenyu_runs[1]) is the
+        # successful recovery move, not necessarily the last run — once chenyu
+        # reaches the plaza, later decisions may be talk (M4 conversations)
+        # instead of more moves.
+        recovery = chenyu_runs[1]
         assert recovery.tool_name == "move"
         assert recovery.tool_arguments["destination_id"] == "village_plaza"
         assert recovery.success == 1

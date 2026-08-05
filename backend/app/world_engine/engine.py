@@ -71,6 +71,9 @@ class WorldEngine:
         # DecisionService (M3) is wired after construction; when set, the
         # "agent_decide" scheduler handler is registered per runtime.
         self.decision_service: Any = None
+        # ConversationService (M4) is wired after construction; the talk tool,
+        # the decision service, and the move_completed handler reach it here.
+        self.conversation_service: Any = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -116,6 +119,77 @@ class WorldEngine:
 
     def get_runtime(self, world_id: str) -> WorldRuntime | None:
         return self._runtimes.get(world_id)
+
+    def idle_agents_near(
+        self, world_id: str, agent_id: str, distance: int
+    ) -> list[str]:
+        """Other agents that are idle (no action in flight) and within
+        manhattan ``distance`` cells of ``agent_id``, nearest first.
+
+        Powers the fake provider's conversation initiation (M4 demo): an idle
+        agent at a busy spot picks the closest idle neighbour to greet.
+        """
+        session = self._session_factory()
+        try:
+            me = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if me is None:
+                return []
+            others = session.scalars(
+                select(Agent).where(
+                    Agent.world_id == world_id,
+                    Agent.agent_id != agent_id,
+                    Agent.action_type.is_(None),
+                )
+            ).all()
+            scored = [
+                (abs(me.col - other.col) + abs(me.row - other.row), other.agent_id)
+                for other in others
+                if abs(me.col - other.col) + abs(me.row - other.row) <= distance
+            ]
+            scored.sort(key=lambda item: (item[0], item[1]))
+            return [agent_id for _, agent_id in scored]
+        finally:
+            session.close()
+
+    def waiting_agents_near(
+        self, world_id: str, agent_id: str, distance: int
+    ) -> list[tuple[str, int]]:
+        """(agent_id, remaining_minutes) for other agents currently waiting
+        (action_type == "wait") within manhattan ``distance`` cells, sorted by
+        when they free up.
+
+        Powers the fake provider's conversation convergence (M4 demo): an idle
+        agent whose only nearby neighbour is waiting pauses until that
+        neighbour's wait ends, so both become idle together and can talk.
+        """
+        session = self._session_factory()
+        try:
+            me = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if me is None:
+                return []
+            world_time = int(
+                session.scalar(
+                    select(World.world_time).where(World.world_id == world_id)
+                )
+                or 0
+            )
+            others = session.scalars(
+                select(Agent).where(
+                    Agent.world_id == world_id,
+                    Agent.agent_id != agent_id,
+                    Agent.action_type == "wait",
+                )
+            ).all()
+            scored: list[tuple[int, str, int]] = []
+            for other in others:
+                if abs(me.col - other.col) + abs(me.row - other.row) > distance:
+                    continue
+                remaining = max((other.action_ends_at or world_time) - world_time, 0)
+                scored.append((remaining, other.agent_id, remaining))
+            scored.sort(key=lambda item: (item[0], item[1]))
+            return [(agent_id, remaining) for _, agent_id, remaining in scored]
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------ #
     # Runtime construction

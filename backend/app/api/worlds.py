@@ -163,6 +163,17 @@ async def list_decisions(
         session.close()
 
 
+@router.get("/{world_id}/agents/{agent_id}/conversations")
+async def list_conversations(
+    request: Request, world_id: str, agent_id: str, limit: int = 20
+) -> list[dict]:
+    """Conversation history for one agent (newest first), each with messages."""
+    engine = _engine(request)
+    if engine.get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return engine.conversation_service.history(world_id, agent_id, limit)
+
+
 @router.post("/{world_id}/agents/{agent_id}/actions", response_model=None)
 async def agent_action(
     request: Request, world_id: str, agent_id: str, body: ActionRequest

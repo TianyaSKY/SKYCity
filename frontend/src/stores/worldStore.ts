@@ -12,6 +12,7 @@ import { defineStore } from 'pinia';
 import {
   checkHealth,
   createWorld,
+  getConversations,
   getSnapshot,
   listWorlds,
   pauseWorld,
@@ -27,6 +28,8 @@ import type {
   ActionResponse,
   AgentSnapshot,
   Cell,
+  ConversationMessage,
+  ConversationSummary,
   WorldEventEnvelope,
   WorldEventItem,
   WorldEventType,
@@ -59,6 +62,40 @@ const AGENT_PALETTE = [
   '#7986cb',
 ];
 
+/** How long a speech bubble stays on screen (real milliseconds). */
+export const BUBBLE_TTL_MS = 4000;
+/** Hard cap on buffered bubble items (one per agent, so usually tiny). */
+export const BUBBLE_CAP = 30;
+
+/** Map backend conversation intent tokens onto Chinese labels. */
+export const INTENT_LABELS: Record<string, string> = {
+  greet: '打招呼',
+  chat: '闲聊',
+  ask: '询问',
+  offer: '提议',
+  leave: '告别',
+};
+
+/** Map backend conversation end reasons onto Chinese labels. */
+export const CONVERSATION_END_REASONS: Record<string, string> = {
+  leave: '对方告别',
+  distance: '距离过远',
+  max_turns: '已达上限',
+  duplicate: '内容重复',
+  cooldown_expired: '冷却结束',
+  both_busy: '双方忙碌',
+};
+
+/** A live speech bubble; at most one per agent (newest wins). */
+export interface BubbleItem {
+  id: string;
+  conversation_id: string;
+  agent_id: string;
+  text: string;
+  at_seq: number;
+  at_ms: number;
+}
+
 let ensureRetryTimer: number | null = null;
 
 /** Map raw backend weather tokens onto short Chinese labels. */
@@ -84,11 +121,28 @@ function locationNameAt(locations: WorldLocation[], cell: unknown): string {
   return loc ? loc.name : `(${cell[0]}, ${cell[1]})`;
 }
 
+/**
+ * The two participants of a conversation from an event payload:
+ * new shape {agent_ids: [a, b]}, with a legacy {a, b} fallback.
+ */
+function toAgentPair(p: Record<string, unknown>): [string, string] | null {
+  if (
+    Array.isArray(p.agent_ids) &&
+    typeof p.agent_ids[0] === 'string' &&
+    typeof p.agent_ids[1] === 'string'
+  ) {
+    return [p.agent_ids[0], p.agent_ids[1]];
+  }
+  if (typeof p.a === 'string' && typeof p.b === 'string') return [p.a, p.b];
+  return null;
+}
+
 /** Build a readable Chinese line for the event stream ('' = not shown). */
 function eventText(
   env: WorldEventEnvelope,
   agents: AgentSnapshot[],
   locations: WorldLocation[],
+  endedPair: [string, string] | null = null,
 ): string {
   const p = env.payload as Record<string, unknown>;
   switch (env.type) {
@@ -122,17 +176,25 @@ function eventText(
     case 'conversation_message': {
       const from = agentName(agents, p.from_agent_id);
       const to = agentName(agents, p.to_agent_id);
-      return `${from} → ${to}: ${typeof p.message === 'string' ? p.message : ''}`;
+      return `${from} 对 ${to} 说：${typeof p.message === 'string' ? p.message : ''}`;
     }
     case 'conversation_started': {
-      const a = agentName(agents, p.a);
-      const b = agentName(agents, p.b);
-      return `${a} 与 ${b} 开始交谈`;
+      const pair = toAgentPair(p);
+      if (!pair) return '';
+      const a = agentName(agents, pair[0]);
+      const b = agentName(agents, pair[1]);
+      return `${a} 和 ${b} 开始交谈`;
     }
     case 'conversation_ended': {
-      const a = agentName(agents, p.a);
-      const b = agentName(agents, p.b);
-      return `${a} 与 ${b} 结束交谈`;
+      // conversation_ended carries no agent ids; the pair is looked up from
+      // the active-conversation registry before it is removed.
+      const pair = endedPair ?? toAgentPair(p);
+      if (!pair) return '';
+      const a = agentName(agents, pair[0]);
+      const b = agentName(agents, pair[1]);
+      const label =
+        typeof p.reason === 'string' ? (CONVERSATION_END_REASONS[p.reason] ?? '') : '';
+      return label ? `${a} 和 ${b} 的对话结束（${label}）` : `${a} 和 ${b} 的对话结束`;
     }
     case 'agent_talked': {
       const from = agentName(agents, p.from_agent_id);
@@ -168,6 +230,14 @@ export const useWorldStore = defineStore('world', {
     events: [] as WorldEventItem[],
     latestSequence: 0,
     agentColors: {} as Record<string, string>,
+    /** Agent the user clicked on the canvas (null = no selection). */
+    selectedAgentId: null as string | null,
+    /** Conversation history cache for the selected agent (newest first). */
+    conversations: [] as ConversationSummary[],
+    /** Conversations currently in progress, by conversation id. */
+    activeConversations: {} as Record<string, { agent_ids: [string, string] }>,
+    /** Live speech bubbles (one per agent, newest wins; capped). */
+    bubbles: [] as BubbleItem[],
   }),
   getters: {
     agentById: (state) => (agentId: string): AgentSnapshot | undefined =>
@@ -185,6 +255,17 @@ export const useWorldStore = defineStore('world', {
     dayLabel(state): string {
       return `第 ${state.day} 天`;
     },
+    /** Other participant of an active conversation involving the agent (if any). */
+    activePartnerOf: (state) => (agentId: string): string | null => {
+      for (const conv of Object.values(state.activeConversations)) {
+        if (conv.agent_ids[0] === agentId) return conv.agent_ids[1];
+        if (conv.agent_ids[1] === agentId) return conv.agent_ids[0];
+      }
+      return null;
+    },
+    /** Newest live bubble for an agent (one per agent, so the only one). */
+    bubbleForAgent: (state) => (agentId: string): BubbleItem | null =>
+      state.bubbles.find((b) => b.agent_id === agentId) ?? null,
   },
   actions: {
     async checkHealth(): Promise<void> {
@@ -216,6 +297,10 @@ export const useWorldStore = defineStore('world', {
       this.latestSequence = payload.latest_sequence;
       // A snapshot supersedes any incremental history accumulated so far.
       this.events = [];
+      // Active conversations and bubbles are incremental-only; a resync
+      // loses them until fresh events arrive (the REST cache survives).
+      this.activeConversations = {};
+      this.bubbles = [];
       this.ensureAgentColors(this.agents);
     },
 
@@ -225,6 +310,13 @@ export const useWorldStore = defineStore('world', {
       this.latestSequence = env.sequence;
       this.worldTime = env.world_time;
       const p = env.payload as Record<string, unknown>;
+
+      // conversation_ended carries no agent ids; capture the pair from the
+      // active registry before the switch removes it (for the event text).
+      const endedPair =
+        env.type === 'conversation_ended' && typeof p.conversation_id === 'string'
+          ? (this.activeConversations[p.conversation_id]?.agent_ids ?? null)
+          : null;
 
       switch (env.type) {
         case 'world_time_changed':
@@ -254,11 +346,51 @@ export const useWorldStore = defineStore('world', {
         case 'agent_wait_completed':
           this.completeAgentWait(p);
           break;
+        case 'conversation_started': {
+          const convId = typeof p.conversation_id === 'string' ? p.conversation_id : '';
+          const pair = toAgentPair(p);
+          if (convId && pair) {
+            this.activeConversations[convId] = { agent_ids: pair };
+            this.ensureConversationInCache(convId, pair, env.world_time);
+          }
+          break;
+        }
+        case 'conversation_message': {
+          const convId = typeof p.conversation_id === 'string' ? p.conversation_id : '';
+          const from = typeof p.from_agent_id === 'string' ? p.from_agent_id : '';
+          const to = typeof p.to_agent_id === 'string' ? p.to_agent_id : '';
+          const text = typeof p.message === 'string' ? p.message : '';
+          if (convId && from && text) {
+            this.pushBubble({ conversation_id: convId, agent_id: from, text, at_seq: env.sequence });
+            if (this.selectedAgentId && (from === this.selectedAgentId || to === this.selectedAgentId)) {
+              this.appendConversationMessage(convId, {
+                from_agent_id: from,
+                to_agent_id: to,
+                message: text,
+                intent: typeof p.intent === 'string' ? p.intent : '',
+                sent_at: env.world_time,
+              });
+            }
+          }
+          break;
+        }
+        case 'conversation_ended': {
+          const convId = typeof p.conversation_id === 'string' ? p.conversation_id : '';
+          if (convId) {
+            delete this.activeConversations[convId];
+            this.endConversationInCache(
+              convId,
+              env.world_time,
+              typeof p.reason === 'string' ? p.reason : '',
+            );
+          }
+          break;
+        }
         default:
           break;
       }
 
-      const text = eventText(env, this.agents, this.locations);
+      const text = eventText(env, this.agents, this.locations, endedPair);
       if (text) {
         this.events.unshift({
           sequence: env.sequence,
@@ -348,6 +480,90 @@ export const useWorldStore = defineStore('world', {
     async submitAgentAction(agentId: string, action: AgentActionRequest): Promise<ActionResponse> {
       if (!this.worldId) throw new Error('未连接世界');
       return postAgentAction(this.worldId, agentId, action);
+    },
+
+    /** Select an agent (opens the conversation panel) or clear the selection. */
+    selectAgent(agentId: string | null): void {
+      if (agentId === this.selectedAgentId) return;
+      this.selectedAgentId = agentId;
+      this.conversations = [];
+      if (agentId) void this.fetchConversations(agentId);
+    },
+
+    /** (Re)fetch conversation history for an agent into the cache (if still selected). */
+    async fetchConversations(agentId: string): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const list = await getConversations(this.worldId, agentId);
+        if (this.selectedAgentId === agentId) this.conversations = list;
+      } catch {
+        // Selection stays; the panel shows its empty state until a refetch.
+      }
+    },
+
+    /** Remove one bubble (used by the overlay for manual dismissal). */
+    dismissBubble(id: string): void {
+      const idx = this.bubbles.findIndex((b) => b.id === id);
+      if (idx >= 0) this.bubbles.splice(idx, 1);
+    },
+
+    /** Drop bubbles older than BUBBLE_TTL_MS (called every animation frame). */
+    pruneBubbles(now: number = Date.now()): void {
+      if (this.bubbles.length === 0) return;
+      const keep = this.bubbles.filter((b) => now - b.at_ms < BUBBLE_TTL_MS);
+      if (keep.length !== this.bubbles.length) this.bubbles = keep;
+    },
+
+    /** Register a bubble for one agent; newest message replaces the previous. */
+    pushBubble(b: { conversation_id: string; agent_id: string; text: string; at_seq: number }): void {
+      const prevIdx = this.bubbles.findIndex((x) => x.agent_id === b.agent_id);
+      if (prevIdx >= 0) this.bubbles.splice(prevIdx, 1);
+      this.bubbles.push({ ...b, id: `${b.conversation_id}:${b.agent_id}`, at_ms: Date.now() });
+      if (this.bubbles.length > BUBBLE_CAP) {
+        this.bubbles.splice(0, this.bubbles.length - BUBBLE_CAP);
+      }
+    },
+
+    /** Insert a live (in-progress) conversation into the selected agent's cache. */
+    ensureConversationInCache(convId: string, pair: [string, string], startedAt: number): void {
+      const mine = this.selectedAgentId;
+      if (!mine || (pair[0] !== mine && pair[1] !== mine)) return;
+      if (this.conversations.some((c) => c.conversation_id === convId)) return;
+      this.conversations.unshift({
+        conversation_id: convId,
+        other_agent_id: pair[0] === mine ? pair[1] : pair[0],
+        started_at: startedAt,
+        ended_at: null,
+        end_reason: null,
+        messages: [],
+      });
+    },
+
+    /** Append a live message to the selected agent's cached conversation. */
+    appendConversationMessage(convId: string, msg: ConversationMessage): void {
+      const mine = this.selectedAgentId;
+      if (!mine || (msg.from_agent_id !== mine && msg.to_agent_id !== mine)) return;
+      let conv = this.conversations.find((c) => c.conversation_id === convId);
+      if (!conv) {
+        conv = {
+          conversation_id: convId,
+          other_agent_id: msg.from_agent_id === mine ? msg.to_agent_id : msg.from_agent_id,
+          started_at: null,
+          ended_at: null,
+          end_reason: null,
+          messages: [],
+        };
+        this.conversations.unshift(conv);
+      }
+      conv.messages.push(msg);
+    },
+
+    /** Mark a cached conversation as ended (badge + reason, live update). */
+    endConversationInCache(convId: string, endedAt: number, reason: string): void {
+      const conv = this.conversations.find((c) => c.conversation_id === convId);
+      if (!conv) return;
+      conv.ended_at = endedAt;
+      conv.end_reason = reason || null;
     },
 
     patchAgent(agentId: string, patch: Record<string, unknown> | undefined): void {
