@@ -175,6 +175,11 @@ export type WorldEventType =
   | 'memory_created'
   | 'relationship_changed'
   | 'daily_reflection'
+  | 'god_action_applied'
+  | 'weather_changed'
+  | 'god_teleport'
+  | 'item_spawned'
+  | 'store_stock_changed'
   | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */
@@ -202,6 +207,110 @@ export interface ActionResponse {
   success: boolean;
   event?: WorldEventEnvelope;
   reason?: string;
+}
+
+/** Identity card of an agent (GET .../agents/{agent_id} → identity). */
+export interface AgentIdentity {
+  id: string;
+  name: string;
+  age: number;
+  occupation: string;
+  background: string;
+  values: string[];
+  long_term_goals: string[];
+  speaking_style: string;
+  personality: Record<string, unknown>;
+}
+
+/** Full agent detail (GET .../agents/{agent_id}): identity card + live state. */
+export interface AgentDetail {
+  agent_id: string;
+  name: string;
+  identity: AgentIdentity;
+  col: number;
+  row: number;
+  location_id: string | null;
+  hunger: number;
+  energy: number;
+  money: number;
+  inventory: InventoryItem[];
+  action: AgentAction;
+  is_deciding: boolean;
+  consecutive_failures: number;
+}
+
+/** One LLM decision record (GET .../decisions entry, recent first). */
+export interface DecisionRecord {
+  run_id: string;
+  agent_id: string;
+  world_id: string;
+  world_time: number;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  latency_ms: number;
+  tool_name: string;
+  tool_arguments: Record<string, unknown>;
+  tool_result: { success?: boolean; reason?: string; event?: WorldEventEnvelope };
+  success: boolean;
+  error_type: string | null;
+  trace_id: string;
+  raw_summary: string;
+  created_at: string | null;
+}
+
+/** Body of POST .../god-actions. */
+export interface GodActionRequest {
+  command_type: string;
+  target_id: string | null;
+  parameters: Record<string, unknown>;
+  reason: string;
+}
+
+/** Response of POST .../god-actions. */
+export interface GodActionResult {
+  command_id: string;
+  success: boolean;
+  result: object | null;
+  events: WorldEventEnvelope[];
+}
+
+/** Payload of the WS god_action_applied event. */
+export interface GodActionAppliedPayload {
+  command_id: string;
+  command_type: string;
+  target_id: string | null;
+  parameters: Record<string, unknown>;
+  reason: string;
+  result: object | null;
+}
+
+/** Payload of the WS weather_changed event. */
+export interface WeatherChangedPayload {
+  weather: string;
+}
+
+/** Payload of the WS god_teleport event. */
+export interface GodTeleportPayload {
+  agent_id: string;
+  to: Cell;
+  location_id: string;
+  reason: string;
+}
+
+/** Payload of the WS item_spawned event. */
+export interface ItemSpawnedPayload {
+  agent_id: string;
+  item_id: string;
+  item_name: string;
+  quantity: number;
+}
+
+/** Payload of the WS store_stock_changed event. */
+export interface StoreStockChangedPayload {
+  store_id: string;
+  item_id: string;
+  quantity: number;
 }
 
 /** Readable event line pushed into the store's event stream. */

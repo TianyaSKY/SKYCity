@@ -69,11 +69,22 @@
 | `relationship_changed` | `{source_agent_id, target_agent_id, deltas: {familiarity, trust, affection, resentment, debt}, values: {...}}` | 关系数值变化（系统计算，M6；deltas 为本次增量，values 为钳制后的新值） |
 | `daily_reflection` | `{agent_id, summary}` | 每日反思完成（23:30 游戏时间，M6） |
 
+| `god_action_applied` | `{command_id, command_type, target_id, parameters, reason, result}` | 神谕指令已应用（M7；每个 god-action 的第一个事件，target_id 为受影响的智能体，无目标时为 null） |
+| `weather_changed` | `{weather}` | 天气变化（clear/cloudy/rain/snow，M7） |
+| `god_teleport` | `{agent_id, to: [col,row], location_id, reason}` | 神谕传送（M7；取消当前行动并落地到地点锚点格） |
+| `item_spawned` | `{agent_id, item_id, item_name, quantity}` | 神谕赐物（M7；仅 god spawn，与 `inventory_changed` 同发） |
+| `store_stock_changed` | `{store_id, item_id, quantity}` | 商店库存被神谕设定为绝对值（M7） |
+
 （M5 追加：`work_started` / `work_completed` / `item_purchased` / `item_sold` /
 `item_used` / `money_changed` / `inventory_changed` / `needs_changed` /
 `store_restocked`；M6 追加：`memory_created` /
 `relationship_changed` / `daily_reflection`；M7 追加：`god_action_applied` /
-`weather_changed`；M9 追加：`world_saved` / `world_restored`。）
+`weather_changed` / `god_teleport` / `item_spawned` / `store_stock_changed`；
+M9 追加：`world_saved` / `world_restored`。）
+
+说明（M7）：神谕发钱/扣款复用 `money_changed`（`{agent_id, amount, balance,
+reason}`，amount 带符号），公开事件复用 `world_event_created`（无
+`agent_id` 即公开：所有智能体各记一条 episodic 0.6 记忆），不新增事件类型。
 
 ## 4. 事件持久化
 

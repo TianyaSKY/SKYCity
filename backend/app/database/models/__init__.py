@@ -6,6 +6,7 @@ autogenerate and create_all see the full schema.
 
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
+from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Employment, Job
@@ -26,6 +27,7 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "Employment",
+    "GodAction",
     "Inventory",
     "Item",
     "Job",

@@ -12,13 +12,16 @@ import { defineStore } from 'pinia';
 import {
   checkHealth,
   createWorld,
+  getAgentDetail,
   getConversations,
+  getDecisions,
   getMemories,
   getRelationships,
   getSnapshot,
   listWorlds,
   pauseWorld,
   postAgentAction,
+  postGodAction,
   resumeWorld,
   setSpeed,
 } from '../api/client';
@@ -28,10 +31,14 @@ import type { WorldSocketStatus } from '../websocket/client';
 import type { MapLocation } from '../types/tiled';
 import type {
   ActionResponse,
+  AgentDetail,
   AgentSnapshot,
   Cell,
   ConversationMessage,
   ConversationSummary,
+  DecisionRecord,
+  GodActionResult,
+  GodActionRequest,
   InventoryItem,
   MemoryItem,
   RelationshipItem,
@@ -105,6 +112,31 @@ export const CONVERSATION_END_REASONS: Record<string, string> = {
   duplicate: '内容重复',
   cooldown_expired: '冷却结束',
   both_busy: '双方忙碌',
+};
+
+/** Map backend decision tool names onto Chinese labels. */
+export const TOOL_LABELS: Record<string, string> = {
+  move: '移动',
+  wait: '等待',
+  talk: '对话',
+  work: '工作',
+  buy_item: '购买',
+  sell_item: '出售',
+  use_item: '使用',
+};
+
+/** Map backend god-action command types onto Chinese labels. */
+export const GOD_COMMAND_LABELS: Record<string, string> = {
+  pause: '暂停世界',
+  resume: '恢复世界',
+  set_speed: '调速',
+  change_weather: '改变天气',
+  grant_money: '发放金钱',
+  deduct_money: '扣除金钱',
+  spawn_item: '生成物品',
+  teleport: '传送',
+  public_event: '公共事件',
+  change_store_stock: '修改库存',
 };
 
 /** A live speech bubble; at most one per agent (newest wins). */
@@ -381,6 +413,37 @@ function eventText(
       const summary = typeof p.summary === 'string' ? truncate(p.summary, 30) : '';
       return `${name} 的今日反思：${summary}`;
     }
+    case 'god_action_applied': {
+      const commandType = typeof p.command_type === 'string' ? p.command_type : '';
+      const command = GOD_COMMAND_LABELS[commandType] ?? commandType;
+      const targetId = typeof p.target_id === 'string' ? p.target_id : '';
+      const target = targetId ? agentName(agents, targetId) : '';
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `上帝干预：${command}${target ? ` ${target}` : ''}（${reason}）`;
+    }
+    case 'weather_changed': {
+      const label = typeof p.weather === 'string' ? (WEATHER_LABELS[p.weather] ?? '') : '';
+      return label ? `天气变为 ${label}` : '天气发生了变化';
+    }
+    case 'god_teleport': {
+      const name = agentName(agents, p.agent_id);
+      const place =
+        locationNameById(locations, p.location_id) ||
+        locationNameAt(locations, p.to) ||
+        (typeof p.location_id === 'string' ? p.location_id : '');
+      return `${name} 被传送到了 ${place}`;
+    }
+    case 'item_spawned': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+      return `${name} 获得了 ${item}×${qty}（上帝）`;
+    }
+    case 'store_stock_changed': {
+      const item = typeof p.item_id === 'string' ? p.item_id : '';
+      const qty = typeof p.quantity === 'number' ? p.quantity : 0;
+      return `商店库存：${item} → ${qty}`;
+    }
     // inventory_changed / needs_changed carry no stream text; they only sync
     // agent state in applyEvent.
     case 'inventory_changed':
@@ -424,6 +487,10 @@ export const useWorldStore = defineStore('world', {
     memories: [] as MemoryItem[],
     /** Relationship cache for the selected agent (REST-backed). */
     relationships: [] as RelationshipItem[],
+    /** Full REST detail (identity card + state) for the selected agent. */
+    agentDetail: null as AgentDetail | null,
+    /** LLM decision history for the selected agent (REST-backed, recent first). */
+    recentDecisions: [] as DecisionRecord[],
     /** Conversations currently in progress, by conversation id. */
     activeConversations: {} as Record<string, { agent_ids: [string, string] }>,
     /** Live speech bubbles (one per agent, newest wins; capped). */
@@ -606,6 +673,18 @@ export const useWorldStore = defineStore('world', {
         case 'daily_reflection':
           // Stream text only; reflections are not part of the memory list.
           break;
+        case 'weather_changed':
+          // The dropdown and clock bar read store.weather; keep it in sync.
+          if (typeof p.weather === 'string') this.weather = p.weather;
+          break;
+        case 'god_teleport':
+          // Teleports are instant: snap the agent to the destination so the
+          // map reflects the intervention immediately (idempotent with any
+          // follow-up agent_move/agent_state events).
+          if (typeof p.agent_id === 'string' && Array.isArray(p.to) && typeof p.to[0] === 'number' && typeof p.to[1] === 'number') {
+            this.teleportAgent(p.agent_id, [p.to[0], p.to[1]], typeof p.location_id === 'string' ? p.location_id : null);
+          }
+          break;
         default:
           break;
       }
@@ -709,10 +788,14 @@ export const useWorldStore = defineStore('world', {
       this.conversations = [];
       this.memories = [];
       this.relationships = [];
+      this.agentDetail = null;
+      this.recentDecisions = [];
       if (agentId) {
         void this.fetchConversations(agentId);
         void this.fetchMemories(agentId);
         void this.fetchRelationships(agentId);
+        void this.fetchAgentDetail(agentId);
+        void this.fetchDecisions(agentId);
       }
     },
 
@@ -747,6 +830,42 @@ export const useWorldStore = defineStore('world', {
       } catch {
         // Selection stays; the panel shows its empty state until a refetch.
       }
+    },
+
+    /** (Re)fetch the full agent detail (identity card + live state, if still selected). */
+    async fetchAgentDetail(agentId: string): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const detail = await getAgentDetail(this.worldId, agentId);
+        if (this.selectedAgentId === agentId) this.agentDetail = detail;
+      } catch {
+        // Selection stays; the panel shows its loading/empty state.
+      }
+    },
+
+    /** (Re)fetch recent LLM decisions for an agent into the cache (if still selected). */
+    async fetchDecisions(agentId: string, limit = 10): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const list = await getDecisions(this.worldId, agentId, limit);
+        if (this.selectedAgentId === agentId) this.recentDecisions = list;
+      } catch {
+        // Selection stays; the panel shows its empty state until a refetch.
+      }
+    },
+
+    /**
+     * Submit a god intervention command. The returned events are applied
+     * locally so the UI reflects the intervention immediately; WS delivery
+     * of the same envelopes is deduped by sequence.
+     */
+    async submitGodAction(body: GodActionRequest): Promise<GodActionResult> {
+      if (!this.worldId) throw new Error('未连接世界');
+      const result = await postGodAction(this.worldId, body);
+      for (const env of result.events ?? []) {
+        this.applyEvent(env);
+      }
+      return result;
     },
 
     /** Remove one bubble (used by the overlay for manual dismissal). */
@@ -854,6 +973,16 @@ export const useWorldStore = defineStore('world', {
       const agent = this.agents.find((a) => a.agent_id === agentId);
       if (!agent || typeof balance !== 'number') return;
       agent.money = balance;
+    },
+
+    /** Snap an agent to a cell instantly (god teleport); clears any in-flight action. */
+    teleportAgent(agentId: string, cell: Cell, locationId: string | null): void {
+      const agent = this.agents.find((a) => a.agent_id === agentId);
+      if (!agent) return;
+      agent.col = cell[0];
+      agent.row = cell[1];
+      agent.location_id = locationId ?? locationIdAt(this.locations, cell);
+      agent.action = null;
     },
 
     startAgentMove(

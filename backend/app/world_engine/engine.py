@@ -86,6 +86,9 @@ class WorldEngine:
         # EconomyService (M5) is wired after construction; the work/buy/sell/
         # use tools and the "work_completed" scheduler handler reach it here.
         self.economy_service: Any = None
+        # GodActionService (M7) is wired after construction; the god-actions
+        # REST endpoint reaches it here.
+        self.god_action_service: Any = None
         # M6: memory + relationship services are self-contained (engine +
         # session factory), so they are constructed here and active in every
         # engine — memory recording and relationship deltas are automatic.
@@ -863,6 +866,40 @@ class WorldEngine:
                 {"item_id": row.item_id, "quantity": row.quantity} for row in inventory_rows
             ],
         )
+
+    def agent_detail(self, world_id: str, agent_id: str) -> dict[str, Any] | None:
+        """M7: one agent's detail — identity card + state + inventory + action.
+
+        Contract shape: {agent_id, name, identity: {...}, col, row, location_id,
+        hunger, energy, money, inventory, action, is_deciding,
+        consecutive_failures}. Returns None when the world or agent is missing.
+        """
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return None
+        session = self._session_factory()
+        try:
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if agent is None:
+                return None
+            snapshot = self._agent_snapshot(session, agent, runtime.clock.world_time)
+            detail = snapshot.model_dump(by_alias=True)
+            detail["identity"] = {
+                "id": agent.agent_id,
+                "name": agent.name,
+                "age": agent.age,
+                "occupation": agent.occupation,
+                "background": agent.background,
+                "values": agent.values or [],
+                "long_term_goals": agent.long_term_goals or [],
+                "speaking_style": agent.speaking_style,
+                "personality": agent.personality or {},
+            }
+            detail["is_deciding"] = agent.is_deciding
+            detail["consecutive_failures"] = agent.consecutive_failures
+            return detail
+        finally:
+            session.close()
 
     def _location_snapshot(self, loc: WorldLocation, world_time: int) -> LocationSnapshot:
         return LocationSnapshot(

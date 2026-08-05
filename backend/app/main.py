@@ -20,6 +20,7 @@ from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
 from app.services.conversation_service import ConversationService
 from app.services.economy_service import EconomyService
+from app.services.god_action_service import GodActionService
 from app.services.world_config_loader import WorldConfigError, load_world_config
 from app.world_engine.engine import WorldEngine
 
@@ -64,11 +65,14 @@ async def lifespan(app: FastAPI):
     engine.decision_service = decision_service
     conversation_service = ConversationService(engine, SessionLocal)
     engine.conversation_service = conversation_service
+    god_service = GodActionService(engine, SessionLocal)
+    engine.god_action_service = god_service
     app.state.engine = engine
     app.state.action_service = service
     app.state.economy_service = economy_service
     app.state.decision_service = decision_service
     app.state.conversation_service = conversation_service
+    app.state.god_action_service = god_service
 
     await engine.start()
     engine.load_existing()

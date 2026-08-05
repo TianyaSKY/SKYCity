@@ -1,9 +1,41 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { useWorldStore } from '../stores/worldStore';
 
 const store = useWorldStore();
 
 const SPEEDS = [1, 2, 5, 10] as const;
+
+const WEATHER_OPTIONS = [
+  { value: 'clear', label: '晴' },
+  { value: 'cloudy', label: '阴' },
+  { value: 'rain', label: '雨' },
+  { value: 'snow', label: '雪' },
+] as const;
+
+const weatherPending = ref(false);
+
+/** Post a change_weather god action; the select re-syncs from store.weather. */
+async function onWeatherChange(e: Event): Promise<void> {
+  const select = e.target as HTMLSelectElement;
+  const value = select.value;
+  if (value === store.weather || weatherPending.value) return;
+  weatherPending.value = true;
+  try {
+    await store.submitGodAction({
+      command_type: 'change_weather',
+      target_id: null,
+      parameters: { weather: value },
+      reason: '玩家干预',
+    });
+  } catch {
+    // Restore the DOM selection: Vue skips re-patching :value when the
+    // bound value is unchanged, so the user's pick would stick otherwise.
+    select.value = store.weather;
+  } finally {
+    weatherPending.value = false;
+  }
+}
 
 const connLabel = (() => ({ connected: '已连接', connecting: '连接中', disconnected: '未连接' }))();
 const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
@@ -15,7 +47,16 @@ const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
     <span class="chip">世界 #{{ worldShort() }}</span>
     <span class="time">{{ store.timeLabel }}</span>
     <span class="day">{{ store.dayLabel }}</span>
-    <span class="weather">{{ store.weatherLabel }}</span>
+    <label class="weather" title="改变天气">
+      <select
+        class="weather-select"
+        :value="store.weather"
+        :disabled="store.connection !== 'connected' || weatherPending"
+        @change="onWeatherChange"
+      >
+        <option v-for="w in WEATHER_OPTIONS" :key="w.value" :value="w.value">{{ w.label }}</option>
+      </select>
+    </label>
     <span class="spacer" />
     <div class="speed-group">
       <button
@@ -87,9 +128,30 @@ const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
   font-weight: 600;
   color: #ffe082;
 }
-.day,
-.weather {
+.day {
   opacity: 0.85;
+}
+.weather {
+  opacity: 0.9;
+  display: inline-flex;
+}
+.weather-select {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cde8d5;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+}
+.weather-select option {
+  background: #0d1a12;
+  color: #cde8d5;
+}
+.weather-select:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .spacer {
   flex: 1;

@@ -17,6 +17,7 @@ from app.database.models import (
     Conversation,
     ConversationMessage,
     Employment,
+    GodAction,
     Inventory,
     Item,
     Job,
@@ -54,6 +55,8 @@ def _clean_db(_database_schema) -> None:
             LLMRun,
             WorldEvent,
             ScheduledAction,
+            # M7 god action audit children.
+            GodAction,
             # M6 memory/relationship children.
             Memory,
             Relationship,

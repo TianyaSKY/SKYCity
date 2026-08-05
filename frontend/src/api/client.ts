@@ -7,7 +7,11 @@
 
 import type {
   ActionResponse,
+  AgentDetail,
   ConversationSummary,
+  DecisionRecord,
+  GodActionResult,
+  GodActionRequest,
   MemoryItem,
   RelationshipItem,
   WorldListItem,
@@ -128,6 +132,21 @@ export function getRelationships(worldId: string, agentId: string): Promise<Rela
   );
 }
 
+/** Fetch one agent's full detail: identity card plus live state. */
+export function getAgentDetail(worldId: string, agentId: string): Promise<AgentDetail> {
+  return requestJson<AgentDetail>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}`,
+  );
+}
+
+/** Fetch one agent's LLM decision history, recent first (limit <= 0 = server default). */
+export function getDecisions(worldId: string, agentId: string, limit = 10): Promise<DecisionRecord[]> {
+  const query = limit > 0 ? `?limit=${limit}` : '';
+  return requestJson<DecisionRecord[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/decisions${query}`,
+  );
+}
+
 export interface AgentActionRequest {
   action_type: 'move' | 'wait' | 'talk' | string;
   destination_id?: string;
@@ -159,6 +178,47 @@ export async function postAgentAction(
     throw new Error(body?.reason ?? `Action failed: ${res.status} ${res.statusText}`);
   }
   return body ?? { success: true };
+}
+
+/**
+ * Submit a god intervention command (pause/resume/speed/weather/money/
+ * items/teleport/public events/store stock). Rejects with a
+ * GodActionError carrying the server detail on 400/404/5xx; resolves with
+ * the command verdict on 200 (success may still be false when the world
+ * rejected the command).
+ */
+export async function postGodAction(worldId: string, body: GodActionRequest): Promise<GodActionResult> {
+  const res = await fetch(`${baseUrl()}/api/worlds/${encodeURIComponent(worldId)}/god-actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let parsed: GodActionResult | null = null;
+  try {
+    parsed = (await res.json()) as GodActionResult;
+  } catch {
+    // Non-JSON body; keep the status text as the detail.
+  }
+  if (!res.ok) {
+    const errBody = parsed as unknown as { detail?: string; reason?: string; error?: string } | null;
+    const detail =
+      errBody?.reason ??
+      errBody?.error ??
+      (typeof errBody?.detail === 'string' ? errBody.detail : `${res.status} ${res.statusText}`);
+    throw new GodActionError(res.status, detail);
+  }
+  return parsed ?? { command_id: '', success: false, result: null, events: [] };
+}
+
+/** Error raised when the god-actions endpoint rejects a command (HTTP 400/404/5xx). */
+export class GodActionError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'GodActionError';
+    this.status = status;
+  }
 }
 
 /** Error raised when the world engine rejects an agent action (HTTP 409). */

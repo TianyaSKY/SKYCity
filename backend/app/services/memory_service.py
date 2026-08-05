@@ -47,6 +47,16 @@ REFLECTION_MINUTE_OF_DAY = 23 * 60 + 30  # 1410
 # Sentinel agent_id on the per-world recurring reflection action.
 REFLECTION_AGENT_ID = "__daily_reflection__"
 
+# M7: memory text templates for god_action_applied, keyed by command type.
+# The result dict of the god action is formatted into the template.
+_GOD_MEMORY_TEXTS: dict[str, str] = {
+    "grant_money": "获得 {amount} 金币",
+    "deduct_money": "被扣除 {actual} 金币",
+    "spawn_item": "获得 {item_name}×{quantity}",
+    "teleport": "被传送到 {location_id}",
+    "change_weather": "天气变为 {weather}",
+}
+
 # Retrieval weights (T6-4).
 WEIGHT_ENTITY = 0.35
 WEIGHT_KEYWORD = 0.25
@@ -636,7 +646,21 @@ class MemoryRecorder:
     ) -> None:
         agent_id = payload.get("agent_id")
         text = payload.get("text") or ""
-        if not agent_id or not text:
+        if not text:
+            return
+        if not agent_id:
+            # M7: a public world event (god-created, no agent_id) is witnessed
+            # by every agent in the world — episodic 0.6 each.
+            agents = session.scalars(
+                select(Agent).where(Agent.world_id == envelope.world_id)
+            ).all()
+            for agent in agents:
+                self._memory_service.record(
+                    session=session, world_id=envelope.world_id,
+                    agent_id=agent.agent_id,
+                    memory_type="episodic", text=text, importance=0.6,
+                    entities=[], keywords=[],
+                )
             return
         self._memory_service.record(
             session=session, world_id=envelope.world_id, agent_id=agent_id,
@@ -647,11 +671,23 @@ class MemoryRecorder:
     def _on_god_action(
         self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
-        """M7: god_action_applied targeting the agent (episodic 0.7)."""
-        agent_id = payload.get("agent_id")
+        """M7: god_action_applied targeting the agent (episodic 0.7).
+
+        The god_action_applied payload carries ``target_id`` (the affected
+        agent) per the M7 contract; commands without a target (pause, weather,
+        public events, ...) record nothing here — public events are handled by
+        the world_event_created branch instead.
+        """
+        agent_id = payload.get("agent_id") or payload.get("target_id")
         if not agent_id:
             return
-        text = payload.get("text") or payload.get("action") or "受到神谕影响"
+        command_type = payload.get("command_type") or ""
+        result = payload.get("result") or {}
+        template = _GOD_MEMORY_TEXTS.get(command_type, "受到神谕影响")
+        try:
+            text = template.format(**result)
+        except (KeyError, ValueError, IndexError):  # pragma: no cover - defensive
+            text = "受到神谕影响"
         self._memory_service.record(
             session=session, world_id=envelope.world_id, agent_id=agent_id,
             memory_type="episodic", text=f"神谕：{text}", importance=0.7,

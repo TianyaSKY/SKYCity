@@ -10,6 +10,7 @@ from app.database.models.llm_runs import LLMRun
 from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest, ActionSuccess
+from app.schemas.god_actions import GodActionRequest, GodActionResponse
 from app.schemas.snapshots import (
     AutonomousRequest,
     CreateWorldRequest,
@@ -212,6 +213,31 @@ async def agent_action(
     return JSONResponse(
         content=ActionSuccess(success=True, event=envelope).model_dump()
     )
+
+
+@router.get("/{world_id}/agents/{agent_id}")
+async def get_agent(request: Request, world_id: str, agent_id: str) -> dict:
+    """M7: one agent's detail — identity card, state, inventory, action."""
+    detail = _engine(request).agent_detail(world_id, agent_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="智能体不存在")
+    return detail
+
+
+@router.post("/{world_id}/god-actions", response_model=GodActionResponse)
+async def god_action(
+    request: Request, world_id: str, body: GodActionRequest
+) -> GodActionResponse:
+    """M7: apply one god intervention — audit row + events + WS push."""
+    engine = _engine(request)
+    service = engine.god_action_service
+    if service is None:
+        raise HTTPException(status_code=503, detail="神谕服务未就绪")
+    result = service.apply(
+        world_id, body.command_type, body.target_id, body.parameters, body.reason
+    )
+    await engine.flush_pending_now(world_id)
+    return GodActionResponse(**result)
 
 
 @router.get("/{world_id}/events")
