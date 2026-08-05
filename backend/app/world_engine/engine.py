@@ -91,6 +91,9 @@ class WorldEngine:
         # GodActionService (M7) is wired after construction; the god-actions
         # REST endpoint reaches it here.
         self.god_action_service: Any = None
+        # StockService (M10) is wired after construction; trading tools, the
+        # stocks REST endpoint and the hourly/daily market ticks reach it here.
+        self.stock_service: Any = None
         # M6: memory + relationship services are self-contained (engine +
         # session factory), so they are constructed here and active in every
         # engine — memory recording and relationship deltas are automatic.
@@ -290,6 +293,16 @@ class WorldEngine:
                     envelope.type,
                     envelope.world_id,
                 )
+        # M10: 经营事件 → 股价 (business events bump the listed company's price).
+        if self.stock_service is not None:
+            try:
+                self.stock_service.on_event(session, envelope)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Stock service failed on event {} (world={})",
+                    envelope.type,
+                    envelope.world_id,
+                )
 
     def _maybe_decision_boost(
         self, session: Session, envelope: WorldEventEnvelope
@@ -408,6 +421,49 @@ class WorldEngine:
         """Remove an in-memory runtime (no DB delete in M2)."""
         self._runtimes.pop(world_id, None)
 
+    def delete_world(self, world_id: str) -> bool:
+        """Permanently delete a world and all its state.
+
+        Removes the runtime first (in-flight decision tasks guard on
+        ``get_runtime`` returning None and exit cleanly); the DB row delete
+        cascades to every child table (agents, events, llm_runs, saves, …).
+        Returns False when the world does not exist.
+
+        The cascade runs on a dedicated raw connection with foreign_keys=ON.
+        A pooled session connection must NOT be used: the pragma is
+        per-connection and survives the pool checkout, so ORM sessions that
+        later reuse the connection would enforce FKs and break their flush
+        order (pure-FK mappers insert agents before worlds).
+        """
+        self.delete_runtime(world_id)
+        session = self._session_factory()
+        try:
+            bind = session.get_bind()
+        finally:
+            session.close()
+        raw = bind.raw_connection()
+        try:
+            cursor = raw.cursor()
+            # PRAGMA before any transaction starts (and again after commit,
+            # so the connection returns to the pool with FKs OFF).
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("SELECT 1 FROM worlds WHERE world_id = ?", (world_id,))
+            if cursor.fetchone() is None:
+                raw.rollback()
+                return False
+            cursor.execute("DELETE FROM worlds WHERE world_id = ?", (world_id,))
+            raw.commit()
+            cursor.execute("PRAGMA foreign_keys=OFF")
+            cursor.close()
+            logger.info("Deleted world {}", world_id)
+            return True
+        finally:
+            try:
+                raw.execute("PRAGMA foreign_keys=OFF")
+            except Exception:  # noqa: BLE001 - best-effort reset
+                pass
+            raw.close()
+
     def _next_world_number(self, session: Session) -> int:
         ids = session.scalars(select(World.world_id)).all()
         numbers = [
@@ -496,6 +552,8 @@ class WorldEngine:
                     products_json=job_seed["products"],
                 )
             )
+        if self.stock_service is not None:
+            self.stock_service.seed(session, world_id)
 
     def _load_identity(self, agent_id: str) -> dict[str, Any]:
         if self.world_data_dir is None:
@@ -719,12 +777,38 @@ class WorldEngine:
         if runtime.last_hour is not None and hour != runtime.last_hour:
             self._apply_hourly_needs(session, runtime, world, world_time)
             self._maybe_restock(session, runtime, world, world_time)
+            self._tick_stock_prices(session, runtime, world, world_time)
             # M8: daily counters reset at the day boundary (midnight crossing).
             day = world_time // 1440
             if runtime.last_day is not None and day != runtime.last_day:
+                # M10: dividends settle before the daily counters reset (same
+                # transaction, same commit).
+                self._pay_dividends(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
         runtime.last_day = world_time // 1440
+
+    def _tick_stock_prices(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """M10: hourly market tick (delegates to StockService when wired)."""
+        if self.stock_service is not None:
+            self.stock_service.tick_prices(session, runtime, world, world_time)
+
+    def _pay_dividends(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """M10: daily dividend settlement at 00:00 (delegates when wired)."""
+        if self.stock_service is not None:
+            self.stock_service.pay_dividends(session, runtime, world, world_time)
 
     def _reset_daily_counters(self, session: Session, world_id: str) -> None:
         """M8: zero every agent's daily LLM call/token counters (day change)."""

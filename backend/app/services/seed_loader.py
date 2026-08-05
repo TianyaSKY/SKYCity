@@ -85,3 +85,26 @@ def load_stores(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
             }
         )
     return tuple(stores)
+
+@lru_cache(maxsize=4)
+def load_stocks(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
+    """Stock seeds (M10): listed town companies with base prices.
+
+    Each entry: (stock_id, name, company_id, source, base_price,
+    outstanding_shares). ``source`` is "store" or "job" — it selects which
+    business events move the price (item_purchased vs work_completed).
+    """
+    base = world_data_dir or Path(get_settings().world_data_dir)
+    data = _load_json(base / "stocks" / "stocks.json")
+    stocks = tuple(
+        {
+            "stock_id": str(entry["stock_id"]),
+            "name": str(entry.get("name") or entry["stock_id"]),
+            "company_id": str(entry.get("company_id") or ""),
+            "source": str(entry.get("source") or "store"),
+            "base_price": int(entry.get("base_price") or 0),
+            "outstanding_shares": int(entry.get("outstanding_shares") or 0),
+        }
+        for entry in data.get("stocks", [])
+    )
+    return stocks

@@ -23,6 +23,7 @@ from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.locations import WorldLocation
 from app.database.models.stores import StoreProduct
+from app.database.models.stocks import Stock
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.world_engine.engine import WorldEngine
@@ -38,6 +39,7 @@ COMMAND_TYPES = {
     "teleport",
     "public_event",
     "change_store_stock",
+    "change_stock_price",
 }
 VALID_WEATHERS = {"clear", "cloudy", "rain", "snow"}
 VALID_SPEEDS = {1, 2, 5, 10}
@@ -53,6 +55,8 @@ MSG_QUANTITY_REQUIRED = "数量必须大于等于 0"
 MSG_WEATHER_REQUIRED = "天气必须是 clear/cloudy/rain/snow"
 MSG_SPEED_REQUIRED = "倍速必须是 1/2/5/10"
 MSG_TEXT_REQUIRED = "事件文本不能为空"
+MSG_STOCK_PRICE_REQUIRED = "股价必须为正整数"
+MSG_STOCK_MISSING = "股票不存在"
 
 DEFAULT_STORE_ID = "village_shop"
 
@@ -533,3 +537,39 @@ class GodActionService:
             trace_id,
         )
         return result, [announce, stock]
+
+    # ------------------------------------------------------------------ #
+    # Stock price (M10, R18.4)
+    # ------------------------------------------------------------------ #
+
+    def _cmd_change_stock_price(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        price = parameters.get("price")
+        if not isinstance(price, int) or isinstance(price, bool) or price < 1:
+            raise HTTPException(status_code=400, detail=MSG_STOCK_PRICE_REQUIRED)
+        stock_id = str(parameters.get("stock_id") or "")
+        stock = session.get(
+            Stock, {"world_id": world.world_id, "stock_id": stock_id}
+        )
+        if stock is None:
+            raise HTTPException(status_code=404, detail=MSG_STOCK_MISSING)
+        stock.price = price
+        result = {"stock_id": stock.stock_id, "price": price}
+        announce = self._announce(
+            session, runtime, "change_stock_price", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        changed = runtime.event_bus.publish(
+            session, world_time, "stock_price_changed",
+            {
+                "stock_id": stock.stock_id,
+                "stock_name": stock.name,
+                "price": stock.price,
+                "prev_price": stock.prev_price,
+                "day_business": stock.day_business,
+            },
+            trace_id,
+        )
+        return result, [announce, changed]
