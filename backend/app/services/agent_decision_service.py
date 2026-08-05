@@ -39,6 +39,9 @@ MAX_CONSECUTIVE_FAILURES = 5
 
 CLAMPED_WAIT_MINUTES = (1, 240)
 
+# M5 R12: how long an exhausted agent is forced to rest before re-deciding.
+FORCED_REST_MINUTES = 60
+
 
 class DecisionService:
     """Owns one world's agents' decision loop."""
@@ -125,6 +128,38 @@ class DecisionService:
                 session.close()
 
     async def _run_cycle(self, world_id: str, agent_id: str, trace_id: str) -> None:
+        # M5 R12: forced rest — an exhausted agent (energy <= 0) may not move
+        # or work, so skip the LLM entirely and start a recovery wait. No
+        # llm_run row is recorded; the wait_completed handler re-arms the
+        # decision loop at the end of the rest.
+        session = self._session_factory()
+        try:
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if agent is not None and agent.energy <= 0:
+                ok, _, _ = self.engine.action_service.execute_wait(
+                    world_id,
+                    agent_id,
+                    minutes=FORCED_REST_MINUTES,
+                    reason="精力耗尽，强制休息",
+                    trace_id=trace_id,
+                )
+                runtime = self.engine.get_runtime(world_id)
+                if ok and runtime is not None:
+                    runtime.event_bus.publish(
+                        session,
+                        runtime.clock.world_time,
+                        "world_event_created",
+                        {
+                            "agent_id": agent_id,
+                            "text": f"{agent.name} 精力耗尽，正在休息",
+                            "importance": "normal",
+                        },
+                    )
+                    session.commit()
+                return
+        finally:
+            session.close()
+
         context = AgentToolContext(
             world_id=world_id,
             agent_id=agent_id,
@@ -233,6 +268,54 @@ class DecisionService:
                 trace_id=trace_id,
             )
             return ok, envelope, reason
+        # M5 economy tools (work / buy / sell / use) through the rule gate.
+        economy_service = self.engine.economy_service
+        if economy_service is None:
+            return False, None, "经济服务未初始化"
+        if result.tool_name == "work":
+            return economy_service.work_start(
+                world_id,
+                agent_id,
+                arguments.get("job_id"),
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        if result.tool_name == "buy_item":
+            quantity = arguments.get("quantity")
+            if quantity is not None:
+                quantity = max(1, min(int(quantity), 99))
+            else:
+                quantity = 1
+            return economy_service.buy(
+                world_id,
+                agent_id,
+                arguments.get("item_id"),
+                quantity=quantity,
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        if result.tool_name == "sell_item":
+            quantity = arguments.get("quantity")
+            if quantity is not None:
+                quantity = max(1, min(int(quantity), 99))
+            else:
+                quantity = 1
+            return economy_service.sell(
+                world_id,
+                agent_id,
+                arguments.get("item_id"),
+                quantity=quantity,
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        if result.tool_name == "use_item":
+            return economy_service.use_item(
+                world_id,
+                agent_id,
+                arguments.get("item_id"),
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(

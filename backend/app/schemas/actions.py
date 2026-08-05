@@ -14,13 +14,17 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action_type: Literal["move", "wait", "talk"]
+    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item"]
     destination_id: str | None = None
     minutes: int | None = Field(default=None, ge=1)
     reason: str | None = None
     target_agent_id: str | None = None
     message: str | None = Field(default=None, max_length=200)
     intent: Literal["greet", "chat", "ask", "offer", "leave"] | None = None
+    # M5 economy actions.
+    job_id: str | None = None
+    item_id: str | None = None
+    quantity: int | None = Field(default=None, ge=1, le=99)
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "ActionRequest":
@@ -30,6 +34,10 @@ class ActionRequest(BaseModel):
             raise ValueError("talk requires target_agent_id")
         if self.action_type == "talk" and not self.message:
             raise ValueError("talk requires message")
+        if self.action_type == "work" and not self.job_id:
+            raise ValueError("work requires job_id")
+        if self.action_type in ("buy_item", "sell_item", "use_item") and not self.item_id:
+            raise ValueError(f"{self.action_type} requires item_id")
         return self
 
 

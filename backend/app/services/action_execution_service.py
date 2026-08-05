@@ -126,6 +126,36 @@ class ActionExecutionService:
                 trace_id,
             )
             return ok, envelope, reason
+        # M5 economy actions.
+        economy_service = self.engine.economy_service
+        if economy_service is None:
+            return False, None, "经济服务未初始化"
+        if request.action_type == "work":
+            return economy_service.work_start(
+                world_id, agent_id, request.job_id, reason=request.reason, trace_id=trace_id
+            )
+        if request.action_type == "buy_item":
+            return economy_service.buy(
+                world_id,
+                agent_id,
+                request.item_id,
+                quantity=request.quantity if request.quantity is not None else 1,
+                reason=request.reason,
+                trace_id=trace_id,
+            )
+        if request.action_type == "sell_item":
+            return economy_service.sell(
+                world_id,
+                agent_id,
+                request.item_id,
+                quantity=request.quantity if request.quantity is not None else 1,
+                reason=request.reason,
+                trace_id=trace_id,
+            )
+        if request.action_type == "use_item":
+            return economy_service.use_item(
+                world_id, agent_id, request.item_id, reason=request.reason, trace_id=trace_id
+            )
         return self.execute_wait(world_id, agent_id, request.minutes, request.reason, trace_id)
 
     # ------------------------------------------------------------------ #

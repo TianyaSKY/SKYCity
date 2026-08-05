@@ -30,6 +30,7 @@ import type {
   Cell,
   ConversationMessage,
   ConversationSummary,
+  InventoryItem,
   WorldEventEnvelope,
   WorldEventItem,
   WorldEventType,
@@ -110,6 +111,59 @@ export const WEATHER_LABELS: Record<string, string> = {
   windy: '风',
 };
 
+/**
+ * Item catalog labels (mirror of world_data/items/items.json). Economy events
+ * like work_completed products and store_restocked carry only item_id, so the
+ * frontend resolves the Chinese display name from this catalog.
+ */
+export const ITEM_NAMES: Record<string, string> = {
+  bread: '面包',
+  apple: '苹果',
+  milk: '牛奶',
+  vegetable_box: '蔬菜盒',
+  carrot: '胡萝卜',
+  strawberry: '草莓',
+  egg: '鸡蛋',
+  honey: '蜂蜜',
+  fish: '鲜鱼',
+  wheat: '小麦',
+  wood: '木材',
+  fertilizer: '肥料',
+  flower_seed: '花种',
+  rope: '麻绳',
+  cloth: '布料',
+  tool_rake: '耙子',
+  pottery: '陶罐',
+  candle: '蜡烛',
+};
+
+/** Display name of an item: explicit payload name > catalog label > raw id. */
+function itemLabel(itemId: unknown, explicitName?: unknown): string {
+  if (typeof explicitName === 'string' && explicitName) return explicitName;
+  if (typeof itemId === 'string' && ITEM_NAMES[itemId]) return ITEM_NAMES[itemId];
+  return typeof itemId === 'string' ? itemId : '';
+}
+
+/** "小麦×1、鸡蛋×2" from an item list; '' when empty or malformed. */
+function itemsText(list: unknown): string {
+  if (!Array.isArray(list)) return '';
+  const parts: string[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const rec = entry as Record<string, unknown>;
+    if (typeof rec.item_id !== 'string') continue;
+    const qty = typeof rec.quantity === 'number' ? rec.quantity : 1;
+    parts.push(`${itemLabel(rec.item_id)}×${qty}`);
+  }
+  return parts.join('、');
+}
+
+/** Signed money delta for display: +30 / -5; '' when missing. */
+function signedAmount(amount: unknown): string {
+  if (typeof amount !== 'number') return '';
+  return amount >= 0 ? `+${amount}` : String(amount);
+}
+
 function agentName(agents: AgentSnapshot[], agentId?: unknown): string {
   if (typeof agentId !== 'string' || !agentId) return '';
   return agents.find((a) => a.agent_id === agentId)?.name ?? agentId;
@@ -119,6 +173,11 @@ function locationNameAt(locations: WorldLocation[], cell: unknown): string {
   if (!Array.isArray(cell) || typeof cell[0] !== 'number' || typeof cell[1] !== 'number') return '';
   const loc = locations.find((l) => l.col === cell[0] && l.row === cell[1]);
   return loc ? loc.name : `(${cell[0]}, ${cell[1]})`;
+}
+
+function locationNameById(locations: WorldLocation[], locationId: unknown): string {
+  if (typeof locationId !== 'string' || !locationId) return '';
+  return locations.find((l) => l.location_id === locationId)?.name ?? '';
 }
 
 /**
@@ -200,6 +259,68 @@ function eventText(
       const from = agentName(agents, p.from_agent_id);
       return `${from}: ${typeof p.message === 'string' ? p.message : ''}`;
     }
+    case 'work_started': {
+      const name = agentName(agents, p.agent_id);
+      const job = typeof p.job_name === 'string' ? p.job_name : '工作';
+      const mins = typeof p.duration_minutes === 'number' ? p.duration_minutes : '?';
+      return `${name} 开始工作（${job}，${mins} 分钟）`;
+    }
+    case 'work_completed': {
+      const name = agentName(agents, p.agent_id);
+      const wage = typeof p.wage === 'number' ? p.wage : 0;
+      const products = itemsText(p.products);
+      return products
+        ? `${name} 完成工作，获得 ${wage} 金币 与产物：${products}`
+        : `${name} 完成工作，获得 ${wage} 金币`;
+    }
+    case 'item_purchased': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+      const total =
+        typeof p.total === 'number'
+          ? p.total
+          : typeof p.unit_price === 'number'
+            ? p.unit_price * qty
+            : 0;
+      return `${name} 购买 ${item}×${qty}（${total} 金币）`;
+    }
+    case 'item_sold': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+      const total =
+        typeof p.total === 'number'
+          ? p.total
+          : typeof p.unit_price === 'number'
+            ? p.unit_price * qty
+            : 0;
+      return `${name} 出售 ${item}×${qty}（${total} 金币）`;
+    }
+    case 'item_used': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const before = typeof p.hunger_before === 'number' ? p.hunger_before : '?';
+      const after = typeof p.hunger_after === 'number' ? p.hunger_after : '?';
+      return `${name} 使用了 ${item}（饥饿 ${before} → ${after}）`;
+    }
+    case 'money_changed': {
+      const name = agentName(agents, p.agent_id);
+      const amount = signedAmount(p.amount);
+      const balance = typeof p.balance === 'number' ? p.balance : '?';
+      return `${name} 的金币变化 ${amount}（当前 ${balance}）`;
+    }
+    case 'store_restocked': {
+      // store_id doubles as the location id of the shop (village_shop).
+      const storeName = locationNameById(locations, p.store_id) || '杂货店';
+      const restocked = itemsText(p.restocked);
+      return restocked ? `${storeName}补货完成（${restocked}）` : `${storeName}补货完成`;
+    }
+    // inventory_changed / needs_changed carry no stream text; they only sync
+    // agent state in applyEvent.
+    case 'inventory_changed':
+    case 'needs_changed':
+      return '';
     default:
       return `[${env.type}]`;
   }
@@ -292,7 +413,10 @@ export const useWorldStore = defineStore('world', {
       this.paused = payload.world.paused;
       this.weather = payload.world.weather;
       this.day = payload.world.day;
-      this.agents = payload.agents.map((a) => ({ ...a }));
+      this.agents = payload.agents.map((a) => ({
+        ...a,
+        inventory: Array.isArray(a.inventory) ? a.inventory : [],
+      }));
       this.locations = payload.locations.map((l) => ({ ...l }));
       this.latestSequence = payload.latest_sequence;
       // A snapshot supersedes any incremental history accumulated so far.
@@ -386,6 +510,18 @@ export const useWorldStore = defineStore('world', {
           }
           break;
         }
+        case 'money_changed':
+          // The balance is authoritative from the same transaction that spent
+          // or earned it; keep store state in sync even without a follow-up
+          // agent_state_changed.
+          this.patchAgentMoney(p.agent_id as string, p.balance);
+          break;
+        case 'inventory_changed':
+          this.replaceAgentInventory(p.agent_id as string, p.items);
+          break;
+        case 'needs_changed':
+          this.patchAgentNeeds(p.agent_id as string, p.hunger, p.energy);
+          break;
         default:
           break;
       }
@@ -577,6 +713,35 @@ export const useWorldStore = defineStore('world', {
       if (typeof patch.row === 'number') agent.row = patch.row;
       if (typeof patch.location_id === 'string' || patch.location_id === null) agent.location_id = patch.location_id;
       if (patch.action !== undefined) agent.action = patch.action as AgentSnapshot['action'];
+    },
+
+    /** Replace an agent's inventory with the authoritative item list. */
+    replaceAgentInventory(agentId: string, items: unknown): void {
+      const agent = this.agents.find((a) => a.agent_id === agentId);
+      if (!agent || !Array.isArray(items)) return;
+      const cleaned: InventoryItem[] = [];
+      for (const entry of items) {
+        if (!entry || typeof entry !== 'object') continue;
+        const rec = entry as Record<string, unknown>;
+        if (typeof rec.item_id !== 'string' || typeof rec.quantity !== 'number') continue;
+        cleaned.push({ item_id: rec.item_id, quantity: rec.quantity });
+      }
+      agent.inventory = cleaned;
+    },
+
+    /** Sync hunger/energy from a needs_changed event. */
+    patchAgentNeeds(agentId: string, hunger: unknown, energy: unknown): void {
+      const agent = this.agents.find((a) => a.agent_id === agentId);
+      if (!agent) return;
+      if (typeof hunger === 'number') agent.hunger = hunger;
+      if (typeof energy === 'number') agent.energy = energy;
+    },
+
+    /** Sync money from a money_changed event's authoritative balance. */
+    patchAgentMoney(agentId: string, balance: unknown): void {
+      const agent = this.agents.find((a) => a.agent_id === agentId);
+      if (!agent || typeof balance !== 'number') return;
+      agent.money = balance;
     },
 
     startAgentMove(

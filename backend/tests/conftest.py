@@ -16,8 +16,15 @@ from app.database import models  # noqa: E402,F401  (populates Base.metadata)
 from app.database.models import (
     Conversation,
     ConversationMessage,
+    Employment,
+    Inventory,
+    Item,
+    Job,
     LLMRun,
     ScheduledAction,
+    Store,
+    StoreProduct,
+    Transaction,
     WorldEvent,
 )
 from app.database.models.agents import Agent
@@ -45,6 +52,14 @@ def _clean_db(_database_schema) -> None:
             LLMRun,
             WorldEvent,
             ScheduledAction,
+            # M5 economy children (SQLite does not cascade without PRAGMA FK on).
+            Transaction,
+            Inventory,
+            Employment,
+            StoreProduct,
+            Store,
+            Job,
+            Item,
             Agent,
             WorldLocation,
             ConversationMessage,

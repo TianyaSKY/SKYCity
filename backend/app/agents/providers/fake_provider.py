@@ -36,10 +36,26 @@ from app.services.conversation_service import MSG_TARGET_BUSY
 # Per-agent scripts. agent_chenyu deliberately opens with a move to a
 # nonexistent location ("ghost_town") that the world rules reject, then
 # recovers on the next decision (T3-9).
+#
+# agent_linxia (M5) demonstrates the full economy chain: shop -> buy bread
+# x4 (50 - 4*12 = 2 left) -> a fifth buy fails 余额不足 (T3-9 tool-failure
+# adjustment) -> farm work (wage + wheat) -> sell the wheat -> buy bread ->
+# eat it. The script is deterministic; conversation initiation may only
+# interleave when another idle agent is within earshot (accepted).
 DEFAULT_SCRIPTS: dict[str, list[tuple[str, dict[str, Any]]]] = {
     "agent_linxia": [
-        ("move", {"destination_id": "village_shop", "reason": "去商店看看有什么新货"}),
-        ("wait", {"minutes": 30, "reason": "在商店附近歇歇脚"}),
+        ("move", {"destination_id": "village_shop", "reason": "去商店买点吃的"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "买一个面包"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "再买一个面包囤着"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "多囤点面包"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "再买一个"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "最后再来一个"}),  # fails: 余额不足
+        ("move", {"destination_id": "village_farm", "reason": "去农场干活赚钱"}),
+        ("work", {"job_id": "job_farm_field", "reason": "干农活赚点钱"}),
+        ("move", {"destination_id": "village_shop", "reason": "回商店卖小麦、买面包"}),
+        ("sell_item", {"item_id": "wheat", "quantity": 1, "reason": "卖掉收获的小麦"}),
+        ("buy_item", {"item_id": "bread", "quantity": 1, "reason": "买面包充饥"}),
+        ("use_item", {"item_id": "bread", "reason": "饿了，吃面包"}),
     ],
     "agent_zhangming": [
         ("move", {"destination_id": "village_plaza", "reason": "去广场散散步"}),

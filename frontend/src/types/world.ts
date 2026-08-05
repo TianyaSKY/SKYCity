@@ -27,6 +27,12 @@ export interface WaitAction {
 
 export type AgentAction = MoveAction | WaitAction | null;
 
+/** One inventory entry of an agent (item catalog keyed by item_id). */
+export interface InventoryItem {
+  item_id: string;
+  quantity: number;
+}
+
 /** One agent as reported by the world snapshot. */
 export interface AgentSnapshot {
   agent_id: string;
@@ -37,6 +43,7 @@ export interface AgentSnapshot {
   hunger: number;
   energy: number;
   money: number;
+  inventory: InventoryItem[];
   action: AgentAction;
 }
 
@@ -63,6 +70,83 @@ export interface WorldSnapshotPayload {
   latest_sequence: number;
 }
 
+/** Payload of the WS work_started event. */
+export interface WorkStartedPayload {
+  agent_id: string;
+  job_id: string;
+  job_name: string;
+  duration_minutes: number;
+  ends_at: number;
+  reason?: string | null;
+}
+
+/** Payload of the WS work_completed event. */
+export interface WorkCompletedPayload {
+  agent_id: string;
+  job_id: string;
+  job_name: string;
+  wage: number;
+  products: InventoryItem[];
+  energy_spent: number;
+}
+
+/** Payload of the WS item_purchased event. */
+export interface ItemPurchasedPayload {
+  agent_id: string;
+  item_id: string;
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+/** Payload of the WS item_sold event. */
+export interface ItemSoldPayload {
+  agent_id: string;
+  item_id: string;
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+/** Payload of the WS item_used event. */
+export interface ItemUsedPayload {
+  agent_id: string;
+  item_id: string;
+  item_name: string;
+  hunger_before: number;
+  hunger_after: number;
+}
+
+/** Payload of the WS money_changed event. */
+export interface MoneyChangedPayload {
+  agent_id: string;
+  /** Signed delta: positive = gained, negative = spent. */
+  amount: number;
+  balance: number;
+  reason?: string | null;
+}
+
+/** Payload of the WS inventory_changed event. */
+export interface InventoryChangedPayload {
+  agent_id: string;
+  items: InventoryItem[];
+}
+
+/** Payload of the WS needs_changed event. */
+export interface NeedsChangedPayload {
+  agent_id: string;
+  hunger: number;
+  energy: number;
+}
+
+/** Payload of the WS store_restocked event. */
+export interface StoreRestockedPayload {
+  store_id: string;
+  restocked: InventoryItem[];
+}
+
 export type WorldEventType =
   | 'world_snapshot'
   | 'world_time_changed'
@@ -79,6 +163,15 @@ export type WorldEventType =
   | 'conversation_started'
   | 'conversation_ended'
   | 'agent_talked'
+  | 'work_started'
+  | 'work_completed'
+  | 'item_purchased'
+  | 'item_sold'
+  | 'item_used'
+  | 'money_changed'
+  | 'inventory_changed'
+  | 'needs_changed'
+  | 'store_restocked'
   | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */

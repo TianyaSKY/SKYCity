@@ -36,8 +36,18 @@ _TOOL_CONVENTIONS = """工具约定：
   intent 取 greet/chat/ask/offer/leave 之一；对方忙碌或太远时会被拒绝。
   收到【收到的消息】里的消息时应当回复（intent 用 chat/ask/offer）；如果不想继续聊，
   用 intent=leave 礼貌告别并结束对话。
+- work(job_id, reason)：在当前地点开始【可做的事】里列出的工作；完成后结算工资与产物。
+- buy_item(item_id, reason, quantity=1)：在商店购买商品；钱不够会被拒绝。
+- sell_item(item_id, reason, quantity=1)：把背包里的物品卖给商店换钱。
+- use_item(item_id, reason)：食用背包里的食物恢复饥饿（每次消耗 1 件）。
 - 每个工具都必须提供中文 reason（talk 的消息用中文），说明你为什么这么做。
 - 一次决策至多发起一次行动；其余情况请选择 wait 并给出理由。"""
+
+_ECONOMY_GUIDE = """经济规则：
+- 工作是赚钱的主要方式：去工作地点用 work 工具干活，完成后拿到工资和产物。
+- 感到饥饿时去商店用 buy_item 买食物（如面包）；食物要用 use_item 食用才会恢复饥饿。
+- 干活收获的材料（如小麦）可以到商店 sell_item 卖钱。
+- 你无法赊账或借钱：钱不够就先去工作，赚到钱再回来买东西。"""
 
 
 def build_system_prompt(identity: dict) -> str:
@@ -55,4 +65,6 @@ def build_system_prompt(identity: dict) -> str:
     lines.append(_BEHAVIORAL_RULES)
     lines.append("")
     lines.append(_TOOL_CONVENTIONS)
+    lines.append("")
+    lines.append(_ECONOMY_GUIDE)
     return "\n".join(lines)

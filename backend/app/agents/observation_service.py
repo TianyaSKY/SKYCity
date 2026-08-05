@@ -15,8 +15,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
 from app.database.models.conversations import ConversationMessage
+from app.database.models.inventories import Inventory
+from app.database.models.items import Item
+from app.database.models.jobs import Job
 from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.worlds import World
 from app.world_engine.engine import is_location_open
 
@@ -24,6 +28,9 @@ MAX_OBSERVATION_CHARS = 2000
 
 # M4: up to this many unread messages appear in one observation.
 MAX_UNREAD_MESSAGES = 3
+
+# M5: shop products shown per store in 可做的事 (bounded for the 2000 char cap).
+MAX_SHOP_PRODUCTS = 6
 
 _WEATHER_NAMES = {
     "clear": "晴朗",
@@ -137,6 +144,27 @@ def build_observation(
             f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
         )
 
+        # M5: the agent's backpack, ordered by item id.
+        inventory_rows = list(
+            session.scalars(
+                select(Inventory)
+                .where(Inventory.world_id == world_id, Inventory.agent_id == agent_id)
+                .order_by(Inventory.item_id)
+            )
+        )
+        item_names = {
+            item.item_id: item.name
+            for item in session.scalars(select(Item).where(Item.world_id == world_id))
+        }
+        lines.append("【背包】")
+        if inventory_rows:
+            for row in inventory_rows:
+                lines.append(
+                    f"- {item_names.get(row.item_id, row.item_id)}（{row.item_id}）×{row.quantity}"
+                )
+        else:
+            lines.append("（空）")
+
         # M4: unread talk messages for this agent, newest unread first. The
         # line carries the sender's agent id so providers can reply without a
         # name->id lookup; once shown they are marked read (the agent saw them).
@@ -190,6 +218,37 @@ def build_observation(
         lines.append("【可做的事】")
         lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
         lines.append("- wait(minutes, reason): 原地等待 1~240 分钟")
+
+        # M5: shop products at the current store (up to 6) + jobs offered here.
+        if agent.location_id is not None:
+            stores = session.scalars(
+                select(Store).where(
+                    Store.world_id == world_id, Store.location_id == agent.location_id
+                )
+            ).all()
+            for store in stores:
+                products = session.scalars(
+                    select(StoreProduct)
+                    .where(StoreProduct.world_id == world_id, StoreProduct.store_id == store.store_id)
+                    .order_by(StoreProduct.item_id)
+                    .limit(MAX_SHOP_PRODUCTS)
+                ).all()
+                for product in products:
+                    lines.append(
+                        f"- buy_item({product.item_id}): {item_names.get(product.item_id, product.item_id)} "
+                        f"{product.sell_price}金币（库存{product.stock}）"
+                    )
+            jobs = session.scalars(
+                select(Job).where(
+                    Job.world_id == world_id, Job.location_id == agent.location_id
+                )
+            ).all()
+            for job in jobs:
+                lines.append(
+                    f"- work({job.job_id}): {job.name}，{job.duration_minutes}分钟，工资{job.wage}金币"
+                )
+        lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
+        lines.append("- use_item(item_id, reason): 食用背包里的食物恢复饥饿")
 
         lines.append("【上次工具结果】")
         if last_run is None:

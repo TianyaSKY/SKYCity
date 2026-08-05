@@ -35,6 +35,15 @@ class AgentActionWait(BaseModel):
 AgentAction = Union[AgentActionMove, AgentActionWait]
 
 
+class InventoryEntrySnapshot(BaseModel):
+    """One stack in an agent's inventory (M5 contract: item_id + quantity)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str
+    quantity: int
+
+
 class AgentSnapshot(BaseModel):
     """One agent as exposed in snapshots and agent_state_changed events."""
 
@@ -49,3 +58,4 @@ class AgentSnapshot(BaseModel):
     energy: int
     money: int
     action: AgentAction | None = None
+    inventory: list[InventoryEntrySnapshot] = Field(default_factory=list)

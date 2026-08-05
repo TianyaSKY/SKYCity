@@ -24,13 +24,18 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
 from app.database.models.agents import Agent
+from app.database.models.inventories import Inventory
+from app.database.models.items import Item
+from app.database.models.jobs import Job
 from app.database.models.locations import WorldLocation
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.domain.agent import AgentActionMove, AgentActionWait, AgentSnapshot
 from app.domain.event import WorldEventEnvelope
 from app.domain.location import LocationSnapshot
 from app.domain.world import WorldSnapshot, WorldSnapshotPayload
+from app.services.seed_loader import load_items, load_jobs, load_stores
 from app.services.world_config_loader import ParsedWorldConfig
 from app.world_engine.clock import WorldClock
 from app.world_engine.event_bus import EventBus
@@ -50,6 +55,8 @@ class WorldRuntime:
     scheduler: Scheduler
     event_bus: EventBus
     ws_clients: set[WebSocket] = field(default_factory=set)
+    # M5: hour index of the last applied hourly needs tick (idempotency guard).
+    last_hour: int | None = None
 
 
 class WorldEngine:
@@ -74,6 +81,9 @@ class WorldEngine:
         # ConversationService (M4) is wired after construction; the talk tool,
         # the decision service, and the move_completed handler reach it here.
         self.conversation_service: Any = None
+        # EconomyService (M5) is wired after construction; the work/buy/sell/
+        # use tools and the "work_completed" scheduler handler reach it here.
+        self.economy_service: Any = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -216,6 +226,8 @@ class WorldEngine:
         scheduler.register("move_completed", self.action_service.handle_move_completed)
         scheduler.register("wait_completed", self.action_service.handle_wait_completed)
         scheduler.register("capacity_recheck", self.action_service.handle_capacity_recheck)
+        if self.economy_service is not None:
+            scheduler.register("work_completed", self.economy_service.handle_work_completed)
         if self.decision_service is not None:
             scheduler.register("agent_decide", self.decision_service.handle_agent_decide)
         self._runtimes[world_id] = runtime
@@ -263,6 +275,7 @@ class WorldEngine:
                 )
             for spawn in self.world_config.spawn_points:
                 session.add(self._build_agent(world_id, spawn))
+            self._seed_economy(session, world_id)
             session.commit()
         finally:
             session.close()
@@ -321,6 +334,58 @@ class WorldEngine:
             action_ends_at=None,
             action_data=None,
         )
+
+    def _seed_economy(self, session: Session, world_id: str) -> None:
+        """M5: seed per-world items, stores (+ products at full stock) and jobs.
+
+        Employment rows are deliberately absent until the first completed work.
+        """
+        for seed in load_items(self.world_data_dir):
+            session.add(
+                Item(
+                    world_id=world_id,
+                    item_id=seed["item_id"],
+                    name=seed["name"],
+                    category=seed["category"],
+                    hunger_restore=seed["hunger_restore"],
+                    base_price=seed["base_price"],
+                )
+            )
+        for store_seed in load_stores(self.world_data_dir):
+            session.add(
+                Store(
+                    world_id=world_id,
+                    store_id=store_seed["store_id"],
+                    location_id=store_seed["location_id"],
+                )
+            )
+            for product in store_seed["products"]:
+                session.add(
+                    StoreProduct(
+                        world_id=world_id,
+                        store_id=store_seed["store_id"],
+                        item_id=product["item_id"],
+                        sell_price=product["sell_price"],
+                        buy_price=product["buy_price"],
+                        stock=product["stock_cap"],  # R15: full stock at open
+                        stock_cap=product["stock_cap"],
+                        restock_daily=product["restock_daily"],
+                    )
+                )
+        for job_seed in load_jobs(self.world_data_dir):
+            session.add(
+                Job(
+                    world_id=world_id,
+                    job_id=job_seed["job_id"],
+                    name=job_seed["name"],
+                    location_id=job_seed["location_id"],
+                    interactable_id=job_seed["interactable_id"],
+                    duration_minutes=job_seed["duration_minutes"],
+                    wage=job_seed["wage"],
+                    energy_cost_per_hour=job_seed["energy_cost_per_hour"],
+                    products_json=job_seed["products"],
+                )
+            )
 
     def _load_identity(self, agent_id: str) -> dict[str, Any]:
         if self.world_data_dir is None:
@@ -518,6 +583,7 @@ class WorldEngine:
                 runtime.event_bus.publish(
                     session, world_time, "world_time_changed", {"world_time": world_time}
                 )
+                self._maybe_hourly_tick(session, runtime, world, world_time)
             session.commit()
             due = runtime.scheduler.load_due(session, runtime.clock.world_time)
             for action in due:
@@ -525,6 +591,108 @@ class WorldEngine:
             session.commit()
         finally:
             session.close()
+
+    def _maybe_hourly_tick(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """M5 R14: apply the hourly needs rhythm exactly once per hour.
+
+        The ``last_hour`` guard makes the tick idempotent per hour boundary;
+        needs_changed events, R11/R12 decision boosts and R15 restocks all
+        ride on this same crossing and share the caller's single commit.
+        """
+        hour = world_time // 60
+        if runtime.last_hour is not None and hour != runtime.last_hour:
+            self._apply_hourly_needs(session, runtime, world, world_time)
+            self._maybe_restock(session, runtime, world, world_time)
+        runtime.last_hour = hour
+
+    def _apply_hourly_needs(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, hunger==100 -1/h."""
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world.world_id)
+        ).all()
+        for agent in agents:
+            before = (agent.hunger, agent.energy)
+            agent.hunger = min(100, agent.hunger + 1)
+            agent.energy = max(0, agent.energy - 1)
+            if agent.action_type == "wait":
+                agent.energy = min(100, agent.energy + 5)
+            if agent.hunger >= 100:
+                agent.energy = max(0, agent.energy - 1)  # R11 extra drain
+            if (agent.hunger, agent.energy) != before:
+                runtime.event_bus.publish(
+                    session,
+                    world_time,
+                    "needs_changed",
+                    {"agent_id": agent.agent_id, "hunger": agent.hunger, "energy": agent.energy},
+                )
+            # R11/R12: hunger maxed or energy drained -> high-priority decision.
+            if (
+                world.autonomous
+                and agent.action_type is None
+                and (agent.hunger >= 100 or agent.energy <= 0)
+            ):
+                runtime.scheduler.schedule(
+                    session,
+                    agent.agent_id,
+                    "agent_decide",
+                    world_time + 1,
+                    {"origin": "needs_boost"},
+                )
+
+    def _maybe_restock(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        world_time: int,
+    ) -> None:
+        """R15: at a store's daily open hour, restock toward stock_cap."""
+        # Open hours live on the location the store covers (R8).
+        stores = session.scalars(
+            select(Store)
+            .join(
+                WorldLocation,
+                (WorldLocation.world_id == Store.world_id)
+                & (WorldLocation.location_id == Store.location_id),
+            )
+            .where(
+                Store.world_id == world.world_id,
+                WorldLocation.open_hour * 60 == world_time % 1440,
+            )
+        ).all()
+        for store in stores:
+            restocked: list[dict[str, Any]] = []
+            products = session.scalars(
+                select(StoreProduct).where(
+                    StoreProduct.world_id == world.world_id,
+                    StoreProduct.store_id == store.store_id,
+                )
+            ).all()
+            for product in products:
+                target = min(product.stock_cap, product.stock + product.restock_daily)
+                gained = target - product.stock
+                if gained > 0:
+                    product.stock = target
+                    restocked.append({"item_id": product.item_id, "quantity": gained})
+            if restocked:
+                runtime.event_bus.publish(
+                    session,
+                    world_time,
+                    "store_restocked",
+                    {"store_id": store.store_id, "restocked": restocked},
+                )
 
     async def _flush_pending(self, runtime: WorldRuntime) -> None:
         """Send every queued envelope to connected WebSocket clients."""
@@ -582,7 +750,7 @@ class WorldEngine:
                     weather=world.weather,
                     day=world_time // 1440 + 1,
                 ),
-                agents=[self._agent_snapshot(agent, world_time) for agent in agents],
+                agents=[self._agent_snapshot(session, agent, world_time) for agent in agents],
                 locations=[self._location_snapshot(loc, world_time) for loc in locations],
                 latest_sequence=runtime.event_bus.sequence,
             )
@@ -609,7 +777,7 @@ class WorldEngine:
             "trace_id": f"trc_{sequence:06d}",
         }
 
-    def _agent_snapshot(self, agent: Agent, world_time: int) -> AgentSnapshot:
+    def _agent_snapshot(self, session: Session, agent: Agent, world_time: int) -> AgentSnapshot:
         action = None
         if agent.action_type == "move":
             data = agent.action_data or {}
@@ -628,6 +796,11 @@ class WorldEngine:
                 ends_at=agent.action_ends_at or world_time,
                 reason=data.get("reason"),
             )
+        inventory_rows = session.scalars(
+            select(Inventory)
+            .where(Inventory.world_id == agent.world_id, Inventory.agent_id == agent.agent_id)
+            .order_by(Inventory.item_id)
+        ).all()
         return AgentSnapshot(
             agent_id=agent.agent_id,
             name=agent.name,
@@ -638,6 +811,9 @@ class WorldEngine:
             energy=agent.energy,
             money=agent.money,
             action=action,
+            inventory=[
+                {"item_id": row.item_id, "quantity": row.quantity} for row in inventory_rows
+            ],
         )
 
     def _location_snapshot(self, loc: WorldLocation, world_time: int) -> LocationSnapshot:

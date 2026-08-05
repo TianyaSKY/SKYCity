@@ -56,9 +56,19 @@
 | `conversation_started` | `{a, b}` | 会话开始 |
 | `conversation_ended` | `{a, b, reason}` | 会话结束 |
 | `agent_talked` | `{from_agent_id, message}` | 气泡显示 |
+| `work_started` | `{agent_id, job_id, job_name, duration_minutes, ends_at, reason}` | 工作开始（R3 不可打断） |
+| `work_completed` | `{agent_id, job_id, job_name, wage, products: [{item_id, quantity}], energy_spent}` | 工作完成结算（工资+产物进背包，R10） |
+| `item_purchased` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 购买商品（R4/R7） |
+| `item_sold` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 出售商品 |
+| `item_used` | `{agent_id, item_id, item_name, hunger_before, hunger_after}` | 使用（食用）食物 |
+| `money_changed` | `{agent_id, amount, balance, reason}` | 金钱变动（amount 带符号） |
+| `inventory_changed` | `{agent_id, items: [{item_id, quantity}]}` | 背包变化（完整列表） |
+| `needs_changed` | `{agent_id, hunger, energy}` | 需求变化（每小时节奏 R14 / 进食后） |
+| `store_restocked` | `{store_id, restocked: [{item_id, quantity}]}` | 商店开门补货（R15） |
 
-（M5 追加：`item_purchased` / `item_sold` / `work_started` / `work_completed` /
-`money_changed` / `inventory_changed`；M6 追加：`memory_created` /
+（M5 追加：`work_started` / `work_completed` / `item_purchased` / `item_sold` /
+`item_used` / `money_changed` / `inventory_changed` / `needs_changed` /
+`store_restocked`；M6 追加：`memory_created` /
 `relationship_changed` / `daily_reflection`；M7 追加：`god_action_applied` /
 `weather_changed`；M9 追加：`world_saved` / `world_restored`。）
 
