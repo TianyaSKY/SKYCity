@@ -509,6 +509,10 @@ class MemoryRecorder:
             self._on_item_used(session, envelope, payload)
         elif event_type == "money_changed":
             self._on_money_changed(session, envelope, payload)
+        elif event_type == "money_transferred":
+            self._on_money_transferred(session, envelope, payload)
+        elif event_type == "item_given":
+            self._on_item_given(session, envelope, payload)
         elif event_type == "world_event_created":
             self._on_world_event(session, envelope, payload)
         elif event_type == "god_action_applied":
@@ -639,6 +643,62 @@ class MemoryRecorder:
             memory_type="episodic",
             text=f"金钱变化：{reason}（{sign}{amount}金币）",
             importance=0.6, entities=[], keywords=["金钱"],
+        )
+
+    def _on_money_transferred(
+        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """M11: a transfer between two agents — both sides remember it.
+
+        No amount threshold: small transfers are still social events.
+        """
+        world_id = envelope.world_id
+        from_id = payload.get("from_agent_id")
+        to_id = payload.get("to_agent_id")
+        amount = payload.get("amount") or 0
+        if not from_id or not to_id:
+            return
+        from_name = self._agent_name(session, world_id, from_id)
+        to_name = self._agent_name(session, world_id, to_id)
+        reason = payload.get("reason") or ""
+        self._memory_service.record(
+            session=session, world_id=world_id, agent_id=from_id,
+            memory_type="episodic",
+            text=f"转账给 {to_name} {amount} 金币（{reason}）",
+            importance=0.6, entities=[to_id], keywords=["金钱"],
+        )
+        self._memory_service.record(
+            session=session, world_id=world_id, agent_id=to_id,
+            memory_type="episodic",
+            text=f"收到 {from_name} 转账 {amount} 金币（{reason}）",
+            importance=0.6, entities=[from_id], keywords=["金钱"],
+        )
+
+    def _on_item_given(
+        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """M11: an item gift between two agents — both sides remember it."""
+        world_id = envelope.world_id
+        from_id = payload.get("from_agent_id")
+        to_id = payload.get("to_agent_id")
+        quantity = payload.get("quantity") or 1
+        if not from_id or not to_id:
+            return
+        from_name = self._agent_name(session, world_id, from_id)
+        to_name = self._agent_name(session, world_id, to_id)
+        item_name = payload.get("item_name") or payload.get("item_id") or ""
+        reason = payload.get("reason") or ""
+        self._memory_service.record(
+            session=session, world_id=world_id, agent_id=from_id,
+            memory_type="episodic",
+            text=f"把 {item_name}×{quantity} 送给了 {to_name}（{reason}）",
+            importance=0.6, entities=[to_id], keywords=["物品"],
+        )
+        self._memory_service.record(
+            session=session, world_id=world_id, agent_id=to_id,
+            memory_type="episodic",
+            text=f"收到 {from_name} 送的 {item_name}×{quantity}（{reason}）",
+            importance=0.6, entities=[from_id], keywords=["物品"],
         )
 
     def _on_world_event(

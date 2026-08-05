@@ -156,6 +156,43 @@ class ActionExecutionService:
             return economy_service.use_item(
                 world_id, agent_id, request.item_id, reason=request.reason, trace_id=trace_id
             )
+        # M10 stock actions through the stock rule gate.
+        if request.action_type in ("buy_stock", "sell_stock"):
+            stock_service = self.engine.stock_service
+            if stock_service is None:
+                return False, None, "股票服务未初始化"
+            fn = (
+                stock_service.buy_stock
+                if request.action_type == "buy_stock"
+                else stock_service.sell_stock
+            )
+            return fn(
+                world_id,
+                agent_id,
+                request.stock_id,
+                shares=request.shares if request.shares is not None else 1,
+                reason=request.reason,
+                trace_id=trace_id,
+            )
+        # M11 agent-to-agent transfer / give.
+        transfer_service = self.engine.transfer_service
+        if request.action_type in ("transfer_money", "give_item"):
+            if transfer_service is None:
+                return False, None, "转账服务未初始化"
+            if request.action_type == "transfer_money":
+                return transfer_service.transfer_money(
+                    world_id, agent_id, request.target_agent_id,
+                    amount=request.amount or 1, reason=request.reason, trace_id=trace_id,
+                )
+            return transfer_service.give_item(
+                world_id, agent_id, request.target_agent_id, request.item_id,
+                quantity=request.quantity if request.quantity is not None else 1,
+                reason=request.reason, trace_id=trace_id,
+            )
+        if request.action_type == "sleep":
+            return self.execute_sleep(
+                world_id, agent_id, request.minutes, request.reason, trace_id=trace_id
+            )
         return self.execute_wait(world_id, agent_id, request.minutes, request.reason, trace_id)
 
     # ------------------------------------------------------------------ #
@@ -291,6 +328,63 @@ class ActionExecutionService:
         finally:
             session.close()
 
+    def execute_sleep(
+        self,
+        world_id: str,
+        agent_id: str,
+        minutes: int | None = None,
+        reason: str | None = None,
+        trace_id: str | None = None,
+    ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
+        """Validate + start a sleep (R1: interruptible like wait).
+
+        Sleep recovers energy much faster than wait (R14: +20/h vs +5/h);
+        the engine tick keys recovery off action_type == "sleep".
+        """
+        session = self._session_factory()
+        try:
+            runtime = self.engine.get_runtime(world_id)
+            if runtime is None:
+                return False, None, MSG_WORLD_MISSING
+            world = session.get(World, world_id)
+            if world is None:
+                return False, None, MSG_WORLD_MISSING
+            if world.paused:
+                return False, None, MSG_PAUSED
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if agent is None:
+                return False, None, MSG_AGENT_MISSING
+            if agent.action_type is not None:
+                if agent.action_type == "move":
+                    return False, None, MSG_BUSY
+                runtime.scheduler.cancel_for_agent(session, agent_id)
+                self._clear_action(agent)
+            sleep_minutes = minutes if minutes is not None else DEFAULT_WAIT_MINUTES
+            ends_at = world.world_time + sleep_minutes
+            agent.action_type = "sleep"
+            agent.action_started_at = world.world_time
+            agent.action_ends_at = ends_at
+            agent.action_data = {"reason": reason}
+            runtime.scheduler.schedule(
+                session, agent_id, "sleep_completed", ends_at, {"reason": reason}
+            )
+            envelope = runtime.event_bus.publish(
+                session,
+                world.world_time,
+                "agent_sleep_started",
+                {
+                    "agent_id": agent_id,
+                    "minutes": sleep_minutes,
+                    "ends_at": ends_at,
+                    "reason": reason,
+                },
+                trace_id,
+            )
+            session.commit()
+            return True, envelope, None
+        finally:
+            session.close()
+
     # ------------------------------------------------------------------ #
     # Scheduler handlers (run on the engine tick at due world_time)
     # ------------------------------------------------------------------ #
@@ -390,6 +484,23 @@ class ActionExecutionService:
             session,
             runtime.clock.world_time,
             "agent_wait_completed",
+            {"agent_id": action.agent_id, "at": [agent.col, agent.row]},
+        )
+        self._maybe_schedule_next_decision(session, action)
+
+    def handle_sleep_completed(self, session: Session, action: ScheduledAction) -> None:
+        """A sleep finished: agent is awake and idle again."""
+        runtime = self.engine.get_runtime(action.world_id)
+        if runtime is None:
+            return
+        agent = session.get(Agent, {"world_id": action.world_id, "agent_id": action.agent_id})
+        if agent is None or agent.action_type != "sleep":
+            return
+        self._clear_action(agent)
+        runtime.event_bus.publish(
+            session,
+            runtime.clock.world_time,
+            "agent_sleep_completed",
             {"agent_id": action.agent_id, "at": [agent.col, agent.row]},
         )
         self._maybe_schedule_next_decision(session, action)

@@ -14,7 +14,7 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item"]
+    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item", "sleep", "buy_stock", "sell_stock", "transfer_money", "give_item"]
     destination_id: str | None = None
     minutes: int | None = Field(default=None, ge=1)
     reason: str | None = None
@@ -25,6 +25,11 @@ class ActionRequest(BaseModel):
     job_id: str | None = None
     item_id: str | None = None
     quantity: int | None = Field(default=None, ge=1, le=99)
+    # M10 stock actions.
+    stock_id: str | None = None
+    shares: int | None = Field(default=None, ge=1, le=9999)
+    # M11 agent-to-agent transfer.
+    amount: int | None = Field(default=None, ge=1, le=1_000_000)
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "ActionRequest":
@@ -38,6 +43,16 @@ class ActionRequest(BaseModel):
             raise ValueError("work requires job_id")
         if self.action_type in ("buy_item", "sell_item", "use_item") and not self.item_id:
             raise ValueError(f"{self.action_type} requires item_id")
+        if self.action_type in ("buy_stock", "sell_stock") and not self.stock_id:
+            raise ValueError(f"{self.action_type} requires stock_id")
+        if self.action_type == "transfer_money" and not self.target_agent_id:
+            raise ValueError("transfer_money requires target_agent_id")
+        if self.action_type == "transfer_money" and self.amount is None:
+            raise ValueError("transfer_money requires amount")
+        if self.action_type == "give_item" and not self.target_agent_id:
+            raise ValueError("give_item requires target_agent_id")
+        if self.action_type == "give_item" and not self.item_id:
+            raise ValueError("give_item requires item_id")
         return self
 
 

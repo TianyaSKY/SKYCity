@@ -32,7 +32,24 @@ class AgentActionWait(BaseModel):
     reason: str | None = None
 
 
-AgentAction = Union[AgentActionMove, AgentActionWait]
+class AgentActionWork(BaseModel):
+    """An in-flight work shift (R3 exclusive; R10 settles at ends_at).
+
+    ``job_name`` is resolved at snapshot time so clients can render a human
+    label without a second lookup.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["work"]
+    job_id: str
+    job_name: str | None = None
+    started_at: int
+    ends_at: int
+    reason: str | None = None
+
+
+AgentAction = Union[AgentActionMove, AgentActionWait, AgentActionWork]
 
 
 class InventoryEntrySnapshot(BaseModel):

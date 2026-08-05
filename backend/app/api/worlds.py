@@ -11,7 +11,9 @@ from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest, ActionSuccess
 from app.schemas.god_actions import GodActionRequest, GodActionResponse
+from app.schemas.locations import LocationDetail
 from app.schemas.saves import RestoreRequest, RestoreResponse, SaveResponse
+from app.schemas.stocks import StocksResponse
 from app.schemas.snapshots import (
     AutonomousRequest,
     CreateWorldRequest,
@@ -64,6 +66,14 @@ async def list_worlds(request: Request) -> list[WorldInfo]:
         ]
     finally:
         session.close()
+
+
+@router.delete("/{world_id}", response_model=OkResponse)
+async def delete_world(request: Request, world_id: str) -> OkResponse:
+    """Permanently delete a world (agents, events, llm_runs, saves cascade)."""
+    if not _engine(request).delete_world(world_id):
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return OkResponse(ok=True)
 
 
 @router.get("/{world_id}", response_model=WorldInfo)
@@ -225,6 +235,17 @@ async def get_agent(request: Request, world_id: str, agent_id: str) -> dict:
     return detail
 
 
+@router.get("/{world_id}/locations/{location_id}", response_model=LocationDetail)
+async def get_location_detail(
+    request: Request, world_id: str, location_id: str
+) -> LocationDetail:
+    """One location's detail: base fields + occupants + store products + jobs."""
+    detail = _engine(request).location_detail(world_id, location_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="地点不存在")
+    return LocationDetail(**detail)
+
+
 @router.post("/{world_id}/god-actions", response_model=GodActionResponse)
 async def god_action(
     request: Request, world_id: str, body: GodActionRequest
@@ -286,3 +307,12 @@ async def list_events(request: Request, world_id: str, after_sequence: int = 0) 
         raise HTTPException(status_code=404, detail="世界不存在")
     envelopes = _engine(request).events_after(world_id, after_sequence)
     return [envelope.model_dump() for envelope in envelopes]
+
+
+@router.get("/{world_id}/stocks", response_model=StocksResponse)
+async def world_stocks(request: Request, world_id: str) -> StocksResponse:
+    """M10: 全部股票行情 + 全量持仓(WS 事件增量维护前端状态)。"""
+    result = _engine(request).stock_service.list_stocks(world_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return StocksResponse(**result)

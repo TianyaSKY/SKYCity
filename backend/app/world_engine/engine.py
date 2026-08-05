@@ -31,7 +31,7 @@ from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
-from app.domain.agent import AgentActionMove, AgentActionWait, AgentSnapshot
+from app.domain.agent import AgentActionMove, AgentActionWait, AgentActionWork, AgentSnapshot
 from app.domain.event import WorldEventEnvelope
 from app.domain.location import LocationSnapshot
 from app.domain.world import WorldSnapshot, WorldSnapshotPayload
@@ -94,6 +94,8 @@ class WorldEngine:
         # StockService (M10) is wired after construction; trading tools, the
         # stocks REST endpoint and the hourly/daily market ticks reach it here.
         self.stock_service: Any = None
+        # TransferService (M11) is wired after construction; transfer/give tools reach it here.
+        self.transfer_service: Any = None
         # M6: memory + relationship services are self-contained (engine +
         # session factory), so they are constructed here and active in every
         # engine — memory recording and relationship deltas are automatic.
@@ -250,6 +252,7 @@ class WorldEngine:
         )
         scheduler.register("move_completed", self.action_service.handle_move_completed)
         scheduler.register("wait_completed", self.action_service.handle_wait_completed)
+        scheduler.register("sleep_completed", self.action_service.handle_sleep_completed)
         scheduler.register("capacity_recheck", self.action_service.handle_capacity_recheck)
         if self.economy_service is not None:
             scheduler.register("work_completed", self.economy_service.handle_work_completed)
@@ -1004,6 +1007,17 @@ class WorldEngine:
                 ends_at=agent.action_ends_at or world_time,
                 reason=data.get("reason"),
             )
+        elif agent.action_type == "work":
+            data = agent.action_data or {}
+            job = session.get(Job, {"world_id": agent.world_id, "job_id": data.get("job_id")})
+            action = AgentActionWork(
+                type="work",
+                job_id=str(data.get("job_id") or ""),
+                job_name=job.name if job is not None else None,
+                started_at=agent.action_started_at or world_time,
+                ends_at=agent.action_ends_at or world_time,
+                reason=data.get("reason"),
+            )
         inventory_rows = session.scalars(
             select(Inventory)
             .where(Inventory.world_id == agent.world_id, Inventory.agent_id == agent.agent_id)
@@ -1070,6 +1084,90 @@ class WorldEngine:
             close_hour=loc.close_hour,
             open=is_location_open(loc.location_type, loc.open_hour, loc.close_hour, world_time),
         )
+
+    def location_detail(self, world_id: str, location_id: str) -> dict[str, Any] | None:
+        """One location's detail: snapshot fields + occupants + store products + jobs.
+
+        Contract shape: {location_id, name, location_type, col, row, capacity,
+        open_hour, close_hour, open, occupants: [{agent_id, name}],
+        products: [{item_id, name, sell_price, buy_price, stock}],
+        jobs: [{job_id, name, wage, duration_minutes}]}. Returns None when the
+        world or location is missing.
+        """
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return None
+        session = self._session_factory()
+        try:
+            loc = session.get(
+                WorldLocation, {"world_id": world_id, "location_id": location_id}
+            )
+            if loc is None:
+                return None
+            detail = self._location_snapshot(loc, runtime.clock.world_time).model_dump()
+
+            occupants = session.scalars(
+                select(Agent)
+                .where(
+                    Agent.world_id == world_id,
+                    Agent.location_id == location_id,
+                )
+                .order_by(Agent.name)
+            ).all()
+            detail["occupants"] = [
+                {"agent_id": agent.agent_id, "name": agent.name} for agent in occupants
+            ]
+
+            products: list[dict[str, Any]] = []
+            store = session.scalars(
+                select(Store).where(
+                    Store.world_id == world_id, Store.location_id == location_id
+                )
+            ).first()
+            if store is not None:
+                item_names = {
+                    item.item_id: item.name
+                    for item in session.scalars(
+                        select(Item).where(Item.world_id == world_id)
+                    ).all()
+                }
+                rows = session.scalars(
+                    select(StoreProduct)
+                    .where(
+                        StoreProduct.world_id == world_id,
+                        StoreProduct.store_id == store.store_id,
+                    )
+                    .order_by(StoreProduct.item_id)
+                ).all()
+                products = [
+                    {
+                        "item_id": row.item_id,
+                        "name": item_names.get(row.item_id, row.item_id),
+                        "sell_price": row.sell_price,
+                        "buy_price": row.buy_price,
+                        "stock": row.stock,
+                    }
+                    for row in rows
+                ]
+            detail["products"] = products
+
+            jobs = session.scalars(
+                select(Job)
+                .where(Job.world_id == world_id, Job.location_id == location_id)
+                .order_by(Job.job_id)
+            ).all()
+            detail["jobs"] = [
+                {
+                    "job_id": job.job_id,
+                    "name": job.name,
+                    "wage": job.wage,
+                    "duration_minutes": job.duration_minutes,
+                }
+                for job in jobs
+            ]
+            return detail
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------ #
     # Event log query
