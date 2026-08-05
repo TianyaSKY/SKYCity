@@ -6,7 +6,7 @@ snapshots are a single query; pending completions live in scheduled_actions.
 
 from __future__ import annotations
 
-from sqlalchemy import JSON, ForeignKey, Integer, String
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
@@ -55,6 +55,10 @@ class Agent(Base):
     action_started_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     action_ends_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     action_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # LLM decision loop (M3): in-flight guard + consecutive failure counter.
+    is_deciding: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Agent(world_id={self.world_id!r}, agent_id={self.agent_id!r}, at=({self.col},{self.row}))"

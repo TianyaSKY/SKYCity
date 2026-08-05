@@ -5,6 +5,7 @@ autogenerate and create_all see the full schema.
 """
 
 from app.database.models.agents import Agent
+from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.world_events import WorldEvent
@@ -14,6 +15,7 @@ from app.database.session import Base
 __all__ = [
     "Agent",
     "Base",
+    "LLMRun",
     "ScheduledAction",
     "World",
     "WorldEvent",

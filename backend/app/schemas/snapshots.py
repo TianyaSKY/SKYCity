@@ -8,11 +8,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CreateWorldRequest(BaseModel):
-    """POST /api/worlds body; name is optional."""
+    """POST /api/worlds body; name is optional, autonomous joins the LLM loop."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, max_length=128)
+    autonomous: bool = False
 
 
 class CreateWorldResponse(BaseModel):
@@ -22,6 +23,7 @@ class CreateWorldResponse(BaseModel):
     world_time: int
     speed: int
     paused: bool
+    autonomous: bool
 
 
 class WorldInfo(BaseModel):
@@ -32,6 +34,7 @@ class WorldInfo(BaseModel):
     world_time: int
     speed: int
     paused: bool
+    autonomous: bool
 
 
 class OkResponse(BaseModel):
@@ -46,3 +49,11 @@ class SpeedRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     speed: Literal[1, 2, 5, 10]
+
+
+class AutonomousRequest(BaseModel):
+    """POST /api/worlds/{id}/autonomous body; enables the LLM decision loop."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool

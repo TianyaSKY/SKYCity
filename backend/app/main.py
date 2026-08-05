@@ -17,6 +17,7 @@ from app.api.worlds import router as worlds_router
 from app.config.settings import get_settings
 from app.database.session import SessionLocal
 from app.services.action_execution_service import ActionExecutionService
+from app.services.agent_decision_service import DecisionService
 from app.services.world_config_loader import WorldConfigError, load_world_config
 from app.world_engine.engine import WorldEngine
 
@@ -55,8 +56,11 @@ async def lifespan(app: FastAPI):
     )
     service = ActionExecutionService(engine, SessionLocal)
     engine.action_service = service
+    decision_service = DecisionService(engine, SessionLocal)
+    engine.decision_service = decision_service
     app.state.engine = engine
     app.state.action_service = service
+    app.state.decision_service = decision_service
 
     await engine.start()
     engine.load_existing()

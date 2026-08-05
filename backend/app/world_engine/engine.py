@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,9 @@ class WorldEngine:
         self._task: asyncio.Task | None = None
         # ActionExecutionService is wired after construction (it needs the engine).
         self.action_service: Any = None
+        # DecisionService (M3) is wired after construction; when set, the
+        # "agent_decide" scheduler handler is registered per runtime.
+        self.decision_service: Any = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -90,11 +94,14 @@ class WorldEngine:
         try:
             worlds = session.scalars(select(World).order_by(World.world_id)).all()
             for world in worlds:
-                self._ensure_runtime(
+                runtime = self._ensure_runtime(
                     world.world_id,
                     clock=WorldClock(world.world_time, world.speed, world.paused),
                     session=session,
                 )
+                if world.autonomous and not world.paused:
+                    # Restart-safe: re-arm the decision loop for idle agents.
+                    self._schedule_idle_decisions(session, runtime, world, delay=2)
             if worlds:
                 logger.info(
                     "World engine resumed {} existing world(s)", len(worlds)
@@ -135,6 +142,8 @@ class WorldEngine:
         scheduler.register("move_completed", self.action_service.handle_move_completed)
         scheduler.register("wait_completed", self.action_service.handle_wait_completed)
         scheduler.register("capacity_recheck", self.action_service.handle_capacity_recheck)
+        if self.decision_service is not None:
+            scheduler.register("agent_decide", self.decision_service.handle_agent_decide)
         self._runtimes[world_id] = runtime
         return runtime
 
@@ -142,8 +151,14 @@ class WorldEngine:
     # World lifecycle
     # ------------------------------------------------------------------ #
 
-    def create_world(self, name: str | None = None) -> WorldRuntime:
-        """Create a new world seeded with locations + agents, return its runtime."""
+    def create_world(
+        self, name: str | None = None, autonomous: bool = False
+    ) -> WorldRuntime:
+        """Create a new world seeded with locations + agents, return its runtime.
+
+        With ``autonomous=True`` the world joins the LLM decision loop: each
+        agent gets an initial agent_decide scheduled (staggered).
+        """
         session = self._session_factory()
         try:
             number = self._next_world_number(session)
@@ -155,6 +170,7 @@ class WorldEngine:
                 speed=1,
                 paused=False,
                 weather="clear",
+                autonomous=autonomous,
             )
             session.add(world)
             for loc in self.world_config.locations:
@@ -176,8 +192,19 @@ class WorldEngine:
             session.commit()
         finally:
             session.close()
+        # A world id is unique; a stale in-memory runtime (e.g. after the
+        # DB was reset) must never leak its sequence counter into the new world.
+        self._runtimes.pop(world_id, None)
         runtime = self._ensure_runtime(world_id, clock=WorldClock(480, 1, False))
-        logger.info("Created world {}", world_id)
+        if autonomous:
+            session = self._session_factory()
+            try:
+                world = session.get(World, world_id)
+                self._schedule_initial_decisions(session, runtime, world, base_delay=2)
+                session.commit()
+            finally:
+                session.close()
+        logger.info("Created world {} (autonomous={})", world_id, autonomous)
         return runtime
 
     def delete_runtime(self, world_id: str) -> None:
@@ -280,6 +307,9 @@ class WorldEngine:
                 return True, None
             world.paused = paused
             runtime.clock.paused = paused
+            if not paused and world.autonomous:
+                # Resume: autonomous worlds re-arm the decision loop for idle agents.
+                self._schedule_idle_decisions(session, runtime, world, delay=2)
             session.commit()
             envelope = self.publish(world_id, "world_paused" if paused else "world_resumed", {})
             return True, envelope
@@ -306,6 +336,79 @@ class WorldEngine:
             return True, envelope
         finally:
             session.close()
+
+    def set_autonomous(self, world_id: str, enabled: bool) -> tuple[bool, bool]:
+        """Enable/disable the LLM decision loop for a world.
+
+        Returns (found, changed). Enabling schedules an initial agent_decide
+        for every agent, staggered +2+i*1 game minutes.
+        """
+        runtime = self._runtimes.get(world_id)
+        if runtime is None:
+            return False, False
+        session = self._session_factory()
+        try:
+            world = session.get(World, world_id)
+            if world is None:
+                return False, False
+            if world.autonomous == enabled:
+                return True, False
+            world.autonomous = enabled
+            if enabled:
+                self._schedule_initial_decisions(session, runtime, world, base_delay=2)
+            session.commit()
+            logger.info("World {} autonomous={}", world_id, enabled)
+            return True, True
+        finally:
+            session.close()
+
+    # ------------------------------------------------------------------ #
+    # Decision-loop scheduling helpers (M3)
+    # ------------------------------------------------------------------ #
+
+    def _schedule_initial_decisions(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        base_delay: int = 2,
+    ) -> None:
+        """Schedule the first agent_decide for every agent, staggered."""
+        agents = session.scalars(
+            select(Agent)
+            .where(Agent.world_id == world.world_id)
+            .order_by(Agent.agent_id)
+        ).all()
+        for index, agent in enumerate(agents):
+            runtime.scheduler.schedule(
+                session,
+                agent.agent_id,
+                "agent_decide",
+                world.world_time + base_delay + index,
+                {"origin": "autonomous"},
+            )
+
+    def _schedule_idle_decisions(
+        self,
+        session: Session,
+        runtime: WorldRuntime,
+        world: World,
+        delay: int = 2,
+    ) -> None:
+        """Re-arm the decision loop for agents that are currently idle."""
+        agents = session.scalars(
+            select(Agent)
+            .where(Agent.world_id == world.world_id, Agent.action_type.is_(None))
+            .order_by(Agent.agent_id)
+        ).all()
+        for agent in agents:
+            runtime.scheduler.schedule(
+                session,
+                agent.agent_id,
+                "agent_decide",
+                world.world_time + delay,
+                {"origin": "resume"},
+            )
 
     # ------------------------------------------------------------------ #
     # Tick loop

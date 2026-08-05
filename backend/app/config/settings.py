@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     map_name: str = "tiny_world"
     log_level: str = "INFO"
 
+    # LLM agent decisions (M3).
+    llm_provider: str = "auto"  # "auto" | "openai" | "fake"
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = 30.0
+    decision_min_interval: int = 5  # game minutes between decisions (floor)
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: object) -> object:

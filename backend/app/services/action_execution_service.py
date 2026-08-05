@@ -324,6 +324,7 @@ class ActionExecutionService:
             return
 
         agent.location_id = destination.location_id
+        self._maybe_schedule_next_decision(session, action)
 
     def handle_wait_completed(self, session: Session, action: ScheduledAction) -> None:
         """A wait finished: agent is idle again."""
@@ -340,6 +341,7 @@ class ActionExecutionService:
             "agent_wait_completed",
             {"agent_id": action.agent_id, "at": [agent.col, agent.row]},
         )
+        self._maybe_schedule_next_decision(session, action)
 
     def handle_capacity_recheck(self, session: Session, action: ScheduledAction) -> None:
         """R15 re-evaluation: enter if a slot freed, otherwise wait again."""
@@ -366,6 +368,7 @@ class ActionExecutionService:
                 "agent_wait_completed",
                 {"agent_id": action.agent_id, "at": [agent.col, agent.row]},
             )
+            self._maybe_schedule_next_decision(session, action)
             return
         # Still full: keep waiting and schedule another check.
         new_end = world_time + CAPACITY_RECHECK_MINUTES
@@ -381,6 +384,33 @@ class ActionExecutionService:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def _maybe_schedule_next_decision(
+        self, session: Session, action: ScheduledAction
+    ) -> None:
+        """M3: autonomous worlds re-arm the LLM loop when an action completes.
+
+        Only when the agent is idle again (a completion handler may have
+        chained a door wait / capacity wait instead) and not mid-decision.
+        """
+        if self.engine.decision_service is None:
+            return
+        runtime = self.engine.get_runtime(action.world_id)
+        if runtime is None:
+            return
+        world = session.get(World, action.world_id)
+        if world is None or not world.autonomous or world.paused:
+            return
+        agent = session.get(Agent, {"world_id": action.world_id, "agent_id": action.agent_id})
+        if agent is None or agent.action_type is not None or agent.is_deciding:
+            return
+        runtime.scheduler.schedule(
+            session,
+            action.agent_id,
+            "agent_decide",
+            runtime.clock.world_time,
+            {"origin": "completed"},
+        )
 
     def _start_wait(
         self,

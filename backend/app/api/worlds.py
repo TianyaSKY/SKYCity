@@ -6,10 +6,18 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
+from app.database.models.llm_runs import LLMRun
 from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest, ActionSuccess
-from app.schemas.snapshots import CreateWorldRequest, CreateWorldResponse, OkResponse, SpeedRequest, WorldInfo
+from app.schemas.snapshots import (
+    AutonomousRequest,
+    CreateWorldRequest,
+    CreateWorldResponse,
+    OkResponse,
+    SpeedRequest,
+    WorldInfo,
+)
 from app.world_engine.engine import WorldEngine
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
@@ -22,12 +30,16 @@ def _engine(request: Request) -> WorldEngine:
 @router.post("", response_model=CreateWorldResponse, status_code=201)
 async def create_world(request: Request, body: CreateWorldRequest | None = None) -> CreateWorldResponse:
     """Create a new world: 5 agents seeded from spawns + identity cards, 8 locations."""
-    runtime = _engine(request).create_world(body.name if body else None)
+    runtime = _engine(request).create_world(
+        body.name if body else None,
+        autonomous=body.autonomous if body else False,
+    )
     return CreateWorldResponse(
         world_id=runtime.world_id,
         world_time=runtime.clock.world_time,
         speed=runtime.clock.speed,
         paused=runtime.clock.paused,
+        autonomous=bool(body.autonomous if body else False),
     )
 
 
@@ -44,6 +56,7 @@ async def list_worlds(request: Request) -> list[WorldInfo]:
                 world_time=w.world_time,
                 speed=w.speed,
                 paused=w.paused,
+                autonomous=w.autonomous,
             )
             for w in worlds
         ]
@@ -67,6 +80,7 @@ async def get_world(request: Request, world_id: str) -> WorldInfo:
         world_time=world.world_time,
         speed=world.speed,
         paused=world.paused,
+        autonomous=world.autonomous,
     )
 
 
@@ -113,6 +127,40 @@ async def set_speed(request: Request, world_id: str, body: SpeedRequest) -> OkRe
     if envelope is not None:
         await engine.flush_pending_now(world_id)
     return OkResponse()
+
+
+@router.post("/{world_id}/autonomous", response_model=OkResponse)
+async def set_autonomous(
+    request: Request, world_id: str, body: AutonomousRequest
+) -> OkResponse:
+    """Enable/disable the LLM decision loop; enabling arms initial decisions."""
+    engine = _engine(request)
+    found, changed = engine.set_autonomous(world_id, body.enabled)
+    if not found:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    if changed:
+        await engine.flush_pending_now(world_id)
+    return OkResponse()
+
+
+@router.get("/{world_id}/agents/{agent_id}/decisions")
+async def list_decisions(
+    request: Request, world_id: str, agent_id: str, limit: int = 50
+) -> list[dict]:
+    """LLM decision history for one agent (recent first), from llm_runs."""
+    if _engine(request).get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    session = SessionLocal()
+    try:
+        rows = session.scalars(
+            select(LLMRun)
+            .where(LLMRun.world_id == world_id, LLMRun.agent_id == agent_id)
+            .order_by(LLMRun.created_at.desc(), LLMRun.run_id.desc())
+            .limit(min(max(limit, 1), 500))
+        ).all()
+        return [row.to_dict() for row in rows]
+    finally:
+        session.close()
 
 
 @router.post("/{world_id}/agents/{agent_id}/actions", response_model=None)
