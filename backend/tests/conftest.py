@@ -21,6 +21,8 @@ from app.database.models import (
     Item,
     Job,
     LLMRun,
+    Memory,
+    Relationship,
     ScheduledAction,
     Store,
     StoreProduct,
@@ -52,6 +54,9 @@ def _clean_db(_database_schema) -> None:
             LLMRun,
             WorldEvent,
             ScheduledAction,
+            # M6 memory/relationship children.
+            Memory,
+            Relationship,
             # M5 economy children (SQLite does not cascade without PRAGMA FK on).
             Transaction,
             Inventory,

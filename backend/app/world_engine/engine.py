@@ -35,6 +35,8 @@ from app.domain.agent import AgentActionMove, AgentActionWait, AgentSnapshot
 from app.domain.event import WorldEventEnvelope
 from app.domain.location import LocationSnapshot
 from app.domain.world import WorldSnapshot, WorldSnapshotPayload
+from app.services.memory_service import MemoryRecorder, MemoryService
+from app.services.relationship_service import RelationshipService
 from app.services.seed_loader import load_items, load_jobs, load_stores
 from app.services.world_config_loader import ParsedWorldConfig
 from app.world_engine.clock import WorldClock
@@ -84,6 +86,12 @@ class WorldEngine:
         # EconomyService (M5) is wired after construction; the work/buy/sell/
         # use tools and the "work_completed" scheduler handler reach it here.
         self.economy_service: Any = None
+        # M6: memory + relationship services are self-contained (engine +
+        # session factory), so they are constructed here and active in every
+        # engine — memory recording and relationship deltas are automatic.
+        self.memory_service = MemoryService(self, session_factory)
+        self.memory_recorder = MemoryRecorder(self, session_factory, self.memory_service)
+        self.relationship_service = RelationshipService(self, session_factory)
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -112,10 +120,15 @@ class WorldEngine:
                     clock=WorldClock(world.world_time, world.speed, world.paused),
                     session=session,
                 )
+                # M6: restore the once-per-day reflection arm (restart-safe).
+                self.memory_service.ensure_daily_reflection_scheduled(
+                    session, runtime, world.world_time
+                )
                 if world.autonomous and not world.paused:
                     # Restart-safe: re-arm the decision loop for idle agents.
                     self._schedule_idle_decisions(session, runtime, world, delay=2)
             if worlds:
+                session.commit()
                 logger.info(
                     "World engine resumed {} existing world(s)", len(worlds)
                 )
@@ -217,6 +230,10 @@ class WorldEngine:
         scheduler = Scheduler(world_id)
         if session is not None:
             event_bus.init_sequence(session)
+        # M6: every published envelope feeds memory recording + relationship
+        # deltas (derived memory_created/relationship_changed events are
+        # filtered out by the services, so the hook terminates).
+        event_bus.on_publish = self._on_event_hooks
         runtime = WorldRuntime(
             world_id=world_id,
             clock=clock or WorldClock(),
@@ -230,8 +247,35 @@ class WorldEngine:
             scheduler.register("work_completed", self.economy_service.handle_work_completed)
         if self.decision_service is not None:
             scheduler.register("agent_decide", self.decision_service.handle_agent_decide)
+        scheduler.register("daily_reflection", self.memory_service.handle_daily_reflection)
         self._runtimes[world_id] = runtime
         return runtime
+
+    def _on_event_hooks(self, session: Session, envelope: WorldEventEnvelope) -> None:
+        """M6: derive memories + relationship deltas from every published event.
+
+        Runs inside the publisher's transaction (the derived rows commit with
+        the source event). One failing hook must never break the world, so
+        each service is guarded independently.
+        """
+        if self.memory_recorder is not None:
+            try:
+                self.memory_recorder.on_event(session, envelope)
+            except Exception:  # noqa: BLE001 - memory bug must not kill the tick
+                logger.exception(
+                    "Memory recorder failed on event {} (world={})",
+                    envelope.type,
+                    envelope.world_id,
+                )
+        if self.relationship_service is not None:
+            try:
+                self.relationship_service.on_event(session, envelope)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Relationship service failed on event {} (world={})",
+                    envelope.type,
+                    envelope.world_id,
+                )
 
     # ------------------------------------------------------------------ #
     # World lifecycle
@@ -283,14 +327,18 @@ class WorldEngine:
         # DB was reset) must never leak its sequence counter into the new world.
         self._runtimes.pop(world_id, None)
         runtime = self._ensure_runtime(world_id, clock=WorldClock(480, 1, False))
-        if autonomous:
-            session = self._session_factory()
-            try:
-                world = session.get(World, world_id)
+        session = self._session_factory()
+        try:
+            world = session.get(World, world_id)
+            # M6: arm the once-per-day 23:30 reflection (T6-6).
+            self.memory_service.ensure_daily_reflection_scheduled(
+                session, runtime, world.world_time
+            )
+            if autonomous:
                 self._schedule_initial_decisions(session, runtime, world, base_delay=2)
-                session.commit()
-            finally:
-                session.close()
+            session.commit()
+        finally:
+            session.close()
         logger.info("Created world {} (autonomous={})", world_id, autonomous)
         return runtime
 

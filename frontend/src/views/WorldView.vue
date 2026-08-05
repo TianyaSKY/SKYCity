@@ -10,7 +10,7 @@ import type { ParsedWorldConfig } from '../types/tiled';
 import EventStream from '../components/EventStream.vue';
 import HealthIndicator from '../components/HealthIndicator.vue';
 import LocationPanel from '../components/LocationPanel.vue';
-import ConversationPanel from '../components/ConversationPanel.vue';
+import AgentPanel from '../components/AgentPanel.vue';
 import SpeechBubble from '../components/SpeechBubble.vue';
 import WorldClockBar from '../components/WorldClockBar.vue';
 
@@ -205,7 +205,7 @@ onBeforeUnmount(() => {
     </div>
     <SpeechBubble :bubbles="store.bubbles" :agent-screen-pos="bubbleScreenPos" />
     <div class="hud hud-right">
-      <ConversationPanel />
+      <AgentPanel />
     </div>
     <LocationPanel class="hud hud-bottom-left" />
     <div v-if="!store.mapLoaded && !store.mapError" class="status-banner">正在加载世界…</div>

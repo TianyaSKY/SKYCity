@@ -7,6 +7,8 @@ inside the caller's transaction); the envelope is also queued in
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -29,6 +31,9 @@ class EventBus:
         self.world_id = world_id
         self._sequence = 0
         self._pending: list[WorldEventEnvelope] = []
+        # M6: engine hook fired for every published envelope (memories,
+        # relationships); must be idempotent for derived event types.
+        self.on_publish: Callable[[Session, WorldEventEnvelope], None] | None = None
 
     # ------------------------------------------------------------------ #
     # Sequence
@@ -97,4 +102,6 @@ class EventBus:
             )
         )
         self._pending.append(envelope)
+        if self.on_publish is not None:
+            self.on_publish(session, envelope)
         return envelope

@@ -9,6 +9,7 @@ bounded to ~2000 characters. The 上次工具结果 section uses the stable mark
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -84,8 +85,14 @@ def build_observation(
     world_id: str,
     agent_id: str,
     session_factory: sessionmaker[Session],
+    memory_service: Any = None,
 ) -> str:
-    """Compose the observation text for one agent decision."""
+    """Compose the observation text for one agent decision.
+
+    ``memory_service`` (M6) enables the real 【相关记忆】 section: up to 4
+    retrieved memories weighted by entity/keyword/importance/recency. When
+    None (no memory system wired) the legacy stub is emitted instead.
+    """
     session = session_factory()
     try:
         world = session.get(World, world_id)
@@ -266,7 +273,37 @@ def build_observation(
             )
 
         lines.append("【相关记忆】")
-        lines.append("[记忆系统将在后续里程碑启用]")
+        if memory_service is not None:
+            # T6-4 context: current location + nearby agents + own items as
+            # entities; weather + current action word as keywords.
+            memory_entities: list[str] = []
+            if agent.location_id:
+                memory_entities.append(agent.location_id)
+            memory_entities.extend(other.agent_id for other in same_location)
+            memory_entities.extend(row.item_id for row in inventory_rows)
+            memory_keywords = [weather]
+            if agent.action_type:
+                memory_keywords.append(agent.action_type)
+            memories = memory_service.retrieve(
+                world_id,
+                agent_id,
+                context_entities=memory_entities,
+                context_keywords=memory_keywords,
+                limit=4,
+                session=session,
+                world_time=world_time,
+            )
+            if memories:
+                for memory in memories:
+                    text = memory.text.replace("\n", " ")
+                    lines.append(
+                        f"- [{memory.memory_type}] {text}（重要度 {memory.importance}）"
+                    )
+            else:
+                lines.append("（暂无）")
+            session.commit()  # persist the recall bumps with the read marks
+        else:
+            lines.append("[记忆系统将在后续里程碑启用]")
 
         observation = "\n".join(lines)
         if len(observation) > MAX_OBSERVATION_CHARS:

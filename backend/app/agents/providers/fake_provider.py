@@ -295,6 +295,33 @@ class FakeDecisionProvider:
     # Result + observation parsing
     # ------------------------------------------------------------------ #
 
+    # ------------------------------------------------------------------ #
+    # Daily reflection (M6 T6-6): deterministic summary from the digest
+    # ------------------------------------------------------------------ #
+
+    async def reflect(
+        self,
+        *,
+        digest: str,
+        context: Any,
+        trace_id: str,
+    ) -> str:
+        """Canned reflection derived from the digest's key numbers.
+
+        The digest carries stable markers (``工作 N 次`` and ``（N 位朋友）``)
+        so the summary is fully deterministic — the same day always produces
+        the same reflection, which keeps tests reproducible.
+        """
+        work = 0
+        friends = 0
+        match = re.search(r"工作 (\d+) 次", digest)
+        if match is not None:
+            work = int(match.group(1))
+        match = re.search(r"（(\d+) 位朋友）", digest)
+        if match is not None:
+            friends = int(match.group(1))
+        return f"今天完成了{work}次工作，和{friends}位朋友聊天。明天继续努力。"
+
     def _result(
         self,
         agent_id: str,

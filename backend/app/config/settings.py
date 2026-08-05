@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     decision_min_interval: int = 5  # game minutes between decisions (floor)
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+    # M6: stronger model used for the no-tool daily reflection prompt.
+    llm_reflect_model: str = "gpt-4o-mini"
 
     @field_validator("cors_origins", mode="before")
     @classmethod

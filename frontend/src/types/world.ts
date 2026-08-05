@@ -172,6 +172,9 @@ export type WorldEventType =
   | 'inventory_changed'
   | 'needs_changed'
   | 'store_restocked'
+  | 'memory_created'
+  | 'relationship_changed'
+  | 'daily_reflection'
   | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */
@@ -256,3 +259,52 @@ export type ConversationEventPayload =
   | ConversationStartedPayload
   | ConversationMessagePayload
   | ConversationEndedPayload;
+
+/** One memory of an agent (GET .../memories response entry, newest first). */
+export interface MemoryItem {
+  memory_id: string;
+  /** working 工作记忆 | episodic 情节记忆 | semantic 语义记忆. */
+  memory_type: string;
+  text: string;
+  importance: number;
+  created_at: number;
+  recall_count: number;
+}
+
+/** One relationship of an agent (GET .../relationships response entry). */
+export interface RelationshipItem {
+  source_agent_id: string;
+  target_agent_id: string;
+  target_name: string;
+  familiarity: number;
+  trust: number;
+  affection: number;
+  resentment: number;
+  debt: number;
+  updated_at: number;
+}
+
+/** Payload of the WS memory_created event. */
+export interface MemoryCreatedPayload {
+  agent_id: string;
+  memory_id: string;
+  memory_type: string;
+  text: string;
+  importance: number;
+}
+
+/** Payload of the WS relationship_changed event. */
+export interface RelationshipChangedPayload {
+  source_agent_id: string;
+  target_agent_id: string;
+  /** Signed deltas per axis (familiarity/trust/affection/resentment/debt). */
+  deltas: Record<string, number>;
+  /** Absolute values after applying the delta. */
+  values: Record<string, number>;
+}
+
+/** Payload of the WS daily_reflection event. */
+export interface DailyReflectionPayload {
+  agent_id: string;
+  summary: string;
+}

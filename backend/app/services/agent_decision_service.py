@@ -166,7 +166,12 @@ class DecisionService:
             action_service=self.engine.action_service,
             engine=self.engine,
         )
-        observation = build_observation(world_id, agent_id, self._session_factory)
+        observation = build_observation(
+            world_id,
+            agent_id,
+            self._session_factory,
+            memory_service=self.engine.memory_service,
+        )
 
         try:
             result = await asyncio.wait_for(
@@ -215,6 +220,12 @@ class DecisionService:
                 "reason": reason,
                 "event": envelope.model_dump() if envelope is not None else None,
             }
+            if not ok:
+                # M6 T6-3: a rejected tool is an observed failure the agent
+                # remembers (working memory, low importance).
+                self.engine.memory_recorder.record_llm_failure(
+                    session, world_id, agent_id, reason or "工具执行失败"
+                )
             session.commit()
 
             paused = bool(
@@ -229,6 +240,38 @@ class DecisionService:
     # ------------------------------------------------------------------ #
     # Tool execution + scheduling
     # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Daily reflection (M6 T6-6): provider's optional reflect hook
+    # ------------------------------------------------------------------ #
+
+    async def run_daily_reflection(
+        self, world_id: str, agent_id: str, digest: str
+    ) -> str | None:
+        """Ask the provider for a day-summary reflection (summary text).
+
+        Uses the provider's optional ``reflect`` method; providers without it
+        (or a failed call) return None and the reflection is skipped.
+        """
+        reflect = getattr(self._provider, "reflect", None)
+        if reflect is None:
+            return None
+        trace_id = f"trc_reflect_{uuid.uuid4().hex[:12]}"
+        try:
+            summary = await asyncio.wait_for(
+                reflect(digest=digest, context=None, trace_id=trace_id),
+                timeout=self._settings.llm_timeout_seconds,
+            )
+        except Exception:  # noqa: BLE001 - a failed reflection is not fatal
+            logger.exception(
+                "Reflection failed world={} agent={} trace={}",
+                world_id,
+                agent_id,
+                trace_id,
+            )
+            return None
+        summary = (summary or "").strip()
+        return summary or None
 
     def _execute_tool(
         self, result: DecisionResult, world_id: str, agent_id: str, trace_id: str
@@ -392,6 +435,11 @@ class DecisionService:
             )
             agent.consecutive_failures = min(
                 (agent.consecutive_failures or 0) + 1, MAX_CONSECUTIVE_FAILURES
+            )
+            # M6 T6-3: the failed decision is an observed event worth a
+            # low-importance working memory.
+            self.engine.memory_recorder.record_llm_failure(
+                session, world_id, agent_id, detail
             )
             session.commit()
 

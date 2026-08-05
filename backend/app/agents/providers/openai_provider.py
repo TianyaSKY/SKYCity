@@ -104,6 +104,35 @@ class OpenAIProvider:
         )
 
     # ------------------------------------------------------------------ #
+    # Daily reflection (M6 T6-6): separate no-tool agent, stronger model
+    # ------------------------------------------------------------------ #
+
+    async def reflect(
+        self,
+        *,
+        digest: str,
+        context: AgentToolContext | None,
+        trace_id: str,
+    ) -> str:
+        """One short first-person day summary from the digest.
+
+        A separate agent with no tools (the model cannot mutate the world) and
+        the stronger ``llm_reflect_model`` setting.
+        """
+        agent = Agent(
+            name="reflection",
+            instructions=(
+                "你是一位小镇居民，正在回顾自己的一天。根据给出的当日总结，"
+                "用中文写一段简短的第一人称反思（50字以内），表达对今天的感受"
+                "和对明天的期望。直接输出反思内容，不要任何前缀或引用。"
+            ),
+            tools=[],
+            model=self._settings.llm_reflect_model,
+        )
+        result = await Runner.run(agent, digest, max_turns=1)
+        return (result.final_output or "").strip()
+
+    # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
 

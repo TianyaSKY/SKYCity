@@ -8,6 +8,8 @@
 import type {
   ActionResponse,
   ConversationSummary,
+  MemoryItem,
+  RelationshipItem,
   WorldListItem,
   WorldSnapshotPayload,
 } from '../types/world';
@@ -104,6 +106,25 @@ export function getConversations(
   const query = limit > 0 ? `?limit=${limit}` : '';
   return requestJson<ConversationSummary[]>(
     `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/conversations${query}`,
+  );
+}
+
+/** Fetch one agent's memories, newest first (limit <= 0 = server default). */
+export function getMemories(
+  worldId: string,
+  agentId: string,
+  limit = 30,
+): Promise<MemoryItem[]> {
+  const query = limit > 0 ? `?limit=${limit}` : '';
+  return requestJson<MemoryItem[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/memories${query}`,
+  );
+}
+
+/** Fetch one agent's relationships (one entry per target agent). */
+export function getRelationships(worldId: string, agentId: string): Promise<RelationshipItem[]> {
+  return requestJson<RelationshipItem[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/relationships`,
   );
 }
 

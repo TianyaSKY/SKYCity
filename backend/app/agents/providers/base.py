@@ -41,3 +41,11 @@ class DecisionProvider(Protocol):
         context: "AgentToolContext",
         trace_id: str,
     ) -> DecisionResult: ...
+
+    async def reflect(
+        self,
+        *,
+        digest: str,
+        context: "AgentToolContext | None",
+        trace_id: str,
+    ) -> str: ...

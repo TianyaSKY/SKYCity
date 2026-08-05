@@ -174,6 +174,28 @@ async def list_conversations(
     return engine.conversation_service.history(world_id, agent_id, limit)
 
 
+@router.get("/{world_id}/agents/{agent_id}/memories")
+async def list_memories(
+    request: Request, world_id: str, agent_id: str, limit: int = 30
+) -> list[dict]:
+    """M6: memories for one agent, newest first (working|episodic|semantic)."""
+    engine = _engine(request)
+    if engine.get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return engine.memory_service.list_memories(world_id, agent_id, limit)
+
+
+@router.get("/{world_id}/agents/{agent_id}/relationships")
+async def list_relationships(
+    request: Request, world_id: str, agent_id: str
+) -> list[dict]:
+    """M6: directional relationships where the agent is the source."""
+    engine = _engine(request)
+    if engine.get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    return engine.relationship_service.list_for_agent(world_id, agent_id)
+
+
 @router.post("/{world_id}/agents/{agent_id}/actions", response_model=None)
 async def agent_action(
     request: Request, world_id: str, agent_id: str, body: ActionRequest

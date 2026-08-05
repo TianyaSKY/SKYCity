@@ -13,6 +13,8 @@ import {
   checkHealth,
   createWorld,
   getConversations,
+  getMemories,
+  getRelationships,
   getSnapshot,
   listWorlds,
   pauseWorld,
@@ -31,6 +33,8 @@ import type {
   ConversationMessage,
   ConversationSummary,
   InventoryItem,
+  MemoryItem,
+  RelationshipItem,
   WorldEventEnvelope,
   WorldEventItem,
   WorldEventType,
@@ -75,6 +79,22 @@ export const INTENT_LABELS: Record<string, string> = {
   ask: '询问',
   offer: '提议',
   leave: '告别',
+};
+
+/** Map backend memory types onto Chinese labels. */
+export const MEMORY_TYPE_LABELS: Record<string, string> = {
+  working: '工作记忆',
+  episodic: '情节记忆',
+  semantic: '语义记忆',
+};
+
+/** Map backend relationship axes onto Chinese labels. */
+export const RELATIONSHIP_AXIS_LABELS: Record<string, string> = {
+  familiarity: '熟悉度',
+  trust: '信任',
+  affection: '好感',
+  resentment: '怨恨',
+  debt: '债务',
 };
 
 /** Map backend conversation end reasons onto Chinese labels. */
@@ -162,6 +182,35 @@ function itemsText(list: unknown): string {
 function signedAmount(amount: unknown): string {
   if (typeof amount !== 'number') return '';
   return amount >= 0 ? `+${amount}` : String(amount);
+}
+
+/** Truncate a string to maxLen characters, appending '…' when cut. */
+function truncate(text: string, maxLen: number): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}…` : text;
+}
+
+/**
+ * Human-readable text for a relationship_changed delta: picks the axis with
+ * the largest absolute delta and reports its direction. Falls back to a
+ * generic line when no known axis changed.
+ */
+function relationshipDeltaText(p: Record<string, unknown>): string {
+  const deltas = p.deltas as Record<string, unknown> | undefined;
+  if (!deltas || typeof deltas !== 'object') return '';
+  let bestKey = '';
+  let bestAbs = 0;
+  let bestDelta = 0;
+  for (const [key, raw] of Object.entries(deltas)) {
+    if (typeof raw !== 'number' || raw === 0) continue;
+    if (Math.abs(raw) > bestAbs) {
+      bestKey = key;
+      bestAbs = Math.abs(raw);
+      bestDelta = raw;
+    }
+  }
+  if (!bestKey) return '';
+  const label = RELATIONSHIP_AXIS_LABELS[bestKey] ?? bestKey;
+  return `${label}${bestDelta > 0 ? '提升了' : '下降了'}`;
 }
 
 function agentName(agents: AgentSnapshot[], agentId?: unknown): string {
@@ -316,6 +365,22 @@ function eventText(
       const restocked = itemsText(p.restocked);
       return restocked ? `${storeName}补货完成（${restocked}）` : `${storeName}补货完成`;
     }
+    case 'memory_created': {
+      const name = agentName(agents, p.agent_id);
+      const text = typeof p.text === 'string' ? truncate(p.text, 30) : '';
+      return text ? `${name} 记下了：${text}` : `${name} 记下了一条记忆`;
+    }
+    case 'relationship_changed': {
+      const source = agentName(agents, p.source_agent_id);
+      const target = agentName(agents, p.target_agent_id);
+      const delta = relationshipDeltaText(p);
+      return delta ? `${source} 对 ${target} 的${delta}` : `${source} 对 ${target} 的关系发生了变化`;
+    }
+    case 'daily_reflection': {
+      const name = agentName(agents, p.agent_id);
+      const summary = typeof p.summary === 'string' ? truncate(p.summary, 30) : '';
+      return `${name} 的今日反思：${summary}`;
+    }
     // inventory_changed / needs_changed carry no stream text; they only sync
     // agent state in applyEvent.
     case 'inventory_changed':
@@ -355,6 +420,10 @@ export const useWorldStore = defineStore('world', {
     selectedAgentId: null as string | null,
     /** Conversation history cache for the selected agent (newest first). */
     conversations: [] as ConversationSummary[],
+    /** Memory cache for the selected agent (newest first; REST-backed). */
+    memories: [] as MemoryItem[],
+    /** Relationship cache for the selected agent (REST-backed). */
+    relationships: [] as RelationshipItem[],
     /** Conversations currently in progress, by conversation id. */
     activeConversations: {} as Record<string, { agent_ids: [string, string] }>,
     /** Live speech bubbles (one per agent, newest wins; capped). */
@@ -522,6 +591,21 @@ export const useWorldStore = defineStore('world', {
         case 'needs_changed':
           this.patchAgentNeeds(p.agent_id as string, p.hunger, p.energy);
           break;
+        case 'memory_created':
+          // Panels are REST-backed; a fresh memory for the selected agent
+          // just refetches so the 记忆 tab stays live.
+          if (this.selectedAgentId && p.agent_id === this.selectedAgentId) {
+            void this.fetchMemories(this.selectedAgentId);
+          }
+          break;
+        case 'relationship_changed':
+          if (this.selectedAgentId && p.source_agent_id === this.selectedAgentId) {
+            void this.fetchRelationships(this.selectedAgentId);
+          }
+          break;
+        case 'daily_reflection':
+          // Stream text only; reflections are not part of the memory list.
+          break;
         default:
           break;
       }
@@ -618,12 +702,18 @@ export const useWorldStore = defineStore('world', {
       return postAgentAction(this.worldId, agentId, action);
     },
 
-    /** Select an agent (opens the conversation panel) or clear the selection. */
+    /** Select an agent (opens the agent panel) or clear the selection. */
     selectAgent(agentId: string | null): void {
       if (agentId === this.selectedAgentId) return;
       this.selectedAgentId = agentId;
       this.conversations = [];
-      if (agentId) void this.fetchConversations(agentId);
+      this.memories = [];
+      this.relationships = [];
+      if (agentId) {
+        void this.fetchConversations(agentId);
+        void this.fetchMemories(agentId);
+        void this.fetchRelationships(agentId);
+      }
     },
 
     /** (Re)fetch conversation history for an agent into the cache (if still selected). */
@@ -632,6 +722,28 @@ export const useWorldStore = defineStore('world', {
       try {
         const list = await getConversations(this.worldId, agentId);
         if (this.selectedAgentId === agentId) this.conversations = list;
+      } catch {
+        // Selection stays; the panel shows its empty state until a refetch.
+      }
+    },
+
+    /** (Re)fetch memories for an agent into the cache (if still selected). */
+    async fetchMemories(agentId: string): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const list = await getMemories(this.worldId, agentId);
+        if (this.selectedAgentId === agentId) this.memories = list;
+      } catch {
+        // Selection stays; the panel shows its empty state until a refetch.
+      }
+    },
+
+    /** (Re)fetch relationships for an agent into the cache (if still selected). */
+    async fetchRelationships(agentId: string): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const list = await getRelationships(this.worldId, agentId);
+        if (this.selectedAgentId === agentId) this.relationships = list;
       } catch {
         // Selection stays; the panel shows its empty state until a refetch.
       }
