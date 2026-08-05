@@ -52,12 +52,27 @@ curl -X POST localhost:8000/api/worlds/world_001/speed \
 
 默认 `LLM_PROVIDER=auto`：设置了 `OPENAI_API_KEY` 时使用真实 LLM（OpenAI Agents SDK），否则回退到内置的确定性脚本提供者（用于演示与测试，行为可预期）。
 
+使用第三方 OpenAI 兼容 API（DeepSeek / Kimi / 通义 / 智谱 / SiliconFlow 等）：
+
+```bash
+# backend/.env
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-xxxx
+OPENAI_BASE_URL=https://api.deepseek.com        # 以服务商文档为准（有无 /v1 均可）
+LLM_MODEL=deepseek-chat                          # 换成服务商提供的模型名
+LLM_REFLECT_MODEL=deepseek-chat
+```
+
+注意：SDK 默认走 Responses API，而第三方服务通常只实现 `/chat/completions`，因此本项目固定走 chat completions（`LLM_USE_RESPONSES=false`）。若你的服务商明确支持 `/responses`，可改为 `true`。
+
 | 环境变量 | 默认 | 说明 |
 |---|---|---|
-| `OPENAI_API_KEY` | — | 真实 LLM 密钥 |
+| `OPENAI_API_KEY` | — | 真实 LLM 密钥（第三方兼容 key 亦可） |
+| `OPENAI_BASE_URL` | — | 第三方 API 地址（OpenAI 兼容）；不设则连官方 OpenAI |
 | `LLM_PROVIDER` | `auto` | `auto` / `openai` / `fake` |
-| `LLM_MODEL` | `gpt-4o-mini` | 普通行动模型 |
+| `LLM_MODEL` | `gpt-4o-mini` | 普通行动模型（第三方填服务商模型名） |
 | `LLM_REFLECT_MODEL` | `gpt-4o-mini` | 每日反思模型 |
+| `LLM_USE_RESPONSES` | `false` | 是否用 Responses API（第三方兼容服务保持 `false`） |
 | `LLM_MAX_CONCURRENT` | `2` | 全局并发上限 |
 | `WORLD_DAILY_TOKEN_BUDGET` | `0` | 每世界每日 Token 预算（0=不限） |
 

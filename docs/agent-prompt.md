@@ -23,8 +23,9 @@
 ## 2. 决策策略
 
 - 一次决策 = 一次 `Runner.run` + 最多一次有效世界行动。
-- `ModelSettings(tool_choice="required", parallel_tool_calls=False)`；
-  最大轮数限制（默认 4），防止工具自循环。
+- `ModelSettings(tool_choice="required", parallel_tool_calls=False)` +
+  `tool_use_behavior="stop_on_first_tool"`：第一个工具执行完即结束回合，
+  模型无法在同一决策内连环行动；最大轮数（默认 4）仅作为畸形工具调用的兜底。
 - 工具失败（规则拒绝）不重试同一调用；结果写入观察（下次决策可见），
   LLM 自行调整策略（T3-9）。
 - LLM 故障/超时 → 降级为 `wait` 10~30 游戏分钟（T8-4），世界不崩溃。
@@ -36,6 +37,7 @@
 ```text
 move(destination_id, reason)
 wait(minutes)
+sleep(minutes, reason)
 talk(target_agent_id, message, intent)
 buy_item(item_id, quantity, reason)
 sell_item(item_id, quantity, reason)

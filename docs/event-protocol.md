@@ -60,11 +60,12 @@
 | `work_completed` | `{agent_id, job_id, job_name, wage, products: [{item_id, quantity}], energy_spent}` | 工作完成结算（工资+产物进背包，R10） |
 | `item_purchased` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 购买商品（R4/R7） |
 | `item_sold` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 出售商品 |
-| `item_used` | `{agent_id, item_id, item_name, hunger_before, hunger_after}` | 使用（食用）食物 |
+| `item_used` | `{agent_id, item_id, item_name, hunger_before, hunger_after, mood_before, mood_after}` | 使用（食用）食物 / 心情物品（M12 追加 mood 字段） |
 | `money_changed` | `{agent_id, amount, balance, reason}` | 金钱变动（amount 带符号） |
 | `inventory_changed` | `{agent_id, items: [{item_id, quantity}]}` | 背包变化（完整列表） |
-| `needs_changed` | `{agent_id, hunger, energy}` | 需求变化（每小时节奏 R14 / 进食后） |
+| `needs_changed` | `{agent_id, hunger, energy, mood}` | 需求变化（每小时节奏 R14 / 进食后，M12 追加 mood） |
 | `store_restocked` | `{store_id, restocked: [{item_id, quantity}]}` | 商店开门补货（R15） |
+| `store_price_changed` | `{store_id, item_id, item_name, sell_price, promo}` | 商店促销/恢复原价（M12，随每日补货结算） |
 | `memory_created` | `{agent_id, memory_id, memory_type, text, importance}` | 新记忆写入（working/episodic/semantic，M6） |
 | `relationship_changed` | `{source_agent_id, target_agent_id, deltas: {familiarity, trust, affection, resentment, debt}, values: {...}}` | 关系数值变化（系统计算，M6；deltas 为本次增量，values 为钳制后的新值） |
 | `daily_reflection` | `{agent_id, summary}` | 每日反思完成（23:30 游戏时间，M6） |
@@ -74,17 +75,27 @@
 | `god_teleport` | `{agent_id, to: [col,row], location_id, reason}` | 神谕传送（M7；取消当前行动并落地到地点锚点格） |
 | `item_spawned` | `{agent_id, item_id, item_name, quantity}` | 神谕赐物（M7；仅 god spawn，与 `inventory_changed` 同发） |
 | `store_stock_changed` | `{store_id, item_id, quantity}` | 商店库存被神谕设定为绝对值（M7） |
+| `stock_price_changed` | `{stock_id, stock_name, price, prev_price, day_business}` | 每小时行情（含经营统计；价格未变也发，M10） |
+| `stock_bought` | `{agent_id, stock_id, stock_name, shares, unit_price, total}` | 买入股票（随 `money_changed`，M10） |
+| `stock_sold` | `{agent_id, stock_id, stock_name, shares, unit_price, total}` | 卖出股票（随 `money_changed`，M10） |
+| `dividend_paid` | `{stock_id, stock_name, div_per_share, payouts: [{agent_id, shares, amount}]}` | 每日分红（M10；金额经 `money_changed` 逐人到账） |
+| `money_transferred` | `{from_agent_id, to_agent_id, amount, reason}` | 智能体间转账(M11;双方余额经各自的 `money_changed` 到账) |
+| `item_given` | `{from_agent_id, to_agent_id, item_id, item_name, quantity, reason}` | 智能体间赠物(M11;双方背包经各自的 `inventory_changed` 到账) |
 
 （M5 追加：`work_started` / `work_completed` / `item_purchased` / `item_sold` /
 `item_used` / `money_changed` / `inventory_changed` / `needs_changed` /
 `store_restocked`；M6 追加：`memory_created` /
 `relationship_changed` / `daily_reflection`；M7 追加：`god_action_applied` /
 `weather_changed` / `god_teleport` / `item_spawned` / `store_stock_changed`；
-M9 追加：`world_saved` / `world_restored`。）
+M9 追加：`world_saved` / `world_restored`；M10 追加：`stock_price_changed` /
+`stock_bought` / `stock_sold` / `dividend_paid`；M11 追加：`money_transferred` / `item_given`。）
 
 说明（M7）：神谕发钱/扣款复用 `money_changed`（`{agent_id, amount, balance,
 reason}`，amount 带符号），公开事件复用 `world_event_created`（无
 `agent_id` 即公开：所有智能体各记一条 episodic 0.6 记忆），不新增事件类型。
+
+M12 追加：`store_price_changed`；`needs_changed` / `item_used` 载荷扩展
+mood 字段。
 
 ## 4. 事件持久化
 

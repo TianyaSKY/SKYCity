@@ -87,6 +87,9 @@ POND_CELLS = [(6, 32), (7, 32), (6, 33), (7, 33)]
 FIELD = ((43, 26), (51, 31))                  # crop field corners
 FENCE_TOP_ROW = 25                            # cols 43..51
 FENCE_BOTTOM_ROW = 32                         # cols 43..51
+# The wangfang farm spur (cols 46-47) crosses both fence rows; these cells
+# are gates (walkable) instead of fence posts, or the farm is unreachable.
+FENCE_GATE_CELLS = {(46, 25), (47, 25), (46, 32), (47, 32)}
 
 BUILDINGS: dict[str, tuple[int, int]] = {
     # location_id -> (col, row, tile)
@@ -248,10 +251,10 @@ def build_layers() -> dict:
     decor[22][28] = gid(WELL)
     decor[20][32] = gid(FOUNTAIN)
 
-    # --- fences -----------------------------------------------------------
-    for c in range(43, 52):
-        decor[FENCE_TOP_ROW][c] = gid(FENCE)
-        decor[FENCE_BOTTOM_ROW][c] = gid(FENCE)
+    # --- fences (gate cells stay walkable for the farm spur) ---------------
+    for r in (FENCE_TOP_ROW, FENCE_BOTTOM_ROW):
+        for c in range(43, 52):
+            decor[r][c] = gid(FENCE_GATE if (c, r) in FENCE_GATE_CELLS else FENCE)
 
     # --- trees & bushes ---------------------------------------------------
     tree_cells = set()
@@ -303,9 +306,10 @@ def build_layers() -> dict:
         collision[r][c] = MARKER
     for (c, r) in POND_CELLS:
         collision[r][c] = MARKER
-    for c in range(43, 52):
-        collision[FENCE_TOP_ROW][c] = MARKER
-        collision[FENCE_BOTTOM_ROW][c] = MARKER
+    for r in (FENCE_TOP_ROW, FENCE_BOTTOM_ROW):
+        for c in range(43, 52):
+            if (c, r) not in FENCE_GATE_CELLS:
+                collision[r][c] = MARKER
     collision[22][28] = MARKER  # well
     collision[20][32] = MARKER  # fountain
 
