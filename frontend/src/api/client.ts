@@ -12,8 +12,10 @@ import type {
   DecisionRecord,
   GodActionResult,
   GodActionRequest,
+  LocationDetail,
   MemoryItem,
   RelationshipItem,
+  StocksResponse,
   WorldListItem,
   WorldSnapshotPayload,
 } from '../types/world';
@@ -63,12 +65,12 @@ export function listWorlds(): Promise<WorldListItem[]> {
   return requestJson<WorldListItem[]>('/api/worlds');
 }
 
-/** Create a new world. */
+/** Create a new autonomous world (LLM agents act on their own). */
 export function createWorld(name: string): Promise<WorldListItem> {
   return requestJson<WorldListItem>('/api/worlds', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, autonomous: true }),
   });
 }
 
@@ -77,9 +79,21 @@ export function getWorld(id: string): Promise<WorldListItem> {
   return requestJson<WorldListItem>(`/api/worlds/${encodeURIComponent(id)}`);
 }
 
+/** Permanently delete a world; its state (agents/events/llm_runs/saves) cascades server-side. */
+export async function deleteWorld(id: string): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>(`/api/worlds/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
 /** Fetch a full world snapshot. */
 export function getSnapshot(id: string): Promise<WorldSnapshotPayload> {
   return requestJson<WorldSnapshotPayload>(`/api/worlds/${encodeURIComponent(id)}/snapshot`);
+}
+
+/** M10: 全部股票行情 + 全量持仓。 */
+export function getStocks(worldId: string): Promise<StocksResponse> {
+  return requestJson<StocksResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stocks`);
 }
 
 /** Pause the world clock. */
@@ -136,6 +150,13 @@ export function getRelationships(worldId: string, agentId: string): Promise<Rela
 export function getAgentDetail(worldId: string, agentId: string): Promise<AgentDetail> {
   return requestJson<AgentDetail>(
     `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}`,
+  );
+}
+
+/** Fetch one location's full detail: occupants + store products + jobs. */
+export function getLocationDetail(worldId: string, locationId: string): Promise<LocationDetail> {
+  return requestJson<LocationDetail>(
+    `/api/worlds/${encodeURIComponent(worldId)}/locations/${encodeURIComponent(locationId)}`,
   );
 }
 

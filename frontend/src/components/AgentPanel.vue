@@ -119,10 +119,16 @@ function inventoryText(inventory: InventoryItem[] | undefined): string {
 
 /** Human-readable current action of an agent ('' = idle). */
 function actionText(action: AgentSnapshot['action']): string {
-  if (!action) return '';
+  if (!action) {
+    const partner = store.selectedAgentId ? store.activePartnerOf(store.selectedAgentId) : null;
+    return partner ? `正在与 ${agentName(partner)} 对话` : '';
+  }
   if (action.type === 'move') {
     const loc = store.locations.find((l) => l.col === action.to[0] && l.row === action.to[1]);
     return `正在前往 ${loc?.name ?? `(${action.to[0]}, ${action.to[1]})`}`;
+  }
+  if (action.type === 'work') {
+    return `正在工作 · ${action.job_name ?? action.job_id}`;
   }
   return '正在等待';
 }
@@ -256,6 +262,19 @@ function setStoreStock(): void {
   });
 }
 
+const stockTarget = ref('');
+const stockPrice = ref(1);
+
+function setStockPrice(): void {
+  if (!stockTarget.value) return;
+  void runGodAction({
+    command_type: 'change_stock_price',
+    target_id: null,
+    parameters: { stock_id: stockTarget.value, price: stockPrice.value },
+    reason: '玩家干预',
+  });
+}
+
 function teleportLocations(): WorldLocation[] {
   return store.locations;
 }
@@ -316,6 +335,11 @@ function teleportLocations(): WorldLocation[] {
           <span class="need-label">金钱</span>
           <span class="need-bar"><i class="need-fill money" :style="{ width: barWidth(liveAgent.money) }" /></span>
           <span class="need-value">{{ liveAgent.money }}</span>
+        </div>
+        <div class="need-row">
+          <span class="need-label">心情</span>
+          <span class="need-bar"><i class="need-fill mood" :style="{ width: barWidth(liveAgent.mood ?? 100) }" /></span>
+          <span class="need-value">{{ liveAgent.mood ?? 100 }}</span>
         </div>
         <div class="ov-section-title">物品</div>
         <p class="ov-inventory">{{ inventoryText(liveAgent.inventory) }}</p>
@@ -430,6 +454,13 @@ function teleportLocations(): WorldLocation[] {
           </select>
           <input v-model.number="stockQty" class="god-qty" type="number" min="1" :disabled="godPending" />
           <button class="god-btn" :disabled="godPending" @click="setStoreStock">设置</button>
+        </div>
+        <div class="god-row">
+          <select v-model="stockTarget" class="god-select" :disabled="godPending">
+            <option v-for="s in store.stocks" :key="s.stock_id" :value="s.stock_id">{{ s.name }}</option>
+          </select>
+          <input v-model.number="stockPrice" class="god-qty" type="number" min="1" :disabled="godPending" />
+          <button class="god-btn" :disabled="godPending || !stockTarget" @click="setStockPrice">调价</button>
         </div>
       </div>
 
@@ -821,6 +852,9 @@ function teleportLocations(): WorldLocation[] {
 }
 .need-fill.money {
   background: #ffd54f;
+}
+.need-fill.mood {
+  background: #ba68c8;
 }
 .need-value {
   width: 28px;

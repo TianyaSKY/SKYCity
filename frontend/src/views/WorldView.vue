@@ -13,11 +13,18 @@ import LocationPanel from '../components/LocationPanel.vue';
 import AgentPanel from '../components/AgentPanel.vue';
 import SpeechBubble from '../components/SpeechBubble.vue';
 import WorldClockBar from '../components/WorldClockBar.vue';
+import LocationLabels from '../components/LocationLabels.vue';
+import AgentNameplates from '../components/AgentNameplates.vue';
+import TaskBoard from '../components/TaskBoard.vue';
+import StockPanel from '../components/StockPanel.vue';
 
 const DEFAULT_AGENT_COLOR = '#9ee6b0';
 
 const store = useWorldStore();
 const host = ref<HTMLElement | null>(null);
+
+/** Static world-space anchor (px) per location for the label overlay. */
+const locationAnchors = ref<{ location_id: string; x: number; y: number }[]>([]);
 
 let renderer: WorldRenderer | null = null;
 let camera: CameraController | null = null;
@@ -37,6 +44,12 @@ onMounted(async () => {
     const bundle = await loadMapBundle(apiBase);
     worldConfig = bundle.config;
     renderer.renderWorld(bundle.config, bundle.texture);
+    // Labels sit above each building's top edge, centered on its origin tile.
+    locationAnchors.value = bundle.config.locations.map((loc) => ({
+      location_id: loc.location_id,
+      x: (loc.col + 0.5) * bundle.config.tileSize,
+      y: loc.row * bundle.config.tileSize - 2,
+    }));
 
     camera = new CameraController(renderer.app, renderer.world);
     camera.attach();
@@ -200,10 +213,26 @@ onBeforeUnmount(() => {
     <div class="hud hud-top-right">
       <span class="tile-readout">tile {{ tileLabel }}</span>
     </div>
+    <div class="hud hud-top-left" style="top: 44px">
+      <TaskBoard />
+    </div>
+    <div class="hud hud-top-right" style="top: 44px">
+      <StockPanel />
+    </div>
     <div class="hud hud-bottom">
       <EventStream />
     </div>
     <SpeechBubble :bubbles="store.bubbles" :agent-screen-pos="bubbleScreenPos" />
+    <LocationLabels
+      :anchors="locationAnchors"
+      :locations="store.locations"
+      :world-to-screen="(x, y) => (renderer ? renderer.worldToScreen(x, y) : { x, y })"
+    />
+    <AgentNameplates
+      :agents="store.agents"
+      :agent-screen-pos="bubbleScreenPos"
+      :bubbles="store.bubbles"
+    />
     <div class="hud hud-right">
       <AgentPanel />
     </div>
@@ -247,6 +276,9 @@ onBeforeUnmount(() => {
 .hud-top-right {
   top: 12px;
   right: 12px;
+}
+.hud-top-right :deep(*) {
+  pointer-events: auto;
 }
 .hud-bottom {
   bottom: 12px;

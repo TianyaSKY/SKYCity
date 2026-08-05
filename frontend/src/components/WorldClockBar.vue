@@ -14,6 +14,7 @@ const WEATHER_OPTIONS = [
 ] as const;
 
 const weatherPending = ref(false);
+const manageBusy = ref(false);
 
 /** Post a change_weather god action; the select re-syncs from store.weather. */
 async function onWeatherChange(e: Event): Promise<void> {
@@ -37,14 +38,63 @@ async function onWeatherChange(e: Event): Promise<void> {
   }
 }
 
+async function onWorldChange(e: Event): Promise<void> {
+  const select = e.target as HTMLSelectElement;
+  if (select.value === store.worldId || !select.value) return;
+  try {
+    await store.switchWorld(select.value);
+  } catch {
+    select.value = store.worldId ?? '';
+  }
+}
+
+async function onNewWorld(): Promise<void> {
+  if (manageBusy.value) return;
+  const name = window.prompt('新世界名称', '晨露村庄');
+  if (!name) return;
+  manageBusy.value = true;
+  try {
+    await store.createNewWorld(name);
+  } finally {
+    manageBusy.value = false;
+  }
+}
+
+async function onDeleteWorld(): Promise<void> {
+  if (manageBusy.value || !store.worldId) return;
+  const label = store.worldId.replace(/^world_/, '');
+  if (!window.confirm(`确定删除世界 #${label}？其全部数据（居民、对话、记忆、存档）将永久删除。`)) return;
+  manageBusy.value = true;
+  try {
+    await store.deleteWorld(store.worldId);
+  } finally {
+    manageBusy.value = false;
+  }
+}
+
 const connLabel = (() => ({ connected: '已连接', connecting: '连接中', disconnected: '未连接' }))();
-const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
+const worldLabel = (w: { world_id: string; name: string }): string =>
+  `#${w.world_id.replace(/^world_/, '')} ${w.name}`;
 </script>
 
 <template>
   <div class="clock-bar">
     <span class="conn" :class="store.connection"><span class="dot" />{{ connLabel[store.connection] }}</span>
-    <span class="chip">世界 #{{ worldShort() }}</span>
+    <select
+      class="world-select"
+      :value="store.worldId ?? ''"
+      :disabled="store.connection !== 'connected' || manageBusy"
+      title="切换世界"
+      @change="onWorldChange"
+    >
+      <option
+        v-for="w in store.worlds"
+        :key="w.world_id"
+        :value="w.world_id"
+      >
+        {{ worldLabel(w) }}
+      </option>
+    </select>
     <span class="time">{{ store.timeLabel }}</span>
     <span class="day">{{ store.dayLabel }}</span>
     <label class="weather" title="改变天气">
@@ -57,6 +107,22 @@ const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
         <option v-for="w in WEATHER_OPTIONS" :key="w.value" :value="w.value">{{ w.label }}</option>
       </select>
     </label>
+    <button
+      class="manage-btn"
+      :disabled="store.connection !== 'connected' || manageBusy"
+      title="创建新世界"
+      @click="onNewWorld"
+    >
+      ＋新世界
+    </button>
+    <button
+      class="manage-btn danger"
+      :disabled="store.connection !== 'connected' || manageBusy || !store.worldId"
+      title="删除当前世界"
+      @click="onDeleteWorld"
+    >
+      删除
+    </button>
     <span class="spacer" />
     <div class="speed-group">
       <button
@@ -116,11 +182,37 @@ const worldShort = (): string => store.worldId?.replace(/^world_/, '') ?? '—';
   background: #e53935;
   box-shadow: 0 0 6px #e53935;
 }
-.chip {
-  padding: 1px 8px;
-  border-radius: 999px;
+.world-select {
+  max-width: 170px;
   background: rgba(255, 255, 255, 0.1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  color: #cde8d5;
+  font-size: 12px;
+  padding: 2px 6px;
+}
+.world-select:disabled {
+  opacity: 0.5;
+}
+.manage-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  color: #cde8d5;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.manage-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+.manage-btn.danger {
+  color: #ffb4a2;
+  border-color: rgba(229, 57, 53, 0.5);
+}
+.manage-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .time {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

@@ -25,7 +25,17 @@ export interface WaitAction {
   reason?: string | null;
 }
 
-export type AgentAction = MoveAction | WaitAction | null;
+/** An in-flight work shift (backend AgentActionWork; R10 settles at ends_at). */
+export interface WorkAction {
+  type: 'work';
+  job_id: string;
+  job_name?: string | null;
+  started_at: number;
+  ends_at: number;
+  reason?: string | null;
+}
+
+export type AgentAction = MoveAction | WaitAction | WorkAction | null;
 
 /** One inventory entry of an agent (item catalog keyed by item_id). */
 export interface InventoryItem {
@@ -42,6 +52,7 @@ export interface AgentSnapshot {
   location_id: string | null;
   hunger: number;
   energy: number;
+  mood: number;
   money: number;
   inventory: InventoryItem[];
   action: AgentAction;
@@ -60,6 +71,45 @@ export interface WorldClockState {
 /** Location as reported by the snapshot: MapLocation plus the open flag. */
 export interface WorldLocation extends MapLocation {
   open: boolean;
+}
+
+/** One agent currently inside a location (location detail endpoint). */
+export interface LocationOccupant {
+  agent_id: string;
+  name: string;
+}
+
+/** One product a store sells/buys, with live stock (location detail endpoint). */
+export interface LocationProduct {
+  item_id: string;
+  name: string;
+  sell_price: number;
+  buy_price: number;
+  stock: number;
+}
+
+/** One work offer at a location (location detail endpoint). */
+export interface LocationJob {
+  job_id: string;
+  name: string;
+  wage: number;
+  duration_minutes: number;
+}
+
+/** Full location detail: snapshot fields + occupants + products + jobs. */
+export interface LocationDetail {
+  location_id: string;
+  name: string;
+  location_type: string;
+  col: number;
+  row: number;
+  capacity: number;
+  open_hour: number;
+  close_hour: number;
+  open: boolean;
+  occupants: LocationOccupant[];
+  products: LocationProduct[];
+  jobs: LocationJob[];
 }
 
 /** Payload of the initial world_snapshot event / GET snapshot response. */
@@ -117,6 +167,8 @@ export interface ItemUsedPayload {
   item_name: string;
   hunger_before: number;
   hunger_after: number;
+  mood_before: number;
+  mood_after: number;
 }
 
 /** Payload of the WS money_changed event. */
@@ -139,12 +191,22 @@ export interface NeedsChangedPayload {
   agent_id: string;
   hunger: number;
   energy: number;
+  mood: number;
 }
 
 /** Payload of the WS store_restocked event. */
 export interface StoreRestockedPayload {
   store_id: string;
   restocked: InventoryItem[];
+}
+
+/** Payload of the WS store_price_changed event (M12 D5 promos). */
+export interface StorePriceChangedPayload {
+  store_id: string;
+  item_id: string;
+  item_name: string;
+  sell_price: number;
+  promo: boolean;
 }
 
 export type WorldEventType =
@@ -172,6 +234,7 @@ export type WorldEventType =
   | 'inventory_changed'
   | 'needs_changed'
   | 'store_restocked'
+  | 'store_price_changed'
   | 'memory_created'
   | 'relationship_changed'
   | 'daily_reflection'
@@ -180,6 +243,12 @@ export type WorldEventType =
   | 'god_teleport'
   | 'item_spawned'
   | 'store_stock_changed'
+  | 'stock_price_changed'
+  | 'stock_bought'
+  | 'stock_sold'
+  | 'dividend_paid'
+  | 'money_transferred'
+  | 'item_given'
   | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */
@@ -232,6 +301,7 @@ export interface AgentDetail {
   location_id: string | null;
   hunger: number;
   energy: number;
+  mood: number;
   money: number;
   inventory: InventoryItem[];
   action: AgentAction;
@@ -311,6 +381,86 @@ export interface StoreStockChangedPayload {
   store_id: string;
   item_id: string;
   quantity: number;
+}
+
+/** One listed stock quote (GET .../stocks entry, M10). */
+export interface StockItem {
+  stock_id: string;
+  name: string;
+  price: number;
+  prev_price: number;
+  day_business: number;
+  last_div_per_share: number;
+  source: string;
+  company_id: string;
+}
+
+/** One holding row (GET .../stocks → holdings, M10). */
+export interface StockHolding {
+  agent_id: string;
+  stock_id: string;
+  shares: number;
+}
+
+/** Response of GET .../stocks (M10): all quotes + all holdings. */
+export interface StocksResponse {
+  stocks: StockItem[];
+  holdings: StockHolding[];
+}
+
+/** Payload of the WS stock_price_changed event (M10). */
+export interface StockPriceChangedPayload {
+  stock_id: string;
+  stock_name: string;
+  price: number;
+  prev_price: number;
+  day_business: number;
+}
+
+/** Payload of the WS stock_bought event (M10). */
+export interface StockBoughtPayload {
+  agent_id: string;
+  stock_id: string;
+  stock_name: string;
+  shares: number;
+  unit_price: number;
+  total: number;
+}
+
+/** Payload of the WS stock_sold event (M10). */
+export interface StockSoldPayload {
+  agent_id: string;
+  stock_id: string;
+  stock_name: string;
+  shares: number;
+  unit_price: number;
+  total: number;
+}
+
+/** Payload of the WS dividend_paid event (M10). */
+export interface DividendPaidPayload {
+  stock_id: string;
+  stock_name: string;
+  div_per_share: number;
+  payouts: { agent_id: string; shares: number; amount: number }[];
+}
+
+/** Payload of the WS money_transferred event (M11). */
+export interface MoneyTransferredPayload {
+  from_agent_id: string;
+  to_agent_id: string;
+  amount: number;
+  reason?: string | null;
+}
+
+/** Payload of the WS item_given event (M11). */
+export interface ItemGivenPayload {
+  from_agent_id: string;
+  to_agent_id: string;
+  item_id: string;
+  item_name: string;
+  quantity: number;
+  reason?: string | null;
 }
 
 /** Readable event line pushed into the store's event stream. */

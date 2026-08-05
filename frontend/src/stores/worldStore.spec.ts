@@ -8,9 +8,11 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
-import { useWorldStore } from './worldStore';
+import { getLocationDetail as getLocationDetailApi } from '../api/client';
+import { actionRemainingMinutes, taskLabelOf, taskPriority, useWorldStore } from './worldStore';
 import type {
   AgentSnapshot,
+  LocationDetail,
   WorldEventEnvelope,
   WorldLocation,
   WorldSnapshotPayload,
@@ -22,9 +24,24 @@ vi.mock('../api/client', () => ({
   getAgentDetail: vi.fn(),
   getConversations: vi.fn(),
   getDecisions: vi.fn(),
+  getLocationDetail: vi.fn(async () => ({
+    location_id: '',
+    name: '',
+    location_type: '',
+    col: 0,
+    row: 0,
+    capacity: 0,
+    open_hour: 0,
+    close_hour: 24,
+    open: true,
+    occupants: [],
+    products: [],
+    jobs: [],
+  })),
   getMemories: vi.fn(),
   getRelationships: vi.fn(),
   getSnapshot: vi.fn(),
+  getStocks: vi.fn(async () => ({ stocks: [], holdings: [] })),
   listWorlds: vi.fn(),
   pauseWorld: vi.fn(),
   postAgentAction: vi.fn(),
@@ -45,6 +62,7 @@ const AGENT_LINXIA: AgentSnapshot = {
   location_id: 'village_plaza',
   hunger: 50,
   energy: 80,
+  mood: 100,
   money: 50,
   inventory: [{ item_id: 'bread', quantity: 1 }],
   action: null,
@@ -58,6 +76,7 @@ const AGENT_ZHANGMING: AgentSnapshot = {
   location_id: 'village_plaza',
   hunger: 40,
   energy: 70,
+  mood: 100,
   money: 20,
   inventory: [],
   action: null,
@@ -374,6 +393,44 @@ describe('applyEvent event mapping', () => {
     expect(store.events[0].text).toBe('林夏 开始工作（种田，10 分钟）');
   });
 
+  it('work_started: sets the live work action (start/end derived)', () => {
+    store.applyEvent(env(1, 'work_started', {
+      agent_id: 'agent_linxia',
+      job_id: 'job_farm',
+      job_name: '种田',
+      duration_minutes: 10,
+      ends_at: 610,
+    }));
+    const action = store.agents[0].action;
+    expect(action).not.toBeNull();
+    expect(action?.type).toBe('work');
+    if (action?.type === 'work') {
+      expect(action.job_id).toBe('job_farm');
+      expect(action.job_name).toBe('种田');
+      expect(action.started_at).toBe(600);
+      expect(action.ends_at).toBe(610);
+    }
+  });
+
+  it('work_completed: clears the live work action', () => {
+    store.applyEvent(env(1, 'work_started', {
+      agent_id: 'agent_linxia',
+      job_id: 'job_farm',
+      job_name: '种田',
+      duration_minutes: 10,
+      ends_at: 610,
+    }));
+    store.applyEvent(env(2, 'work_completed', {
+      agent_id: 'agent_linxia',
+      job_id: 'job_farm',
+      job_name: '种田',
+      wage: 30,
+      products: [],
+      energy_spent: 10,
+    }));
+    expect(store.agents[0].action).toBeNull();
+  });
+
   it('work_completed: wage + catalog item products line', () => {
     store.applyEvent(env(1, 'work_completed', {
       agent_id: 'agent_linxia',
@@ -445,10 +502,11 @@ describe('applyEvent event mapping', () => {
     expect(store.events).toHaveLength(0);
   });
 
-  it('needs_changed: patches hunger/energy, no stream line', () => {
-    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', hunger: 90, energy: 25 }));
+  it('needs_changed: patches hunger/energy/mood, no stream line', () => {
+    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', hunger: 90, energy: 25, mood: 55 }));
     expect(store.agents[0].hunger).toBe(90);
     expect(store.agents[0].energy).toBe(25);
+    expect(store.agents[0].mood).toBe(55);
     expect(store.events).toHaveLength(0);
   });
 
@@ -461,6 +519,25 @@ describe('applyEvent event mapping', () => {
       ],
     }));
     expect(store.events[0].text).toBe('村口商店补货完成（面包×5、牛奶×3）');
+  });
+
+  it('store_price_changed: promo and price-restore lines', () => {
+    store.applyEvent(env(1, 'store_price_changed', {
+      store_id: 'village_shop',
+      item_id: 'bread',
+      item_name: '面包',
+      sell_price: 10,
+      promo: true,
+    }));
+    expect(store.events[0].text).toBe('村口商店的面包促销：10 金币');
+    store.applyEvent(env(2, 'store_price_changed', {
+      store_id: 'village_shop',
+      item_id: 'bread',
+      item_name: '面包',
+      sell_price: 12,
+      promo: false,
+    }));
+    expect(store.events[0].text).toBe('村口商店的面包恢复原价：12 金币');
   });
 
   it('god_action_applied: intervention line with command + target + reason', () => {
@@ -508,6 +585,133 @@ describe('applyEvent event mapping', () => {
   });
 });
 
+describe('applyEvent M10 stock events', () => {
+  let store: ReturnType<typeof useWorldStore>;
+
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+    // applySnapshot fires loadStocks(); let the mock's empty payload land
+    // first so the manual quote seeding below is not overwritten.
+    await Promise.resolve();
+    store.stocks = [
+      {
+        stock_id: 'stock_village_shop',
+        name: '晨露商店',
+        price: 100,
+        prev_price: 100,
+        day_business: 0,
+        last_div_per_share: 0,
+        source: 'store',
+        company_id: 'village_shop',
+      },
+    ];
+  });
+
+  it('stock_price_changed: quote row + panel price update; zero delta stays silent', () => {
+    store.applyEvent(env(1, 'stock_price_changed', {
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      price: 102,
+      prev_price: 100,
+      day_business: 3,
+    }));
+    expect(store.stocks[0].price).toBe(102);
+    expect(store.stocks[0].prev_price).toBe(100);
+    expect(store.stocks[0].day_business).toBe(3);
+    expect(store.events[0].text).toBe('晨露商店 股价 102（+2）');
+
+    // Unchanged price still syncs the panel but adds no stream line.
+    store.applyEvent(env(2, 'stock_price_changed', {
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      price: 102,
+      prev_price: 102,
+      day_business: 3,
+    }));
+    expect(store.stocks[0].prev_price).toBe(102);
+    expect(store.events).toHaveLength(1);
+  });
+
+  it('stock_bought: holding grows + event line', () => {
+    store.applyEvent(env(1, 'stock_bought', {
+      agent_id: 'agent_linxia',
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      shares: 2,
+      unit_price: 20,
+      total: 40,
+    }));
+    expect(store.holdings['agent_linxia']['stock_village_shop']).toBe(2);
+    expect(store.events[0].text).toBe('林夏 买入 晨露商店 2股 @20（共40金币）');
+  });
+
+  it('stock_sold: holding shrinks, removed at zero', () => {
+    store.holdings = { agent_linxia: { stock_village_shop: 2 } };
+    store.applyEvent(env(1, 'stock_sold', {
+      agent_id: 'agent_linxia',
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      shares: 1,
+      unit_price: 20,
+      total: 20,
+    }));
+    expect(store.holdings['agent_linxia']['stock_village_shop']).toBe(1);
+    expect(store.events[0].text).toBe('林夏 卖出 晨露商店 1股 @20（得20金币）');
+
+    store.applyEvent(env(2, 'stock_sold', {
+      agent_id: 'agent_linxia',
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      shares: 1,
+      unit_price: 20,
+      total: 20,
+    }));
+    expect(store.holdings['agent_linxia']['stock_village_shop']).toBeUndefined();
+  });
+
+  it('dividend_paid: dividend event line', () => {
+    store.applyEvent(env(1, 'dividend_paid', {
+      stock_id: 'stock_village_shop',
+      stock_name: '晨露商店',
+      div_per_share: 2,
+      payouts: [{ agent_id: 'agent_linxia', shares: 2, amount: 4 }],
+    }));
+    expect(store.events[0].text).toBe('晨露商店 每股分红 2 金币');
+  });
+});
+
+describe('applyEvent M11 transfer events', () => {
+  let store: ReturnType<typeof useWorldStore>;
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+  });
+
+  it('money_transferred: 事件行', () => {
+    store.applyEvent(env(1, 'money_transferred', {
+      from_agent_id: 'agent_linxia',
+      to_agent_id: 'agent_zhangming',
+      amount: 30,
+    }));
+    expect(store.events[0].text).toBe('林夏 转账 30 金币给 张明');
+  });
+
+  it('item_given: 事件行', () => {
+    store.applyEvent(env(1, 'item_given', {
+      from_agent_id: 'agent_linxia',
+      to_agent_id: 'agent_zhangming',
+      item_id: 'bread',
+      item_name: '面包',
+      quantity: 2,
+    }));
+    expect(store.events[0].text).toBe('林夏 把 面包×2 给了 张明');
+  });
+});
+
 describe('getters', () => {
   let store: ReturnType<typeof useWorldStore>;
 
@@ -552,5 +756,147 @@ describe('getters', () => {
 
     // Unknown location -> closed.
     expect(store.isOpen('nowhere')).toBe(false);
+  });
+});
+
+describe('location detail', () => {
+  // The module is mocked by vi.mock above; the binding is the vi.fn itself.
+  const getLocationDetailMock = vi.mocked(getLocationDetailApi);
+
+  beforeEach(() => {
+    getLocationDetailMock.mockReset();
+  });
+
+  async function flush(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+
+  it('selectLocation fetches the detail and stores it', async () => {
+    const store = useWorldStore();
+    store.worldId = 'world_e2e';
+    const detail = {
+      location_id: 'village_shop',
+      name: '村口商店',
+      location_type: 'shop',
+      col: 5,
+      row: 5,
+      capacity: 5,
+      open_hour: 8,
+      close_hour: 18,
+      open: true,
+      occupants: [{ agent_id: 'agent_linxia', name: '林夏' }],
+      products: [{ item_id: 'bread', name: '面包', sell_price: 5, buy_price: 3, stock: 12 }],
+      jobs: [{ job_id: 'job_shop_attendant', name: '商店值班', wage: 60, duration_minutes: 240 }],
+    };
+    getLocationDetailMock.mockResolvedValue(detail);
+
+    store.selectLocation(LOCATION_SHOP);
+    await flush();
+
+    expect(getLocationDetailMock).toHaveBeenCalledWith('world_e2e', 'village_shop');
+    expect(store.locationDetail).toEqual(detail);
+  });
+
+  it('drops stale detail when the selection changed mid-flight', async () => {
+    const store = useWorldStore();
+    store.worldId = 'world_e2e';
+    const { promise: shopResponse, resolve: resolveShop } = Promise.withResolvers<LocationDetail>();
+    getLocationDetailMock
+      .mockImplementationOnce(() => shopResponse)
+      .mockResolvedValue({ ...baseShopDetail(), location_id: 'village_house', name: '林夏的家' });
+
+    store.selectLocation(LOCATION_SHOP);
+    store.selectLocation(LOCATION_HOUSE);
+    await flush();
+    // The house fetch resolved while the shop request is still in flight.
+    expect(store.locationDetail).toEqual({ ...baseShopDetail(), location_id: 'village_house', name: '林夏的家' });
+
+    // The slow shop response lands late; it must not overwrite the house.
+    resolveShop({ ...baseShopDetail(), location_id: 'village_shop' });
+    await flush();
+    expect(store.locationDetail?.location_id).toBe('village_house');
+  });
+
+  it('refetches the selected location on arrival/purchase/restock events only', async () => {
+    const store = useWorldStore();
+    store.worldId = 'world_e2e';
+    getLocationDetailMock.mockResolvedValue(baseShopDetail());
+    store.selectLocation(LOCATION_SHOP);
+    await flush();
+    getLocationDetailMock.mockClear();
+
+    store.applyEvent(env(1, 'agent_move_completed', { agent_id: 'agent_linxia', at: [5, 5] }));
+    await flush();
+    expect(getLocationDetailMock).toHaveBeenCalledTimes(1);
+    expect(getLocationDetailMock).toHaveBeenCalledWith('world_e2e', 'village_shop');
+
+    store.applyEvent(env(2, 'item_purchased', { agent_id: 'agent_linxia', item_id: 'bread', quantity: 1 }));
+    await flush();
+    expect(getLocationDetailMock).toHaveBeenCalledTimes(2);
+
+    store.applyEvent(env(3, 'needs_changed', { agent_id: 'agent_linxia', hunger: 40 }));
+    await flush();
+    expect(getLocationDetailMock).toHaveBeenCalledTimes(2);
+
+    // No selection -> no refetch traffic.
+    store.selectLocation(null);
+    await flush();
+    getLocationDetailMock.mockClear();
+    store.applyEvent(env(4, 'agent_move_completed', { agent_id: 'agent_linxia', at: [5, 5] }));
+    await flush();
+    expect(getLocationDetailMock).not.toHaveBeenCalled();
+  });
+});
+
+function baseShopDetail(): LocationDetail {
+  return {
+    location_id: 'village_shop',
+    name: '村口商店',
+    location_type: 'shop',
+    col: 5,
+    row: 5,
+    capacity: 5,
+    open_hour: 8,
+    close_hour: 18,
+    open: true,
+    occupants: [],
+    products: [],
+    jobs: [],
+  };
+}
+
+describe('task label helpers', () => {
+  const locations: WorldLocation[] = [LOCATION_SHOP, LOCATION_HOUSE];
+
+  it('taskLabelOf: idle / move-to-named-location / wait / work / conversation', () => {
+    expect(taskLabelOf(null, locations)).toBe('空闲');
+    expect(taskLabelOf({ type: 'move', from: [3, 4], to: [5, 5], started_at: 600, ends_at: 610 }, locations)).toBe(
+      '前往 村口商店',
+    );
+    expect(taskLabelOf({ type: 'wait', ends_at: 610 }, locations)).toBe('等待中');
+    expect(taskLabelOf({ type: 'work', job_id: 'job_farm', job_name: '种田', started_at: 600, ends_at: 610 }, locations)).toBe(
+      '工作中 · 种田',
+    );
+    // Job name may be missing on stale snapshots; fall back to the raw id.
+    expect(taskLabelOf({ type: 'work', job_id: 'job_farm', started_at: 600, ends_at: 610 }, locations)).toBe(
+      '工作中 · job_farm',
+    );
+    // An idle agent in an active conversation reads as 对话中.
+    expect(taskLabelOf(null, locations, true)).toBe('对话中');
+  });
+
+  it('actionRemainingMinutes: clamps to 0, null when idle', () => {
+    expect(actionRemainingMinutes({ type: 'wait', ends_at: 610 }, 605)).toBe(5);
+    expect(actionRemainingMinutes({ type: 'work', job_id: 'job_farm', started_at: 600, ends_at: 610 }, 615)).toBe(0);
+    expect(actionRemainingMinutes(null, 600)).toBeNull();
+  });
+
+  it('taskPriority: conversation > work > move > wait > idle', () => {
+    expect(taskPriority(null, true)).toBe(0);
+    expect(taskPriority({ type: 'work', job_id: 'job_farm', started_at: 600, ends_at: 610 }, false)).toBe(1);
+    expect(taskPriority({ type: 'move', from: [3, 4], to: [5, 5], started_at: 600, ends_at: 610 }, false)).toBe(2);
+    expect(taskPriority({ type: 'wait', ends_at: 610 }, false)).toBe(3);
+    expect(taskPriority(null, false)).toBe(4);
   });
 });

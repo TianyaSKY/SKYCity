@@ -12,12 +12,15 @@ import { defineStore } from 'pinia';
 import {
   checkHealth,
   createWorld,
+  deleteWorld as deleteWorldApi,
   getAgentDetail,
   getConversations,
   getDecisions,
+  getLocationDetail,
   getMemories,
   getRelationships,
   getSnapshot,
+  getStocks,
   listWorlds,
   pauseWorld,
   postAgentAction,
@@ -40,8 +43,10 @@ import type {
   GodActionResult,
   GodActionRequest,
   InventoryItem,
+  LocationDetail,
   MemoryItem,
   RelationshipItem,
+  StockItem,
   WorldEventEnvelope,
   WorldEventItem,
   WorldEventType,
@@ -123,6 +128,10 @@ export const TOOL_LABELS: Record<string, string> = {
   buy_item: '购买',
   sell_item: '出售',
   use_item: '使用',
+  buy_stock: '买入股票',
+  sell_stock: '卖出股票',
+  transfer_money: '转账',
+  give_item: '赠物',
 };
 
 /** Map backend god-action command types onto Chinese labels. */
@@ -137,6 +146,7 @@ export const GOD_COMMAND_LABELS: Record<string, string> = {
   teleport: '传送',
   public_event: '公共事件',
   change_store_stock: '修改库存',
+  change_stock_price: '调整股价',
 };
 
 /** A live speech bubble; at most one per agent (newest wins). */
@@ -397,6 +407,11 @@ function eventText(
       const restocked = itemsText(p.restocked);
       return restocked ? `${storeName}补货完成（${restocked}）` : `${storeName}补货完成`;
     }
+    case 'store_price_changed': {
+      const name = locationNameById(locations, p.store_id) || '杂货店';
+      const item = itemLabel(p.item_id, p.item_name);
+      return p.promo ? `${name}的${item}促销：${p.sell_price} 金币` : `${name}的${item}恢复原价：${p.sell_price} 金币`;
+    }
     case 'memory_created': {
       const name = agentName(agents, p.agent_id);
       const text = typeof p.text === 'string' ? truncate(p.text, 30) : '';
@@ -444,6 +459,37 @@ function eventText(
       const qty = typeof p.quantity === 'number' ? p.quantity : 0;
       return `商店库存：${item} → ${qty}`;
     }
+    case 'stock_price_changed': {
+      const price = typeof p.price === 'number' ? p.price : 0;
+      const prev = typeof p.prev_price === 'number' ? p.prev_price : 0;
+      const delta = price - prev;
+      if (delta === 0) return ''; // 无变化不刷屏
+      const sign = delta > 0 ? '+' : '';
+      return `${typeof p.stock_name === 'string' ? p.stock_name : p.stock_id} 股价 ${price}（${sign}${delta}）`;
+    }
+    case 'stock_bought': {
+      const name = agentName(agents, p.agent_id);
+      return `${name} 买入 ${p.stock_name} ${p.shares}股 @${p.unit_price}（共${p.total}金币）`;
+    }
+    case 'stock_sold': {
+      const name = agentName(agents, p.agent_id);
+      return `${name} 卖出 ${p.stock_name} ${p.shares}股 @${p.unit_price}（得${p.total}金币）`;
+    }
+    case 'dividend_paid':
+      return `${p.stock_name} 每股分红 ${p.div_per_share} 金币`;
+    case 'money_transferred': {
+      const from = agentName(agents, p.from_agent_id);
+      const to = agentName(agents, p.to_agent_id);
+      const amount = typeof p.amount === 'number' ? p.amount : 0;
+      return `${from} 转账 ${amount} 金币给 ${to}`;
+    }
+    case 'item_given': {
+      const from = agentName(agents, p.from_agent_id);
+      const to = agentName(agents, p.to_agent_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+      return `${from} 把 ${item}×${qty} 给了 ${to}`;
+    }
     // inventory_changed / needs_changed carry no stream text; they only sync
     // agent state in applyEvent.
     case 'inventory_changed':
@@ -458,6 +504,41 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
   return locations.find((l) => l.col === cell[0] && l.row === cell[1])?.location_id ?? null;
 }
 
+/** Human-readable current task of an agent (e.g. "工作中 · 农场劳作"). */
+export function taskLabelOf(
+  action: AgentSnapshot['action'],
+  locations: WorldLocation[],
+  inConversation = false,
+): string {
+  if (inConversation) return '对话中';
+  if (!action) return '空闲';
+  if (action.type === 'move') {
+    const loc = locations.find((l) => l.col === action.to[0] && l.row === action.to[1]);
+    return `前往 ${loc?.name ?? `(${action.to[0]}, ${action.to[1]})`}`;
+  }
+  if (action.type === 'wait') return '等待中';
+  if (action.type === 'work') return `工作中 · ${action.job_name ?? action.job_id}`;
+  return '空闲';
+}
+
+/** Remaining game minutes until the in-flight action ends (null when idle). */
+export function actionRemainingMinutes(
+  action: AgentSnapshot['action'],
+  worldTime: number,
+): number | null {
+  if (!action) return null;
+  return Math.max(0, action.ends_at - worldTime);
+}
+
+/** Sort priority for the task board: busiest first. */
+export function taskPriority(action: AgentSnapshot['action'], inConversation: boolean): number {
+  if (inConversation) return 0;
+  if (!action) return 4;
+  if (action.type === 'work') return 1;
+  if (action.type === 'move') return 2;
+  return 3;
+}
+
 export const useWorldStore = defineStore('world', {
   state: () => ({
     health: null as HealthInfo | null,
@@ -466,10 +547,13 @@ export const useWorldStore = defineStore('world', {
     mapError: null as string | null,
     pointerTile: null as TileCoord | null,
     selectedLocation: null as MapLocation | null,
+    /** REST detail of the selected location (occupants/products/jobs). */
+    locationDetail: null as LocationDetail | null,
     /** Game minutes since midnight; 480 = 08:00. */
     worldTime: 480,
     connection: 'disconnected' as WorldSocketStatus,
     worldId: null as string | null,
+    worlds: [] as WorldListItem[],
     speed: 1,
     paused: false,
     weather: 'sunny',
@@ -495,6 +579,10 @@ export const useWorldStore = defineStore('world', {
     activeConversations: {} as Record<string, { agent_ids: [string, string] }>,
     /** Live speech bubbles (one per agent, newest wins; capped). */
     bubbles: [] as BubbleItem[],
+    /** M10: town stock quotes (REST-loaded, WS-updated). */
+    stocks: [] as StockItem[],
+    /** M10: shares per agent per stock (agent_id → stock_id → shares). */
+    holdings: {} as Record<string, Record<string, number>>,
   }),
   getters: {
     agentById: (state) => (agentId: string): AgentSnapshot | undefined =>
@@ -547,6 +635,19 @@ export const useWorldStore = defineStore('world', {
     },
     selectLocation(location: MapLocation | null): void {
       this.selectedLocation = location;
+      this.locationDetail = null;
+      if (location) void this.fetchLocationDetail(location.location_id);
+    },
+
+    /** Fetch the selected location's detail; stale responses are dropped. */
+    async fetchLocationDetail(locationId: string): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const detail = await getLocationDetail(this.worldId, locationId);
+        if (this.selectedLocation?.location_id === locationId) this.locationDetail = detail;
+      } catch {
+        // Selection stays; the panel shows base info until a refetch.
+      }
     },
 
     /** Full state overwrite from a world snapshot (WS initial or REST resync). */
@@ -570,6 +671,33 @@ export const useWorldStore = defineStore('world', {
       this.activeConversations = {};
       this.bubbles = [];
       this.ensureAgentColors(this.agents);
+      // M10: snapshots arrive on connect/reconnect/ensureWorld, so a REST
+      // refresh naturally supersedes any stale incremental stock state.
+      void this.loadStocks();
+    },
+
+    /** M10: fetch all quotes + holdings (REST full state). */
+    async loadStocks(): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const data = await getStocks(this.worldId);
+        this.stocks = data.stocks;
+        const map: Record<string, Record<string, number>> = {};
+        for (const h of data.holdings) (map[h.agent_id] ??= {})[h.stock_id] = h.shares;
+        this.holdings = map;
+      } catch {
+        // Best-effort; the next snapshot or WS events will refresh the panel.
+      }
+    },
+
+    /** M10: apply a signed share delta to one agent's holding (WS events). */
+    patchHolding(agentId: string, stockId: string, delta: number): void {
+      const next = (this.holdings[agentId]?.[stockId] ?? 0) + delta;
+      if (next <= 0) {
+        if (this.holdings[agentId]) delete this.holdings[agentId][stockId];
+      } else {
+        (this.holdings[agentId] ??= {})[stockId] = next;
+      }
     },
 
     /** Apply one incremental event (strictly ascending sequence). */
@@ -613,6 +741,12 @@ export const useWorldStore = defineStore('world', {
           break;
         case 'agent_wait_completed':
           this.completeAgentWait(p);
+          break;
+        case 'work_started':
+          this.startAgentWork(env, p);
+          break;
+        case 'work_completed':
+          this.completeAgentWork(p);
           break;
         case 'conversation_started': {
           const convId = typeof p.conversation_id === 'string' ? p.conversation_id : '';
@@ -664,7 +798,7 @@ export const useWorldStore = defineStore('world', {
           this.replaceAgentInventory(p.agent_id as string, p.items);
           break;
         case 'needs_changed':
-          this.patchAgentNeeds(p.agent_id as string, p.hunger, p.energy);
+          this.patchAgentNeeds(p.agent_id as string, p.hunger, p.energy, p.mood);
           break;
         case 'memory_created':
           // Panels are REST-backed; a fresh memory for the selected agent
@@ -693,6 +827,23 @@ export const useWorldStore = defineStore('world', {
             this.teleportAgent(p.agent_id, [p.to[0], p.to[1]], typeof p.location_id === 'string' ? p.location_id : null);
           }
           break;
+        case 'stock_price_changed': {
+          const s = this.stocks.find((x) => x.stock_id === p.stock_id);
+          if (s) {
+            s.price = Number(p.price);
+            s.prev_price = Number(p.prev_price);
+            s.day_business = Number(p.day_business ?? 0);
+          }
+          break;
+        }
+        case 'stock_bought':
+          this.patchHolding(String(p.agent_id), String(p.stock_id), Number(p.shares) || 0);
+          break;
+        case 'stock_sold':
+          this.patchHolding(String(p.agent_id), String(p.stock_id), -(Number(p.shares) || 0));
+          break;
+        case 'dividend_paid':
+          break; // 金额经 money_changed 到账, 面板显示不依赖此事件
         default:
           break;
       }
@@ -709,6 +860,24 @@ export const useWorldStore = defineStore('world', {
         });
         if (this.events.length > EVENT_CAP) this.events.length = EVENT_CAP;
       }
+
+      // The open location panel tracks live occupants/store stock: refetch
+      // the selected location's detail whenever an event can change it.
+      const selected = this.selectedLocation;
+      if (selected) {
+        switch (env.type) {
+          case 'agent_move_completed':
+          case 'agent_teleported':
+          case 'item_purchased':
+          case 'item_sold':
+          case 'store_restocked':
+          case 'store_price_changed':
+            void this.fetchLocationDetail(selected.location_id);
+            break;
+          default:
+            break;
+        }
+      }
     },
 
     /** Bootstrap: pick the first world (or create one), seed, and connect. */
@@ -717,14 +886,12 @@ export const useWorldStore = defineStore('world', {
         return;
       }
       try {
-        let worlds: WorldListItem[];
-        try {
-          worlds = await listWorlds();
-        } catch {
-          worlds = [];
-        }
+        await this.refreshWorlds();
+        let worlds = this.worlds;
         if (worlds.length === 0) {
-          worlds = [await createWorld('晨露村庄')];
+          await createWorld('晨露村庄');
+          await this.refreshWorlds(); // the create response has no name; refetch
+          worlds = this.worlds;
         }
         const world = worlds[0];
         this.worldId = world.world_id;
@@ -741,6 +908,47 @@ export const useWorldStore = defineStore('world', {
             ensureRetryTimer = null;
             void this.ensureWorld();
           }, 2000);
+        }
+      }
+    },
+
+    /** Reload the world list (best-effort; keeps the previous list on error). */
+    async refreshWorlds(): Promise<void> {
+      try {
+        this.worlds = await listWorlds();
+      } catch {
+        // transient backend hiccup — the list is only used for the switcher
+      }
+    },
+
+    /** Join another world: fetch its snapshot and re-point the WebSocket. */
+    async switchWorld(worldId: string): Promise<void> {
+      if (worldId === this.worldId && this.connection !== 'disconnected') return;
+      const snapshot = await getSnapshot(worldId);
+      this.worldId = worldId;
+      this.applySnapshot(snapshot);
+      this.mapError = null;
+      this.connect(worldId);
+    },
+
+    /** Create a brand-new world and join it. */
+    async createNewWorld(name: string): Promise<void> {
+      const created = await createWorld(name);
+      await this.refreshWorlds();
+      await this.switchWorld(created.world_id);
+    },
+
+    /** Delete a world; when it is the active one, join the next available. */
+    async deleteWorld(worldId: string): Promise<void> {
+      await deleteWorldApi(worldId);
+      await this.refreshWorlds();
+      if (this.worldId === worldId) {
+        const next = this.worlds[0];
+        if (next) {
+          await this.switchWorld(next.world_id);
+        } else {
+          this.worldId = null;
+          await this.ensureWorld(); // creates a fresh world
         }
       }
     },
@@ -968,12 +1176,13 @@ export const useWorldStore = defineStore('world', {
       agent.inventory = cleaned;
     },
 
-    /** Sync hunger/energy from a needs_changed event. */
-    patchAgentNeeds(agentId: string, hunger: unknown, energy: unknown): void {
+    /** Sync hunger/energy/mood from a needs_changed event. */
+    patchAgentNeeds(agentId: string, hunger: unknown, energy: unknown, mood: unknown): void {
       const agent = this.agents.find((a) => a.agent_id === agentId);
       if (!agent) return;
       if (typeof hunger === 'number') agent.hunger = hunger;
       if (typeof energy === 'number') agent.energy = energy;
+      if (typeof mood === 'number') agent.mood = mood;
     },
 
     /** Sync money from a money_changed event's authoritative balance. */
@@ -1042,6 +1251,29 @@ export const useWorldStore = defineStore('world', {
         agent.row = p.at[1] as number;
         agent.location_id = locationIdAt(this.locations, [agent.col, agent.row]);
       }
+      agent.action = null;
+    },
+
+    /** Reflect an in-flight work shift (R3: exclusive until work_completed). */
+    startAgentWork(env: WorldEventEnvelope, p: Record<string, unknown>): void {
+      const agent = this.agents.find((a) => a.agent_id === p.agent_id);
+      if (!agent) return;
+      const endsAt = typeof p.ends_at === 'number' ? p.ends_at : env.world_time;
+      const duration = typeof p.duration_minutes === 'number' ? p.duration_minutes : 0;
+      agent.action = {
+        type: 'work',
+        job_id: typeof p.job_id === 'string' ? p.job_id : '',
+        job_name: typeof p.job_name === 'string' ? p.job_name : null,
+        started_at: endsAt - duration,
+        ends_at: endsAt,
+        reason: typeof p.reason === 'string' ? p.reason : null,
+      };
+    },
+
+    /** Clear the work action; wage/products arrive via money/inventory events. */
+    completeAgentWork(p: Record<string, unknown>): void {
+      const agent = this.agents.find((a) => a.agent_id === p.agent_id);
+      if (!agent) return;
       agent.action = null;
     },
 
