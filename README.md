@@ -8,7 +8,7 @@
 
 - 64×40 瓦片小镇地图（Tiled JSON），PixiJS 整数倍缩放渲染
 - 世界时钟（游戏分钟制）：暂停 / 恢复 / 1× / 2× / 5× / 10×
-- 5 个智能体，由 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品
+- 6 个智能体（每人一份角色卡，可自行添加），由 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品
 - 真实对话：气泡、历史面板、交谈高亮、防无限对聊
 - 经济闭环：饥饿 → 工作 → 工资 → 商店购买 → 进食
 - 记忆系统（工作/情节/语义记忆 + 加权检索）与方向性人际关系
@@ -76,6 +76,47 @@ LLM_REFLECT_MODEL=deepseek-chat
 | `LLM_MAX_CONCURRENT` | `2` | 全局并发上限 |
 | `WORLD_DAILY_TOKEN_BUDGET` | `0` | 每世界每日 Token 预算（0=不限） |
 
+## 添加新智能体
+
+每个智能体只有一份数据：`world_data/identities/agent_xxx.json` 角色卡，包含身份（姓名/年龄/职业/背景/五因素）、`spawn` 出生点和可选的 `home`。出生点与住宅由 `tools/build_map.py` 从角色卡派生到地图，引擎也只读角色卡——加一个智能体只需写一个文件：
+
+1. 新建 `world_data/identities/agent_xxx.json`（参考现有角色卡）：
+
+   ```json
+   {
+     "id": "agent_xxx",
+     "name": "名字", "age": 30, "occupation": "职业",
+     "background": "背景故事", "values": [], "long_term_goals": [],
+     "speaking_style": "说话风格",
+     "personality": {
+       "openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5,
+       "agreeableness": 0.5, "emotional_stability": 0.5
+     },
+     "initial_money": 50,
+     "spawn": { "col": 33, "row": 20, "direction": "down" },
+     "home": { "location_id": "xxx_home", "name": "XXX的家", "col": 33, "row": 19 }
+   }
+   ```
+
+   `home` 可省略（无家的智能体出生在出生点格）；`initial_money` 默认 50。`spawn` 必填，`id` 必须等于文件名。
+
+2. 重新生成地图（可选，仅同步 tmj 里的可视化出生点/住宅；引擎只读角色卡，不跑也能建世界）：
+
+   ```bash
+   uv run --with pillow python tools/build_map.py
+   ```
+
+3. 重建世界让新智能体入场（智能体只在建世界时播种）：
+
+   ```bash
+   curl -X DELETE localhost:8000/api/worlds/world_001
+   curl -X POST localhost:8000/api/worlds \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"晨露村庄","autonomous":true}'
+   ```
+
+   前端无需改动：精灵、名牌、气泡都按快照动态渲染。新智能体自动使用现有的工作 / 商店 / 物品（要新工种就加 `world_data/jobs/jobs.json`，`location_id` 必须指向地图上存在的地点）。
+
 ## 测试
 
 ```bash
@@ -100,7 +141,7 @@ curl localhost:8000/api/worlds/world_001/replay              # 事件重放
 ```
 backend/     FastAPI + SQLAlchemy + 世界引擎 + LLM 智能体
 frontend/    Vue3 + Vite + Pinia + PixiJS 8
-world_data/  地图(tmj/tsj)、身份卡、物品、工作、商店种子数据
+world_data/  地图(tmj/tsj)、角色卡(身份+出生点+家)、物品、工作、商店种子数据
 tools/       地图生成器（build_map.py，确定性）
 docs/        架构、世界规则、事件协议、地图规范、智能体约定
 ```

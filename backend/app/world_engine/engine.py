@@ -50,9 +50,6 @@ TICK_INTERVAL = 0.1  # real seconds per engine tick
 # M12 D6: daily cost of living, deducted at 00:00 (floor 0, never debt).
 UPKEEP_PER_DAY = 5
 
-_HOME_SUFFIX = "_home"
-
-
 def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
     """M12 D5: deterministic 20% chance of a promo day for one product.
 
@@ -493,8 +490,10 @@ class WorldEngine:
 
     def _build_agent(self, world_id: str, spawn: Any) -> Agent:
         identity = self._load_identity(spawn.agent_id)
-        home_id = f"{spawn.agent_id.removeprefix('agent_')}{_HOME_SUFFIX}"
-        home_exists = any(loc.location_id == home_id for loc in self.world_config.locations)
+        home_id = spawn.home_id
+        home_exists = home_id is not None and any(
+            loc.location_id == home_id for loc in self.world_config.locations
+        )
         return Agent(
             world_id=world_id,
             agent_id=spawn.agent_id,

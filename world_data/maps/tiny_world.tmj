@@ -18194,92 +18194,6 @@
         {
           "height": 16,
           "id": 5,
-          "name": "linxia_home",
-          "properties": [
-            {
-              "name": "location_id",
-              "type": "string",
-              "value": "linxia_home"
-            },
-            {
-              "name": "name",
-              "type": "string",
-              "value": "林夏的家"
-            },
-            {
-              "name": "location_type",
-              "type": "string",
-              "value": "house"
-            },
-            {
-              "name": "capacity",
-              "type": "int",
-              "value": 4
-            },
-            {
-              "name": "open_hour",
-              "type": "int",
-              "value": 0
-            },
-            {
-              "name": "close_hour",
-              "type": "int",
-              "value": 24
-            }
-          ],
-          "rotation": 0,
-          "type": "location",
-          "visible": true,
-          "width": 16,
-          "x": 288,
-          "y": 416
-        },
-        {
-          "height": 16,
-          "id": 6,
-          "name": "zhangming_home",
-          "properties": [
-            {
-              "name": "location_id",
-              "type": "string",
-              "value": "zhangming_home"
-            },
-            {
-              "name": "name",
-              "type": "string",
-              "value": "张明的家"
-            },
-            {
-              "name": "location_type",
-              "type": "string",
-              "value": "house"
-            },
-            {
-              "name": "capacity",
-              "type": "int",
-              "value": 4
-            },
-            {
-              "name": "open_hour",
-              "type": "int",
-              "value": 0
-            },
-            {
-              "name": "close_hour",
-              "type": "int",
-              "value": 24
-            }
-          ],
-          "rotation": 0,
-          "type": "location",
-          "visible": true,
-          "width": 16,
-          "x": 640,
-          "y": 160
-        },
-        {
-          "height": 16,
-          "id": 7,
           "name": "chenyu_home",
           "properties": [
             {
@@ -18322,7 +18236,50 @@
         },
         {
           "height": 16,
-          "id": 8,
+          "id": 6,
+          "name": "linxia_home",
+          "properties": [
+            {
+              "name": "location_id",
+              "type": "string",
+              "value": "linxia_home"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "林夏的家"
+            },
+            {
+              "name": "location_type",
+              "type": "string",
+              "value": "house"
+            },
+            {
+              "name": "capacity",
+              "type": "int",
+              "value": 4
+            },
+            {
+              "name": "open_hour",
+              "type": "int",
+              "value": 0
+            },
+            {
+              "name": "close_hour",
+              "type": "int",
+              "value": 24
+            }
+          ],
+          "rotation": 0,
+          "type": "location",
+          "visible": true,
+          "width": 16,
+          "x": 288,
+          "y": 416
+        },
+        {
+          "height": 16,
+          "id": 7,
           "name": "wangfang_home",
           "properties": [
             {
@@ -18362,6 +18319,49 @@
           "width": 16,
           "x": 768,
           "y": 544
+        },
+        {
+          "height": 16,
+          "id": 8,
+          "name": "zhangming_home",
+          "properties": [
+            {
+              "name": "location_id",
+              "type": "string",
+              "value": "zhangming_home"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "张明的家"
+            },
+            {
+              "name": "location_type",
+              "type": "string",
+              "value": "house"
+            },
+            {
+              "name": "capacity",
+              "type": "int",
+              "value": 4
+            },
+            {
+              "name": "open_hour",
+              "type": "int",
+              "value": 0
+            },
+            {
+              "name": "close_hour",
+              "type": "int",
+              "value": 24
+            }
+          ],
+          "rotation": 0,
+          "type": "location",
+          "visible": true,
+          "width": 16,
+          "x": 640,
+          "y": 160
         }
       ],
       "opacity": 1,
@@ -18530,64 +18530,6 @@
         {
           "height": 0,
           "id": 14,
-          "name": "spawn_linxia",
-          "point": true,
-          "properties": [
-            {
-              "name": "spawn_id",
-              "type": "string",
-              "value": "spawn_linxia"
-            },
-            {
-              "name": "agent_id",
-              "type": "string",
-              "value": "agent_linxia"
-            },
-            {
-              "name": "direction",
-              "type": "string",
-              "value": "down"
-            }
-          ],
-          "rotation": 0,
-          "type": "spawn_point",
-          "visible": true,
-          "width": 0,
-          "x": 296.0,
-          "y": 440.0
-        },
-        {
-          "height": 0,
-          "id": 15,
-          "name": "spawn_zhangming",
-          "point": true,
-          "properties": [
-            {
-              "name": "spawn_id",
-              "type": "string",
-              "value": "spawn_zhangming"
-            },
-            {
-              "name": "agent_id",
-              "type": "string",
-              "value": "agent_zhangming"
-            },
-            {
-              "name": "direction",
-              "type": "string",
-              "value": "down"
-            }
-          ],
-          "rotation": 0,
-          "type": "spawn_point",
-          "visible": true,
-          "width": 0,
-          "x": 648.0,
-          "y": 184.0
-        },
-        {
-          "height": 0,
-          "id": 16,
           "name": "spawn_chenyu",
           "point": true,
           "properties": [
@@ -18616,36 +18558,7 @@
         },
         {
           "height": 0,
-          "id": 17,
-          "name": "spawn_wangfang",
-          "point": true,
-          "properties": [
-            {
-              "name": "spawn_id",
-              "type": "string",
-              "value": "spawn_wangfang"
-            },
-            {
-              "name": "agent_id",
-              "type": "string",
-              "value": "agent_wangfang"
-            },
-            {
-              "name": "direction",
-              "type": "string",
-              "value": "down"
-            }
-          ],
-          "rotation": 0,
-          "type": "spawn_point",
-          "visible": true,
-          "width": 0,
-          "x": 776.0,
-          "y": 568.0
-        },
-        {
-          "height": 0,
-          "id": 18,
+          "id": 15,
           "name": "spawn_laozhang",
           "point": true,
           "properties": [
@@ -18674,7 +18587,36 @@
         },
         {
           "height": 0,
-          "id": 19,
+          "id": 16,
+          "name": "spawn_linxia",
+          "point": true,
+          "properties": [
+            {
+              "name": "spawn_id",
+              "type": "string",
+              "value": "spawn_linxia"
+            },
+            {
+              "name": "agent_id",
+              "type": "string",
+              "value": "agent_linxia"
+            },
+            {
+              "name": "direction",
+              "type": "string",
+              "value": "down"
+            }
+          ],
+          "rotation": 0,
+          "type": "spawn_point",
+          "visible": true,
+          "width": 0,
+          "x": 296.0,
+          "y": 440.0
+        },
+        {
+          "height": 0,
+          "id": 17,
           "name": "spawn_touzi",
           "point": true,
           "properties": [
@@ -18698,8 +18640,66 @@
           "type": "spawn_point",
           "visible": true,
           "width": 0,
-          "x": 528.0,
-          "y": 320.0
+          "x": 536.0,
+          "y": 328.0
+        },
+        {
+          "height": 0,
+          "id": 18,
+          "name": "spawn_wangfang",
+          "point": true,
+          "properties": [
+            {
+              "name": "spawn_id",
+              "type": "string",
+              "value": "spawn_wangfang"
+            },
+            {
+              "name": "agent_id",
+              "type": "string",
+              "value": "agent_wangfang"
+            },
+            {
+              "name": "direction",
+              "type": "string",
+              "value": "down"
+            }
+          ],
+          "rotation": 0,
+          "type": "spawn_point",
+          "visible": true,
+          "width": 0,
+          "x": 776.0,
+          "y": 568.0
+        },
+        {
+          "height": 0,
+          "id": 19,
+          "name": "spawn_zhangming",
+          "point": true,
+          "properties": [
+            {
+              "name": "spawn_id",
+              "type": "string",
+              "value": "spawn_zhangming"
+            },
+            {
+              "name": "agent_id",
+              "type": "string",
+              "value": "agent_zhangming"
+            },
+            {
+              "name": "direction",
+              "type": "string",
+              "value": "down"
+            }
+          ],
+          "rotation": 0,
+          "type": "spawn_point",
+          "visible": true,
+          "width": 0,
+          "x": 648.0,
+          "y": 184.0
         }
       ],
       "opacity": 1,
@@ -18710,7 +18710,7 @@
     }
   ],
   "nextlayerid": 11,
-  "nextobjectid": 19,
+  "nextobjectid": 20,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",

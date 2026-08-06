@@ -13,5 +13,6 @@
     "extraversion": 0.55,
     "agreeableness": 0.88,
     "emotional_stability": 0.82
-  }
+  },
+  "spawn": { "col": 30, "row": 9, "direction": "down" }
 }
