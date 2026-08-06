@@ -8,6 +8,9 @@ talked about earning money ("去农场找零工") but never worked or shopped.
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from app.agents.providers.openai_provider import OpenAIProvider
 from app.config.settings import Settings
 
@@ -43,3 +46,31 @@ def test_economy_tools_are_function_tools() -> None:
         assert hasattr(tool, "name") and hasattr(tool, "on_invoke_tool"), (
             f"{tool} is not an SDK function tool"
         )
+
+
+def test_llm_tool_choice_defaults_to_required() -> None:
+    # "required" preserves the one-action-per-decision contract; the provider
+    # treats a missing tool call as a hard DecisionError in that mode.
+    # _env_file=None: the dev .env may legitimately set LLM_TOOL_CHOICE=auto.
+    settings = Settings(_env_file=None)
+    assert settings.llm_tool_choice == "required"
+    provider = OpenAIProvider(
+        Settings(_env_file=None, openai_api_key="sk-dummy", llm_provider="openai")
+    )
+    assert provider._settings.llm_tool_choice == "required"
+
+
+def test_llm_tool_choice_accepts_auto_for_thinking_models() -> None:
+    # Reasoning models (DeepSeek v4, qwen3.8-max) reject the forced choice;
+    # "auto" lets them reply in text, which the provider degrades to wait.
+    settings = Settings(llm_tool_choice="auto")
+    assert settings.llm_tool_choice == "auto"
+    provider = OpenAIProvider(
+        Settings(openai_api_key="sk-dummy", llm_provider="openai", llm_tool_choice="auto")
+    )
+    assert provider._settings.llm_tool_choice == "auto"
+
+
+def test_llm_tool_choice_rejects_unknown_values() -> None:
+    with pytest.raises(ValidationError):
+        Settings(llm_tool_choice="always")
