@@ -14,15 +14,22 @@ from sqlalchemy import delete
 
 from app.database import models  # noqa: E402,F401  (populates Base.metadata)
 from app.database.models import (
+    Company,
+    CompanyInventory,
+    CompanyTransaction,
     Conversation,
     ConversationMessage,
     Employment,
+    EmploymentContract,
     GodAction,
     Inventory,
     Item,
     Job,
+    JobApplication,
+    JobOpening,
     LLMRun,
     Memory,
+    Position,
     Relationship,
     Save,
     ScheduledAction,
@@ -31,6 +38,7 @@ from app.database.models import (
     Stock,
     StockHolding,
     Transaction,
+    WorkShift,
     WorldEvent,
 )
 from app.database.models.agents import Agent
@@ -58,14 +66,18 @@ def _clean_db(_database_schema) -> None:
             LLMRun,
             WorldEvent,
             ScheduledAction,
-            # M7 god action audit children.
             GodAction,
-            # M9 save rows (FK worlds; deleted before worlds).
             Save,
-            # M6 memory/relationship children.
             Memory,
             Relationship,
-            # M5 economy children (SQLite does not cascade without PRAGMA FK on).
+            CompanyTransaction,
+            CompanyInventory,
+            WorkShift,
+            JobApplication,
+            EmploymentContract,
+            JobOpening,
+            Position,
+            Company,
             Transaction,
             StockHolding,
             Stock,
