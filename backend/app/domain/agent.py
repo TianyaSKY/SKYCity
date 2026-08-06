@@ -71,7 +71,7 @@ class AgentSnapshot(BaseModel):
     col: int
     row: int
     location_id: str | None = None
-    hunger: int
+    satiety: int
     energy: int
     mood: int
     money: int

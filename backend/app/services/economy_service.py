@@ -3,7 +3,7 @@
 World rules enforced here (docs/world-rules.md): R1 (one action; move 独占),
 R3 (work uninterruptible — no other tool may run mid-work), R4 (last-item
 race via BEGIN IMMEDIATE + conditional UPDATE), R7 (no credit), R8 (store
-hours), R10 (wage + products settled at completion), R11 (hunger=100 blocks
+hours), R10 (wage + products settled at completion), R11 (satiety=0 blocks
 work), R12 (energy=0 blocks work; forced rest lives in the decision service),
 R14 (work drains energy by the job's intensity).
 
@@ -41,7 +41,7 @@ MSG_BUSY = "当前行动未完成"
 MSG_JOB_MISSING = "工作不存在"
 MSG_NOT_AT_JOB = "不在工作地点"
 MSG_LOCATION_CLOSED = "地点未开门"
-MSG_HUNGRY_FULL = "饥饿值已满，无法工作"
+MSG_SATIETY_EMPTY = "饱食度耗尽，无法工作"
 MSG_EXHAUSTED = "精力耗尽，无法工作"
 MSG_PRODUCT_MISSING = "商店没有该商品"
 MSG_NOT_AT_STORE = "不在商店"
@@ -104,8 +104,8 @@ class EconomyService:
                 location.location_type, location.open_hour, location.close_hour, world.world_time
             ):
                 return False, None, MSG_LOCATION_CLOSED  # R8
-            if agent.hunger >= 100:
-                return False, None, MSG_HUNGRY_FULL  # R11
+            if agent.satiety <= 0:
+                return False, None, MSG_SATIETY_EMPTY  # R11
             if agent.energy <= 0:
                 return False, None, MSG_EXHAUSTED  # R12
 
@@ -525,7 +525,7 @@ class EconomyService:
         reason: str | None = None,
         trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Consume one usable item: food restores hunger, M12 mood items
+        """Consume one usable item: food restores satiety, M12 mood items
         restore mood (both may apply for hybrid items)."""
         session = self._session_factory()
         try:
@@ -545,7 +545,7 @@ class EconomyService:
             item = session.get(Item, {"world_id": world_id, "item_id": item_id})
             if item is None:
                 return False, None, MSG_ITEM_MISSING
-            if item.hunger_restore <= 0 and item.mood_restore <= 0:
+            if item.satiety_restore <= 0 and item.mood_restore <= 0:
                 return False, None, MSG_NOT_FOOD
             inventory = session.get(
                 Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -553,11 +553,11 @@ class EconomyService:
             if inventory is None or inventory.quantity < 1:
                 return False, None, MSG_NOT_IN_INVENTORY
 
-            hunger_before = agent.hunger
-            hunger_after = max(0, hunger_before - item.hunger_restore)
+            satiety_before = agent.satiety
+            satiety_after = min(100, satiety_before + item.satiety_restore)
             mood_before = agent.mood
             mood_after = min(100, mood_before + item.mood_restore)
-            agent.hunger = hunger_after
+            agent.satiety = satiety_after
             agent.mood = mood_after
             inventory.quantity -= 1
             if inventory.quantity <= 0:
@@ -571,8 +571,8 @@ class EconomyService:
                     "agent_id": agent_id,
                     "item_id": item_id,
                     "item_name": item.name,
-                    "hunger_before": hunger_before,
-                    "hunger_after": hunger_after,
+                    "satiety_before": satiety_before,
+                    "satiety_after": satiety_after,
                     "mood_before": mood_before,
                     "mood_after": mood_after,
                 },
@@ -584,7 +584,7 @@ class EconomyService:
                 "needs_changed",
                 {
                     "agent_id": agent_id,
-                    "hunger": agent.hunger,
+                    "satiety": agent.satiety,
                     "energy": agent.energy,
                     "mood": agent.mood,
                 },

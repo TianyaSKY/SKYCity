@@ -391,9 +391,9 @@ function eventText(
     case 'item_used': {
       const name = agentName(agents, p.agent_id);
       const item = itemLabel(p.item_id, p.item_name);
-      const before = typeof p.hunger_before === 'number' ? p.hunger_before : '?';
-      const after = typeof p.hunger_after === 'number' ? p.hunger_after : '?';
-      return `${name} 使用了 ${item}（饥饿 ${before} → ${after}）`;
+      const before = typeof p.satiety_before === 'number' ? p.satiety_before : '?';
+      const after = typeof p.satiety_after === 'number' ? p.satiety_after : '?';
+      return `${name} 使用了 ${item}（饱食度 ${before} → ${after}）`;
     }
     case 'money_changed': {
       const name = agentName(agents, p.agent_id);
@@ -798,7 +798,7 @@ export const useWorldStore = defineStore('world', {
           this.replaceAgentInventory(p.agent_id as string, p.items);
           break;
         case 'needs_changed':
-          this.patchAgentNeeds(p.agent_id as string, p.hunger, p.energy, p.mood);
+          this.patchAgentNeeds(p.agent_id as string, p.satiety, p.energy, p.mood);
           break;
         case 'memory_created':
           // Panels are REST-backed; a fresh memory for the selected agent
@@ -1153,7 +1153,7 @@ export const useWorldStore = defineStore('world', {
       if (!agentId || !patch) return;
       const agent = this.agents.find((a) => a.agent_id === agentId);
       if (!agent) return;
-      if (typeof patch.hunger === 'number') agent.hunger = patch.hunger;
+      if (typeof patch.satiety === 'number') agent.satiety = patch.satiety;
       if (typeof patch.energy === 'number') agent.energy = patch.energy;
       if (typeof patch.money === 'number') agent.money = patch.money;
       if (typeof patch.col === 'number') agent.col = patch.col;
@@ -1176,11 +1176,11 @@ export const useWorldStore = defineStore('world', {
       agent.inventory = cleaned;
     },
 
-    /** Sync hunger/energy/mood from a needs_changed event. */
-    patchAgentNeeds(agentId: string, hunger: unknown, energy: unknown, mood: unknown): void {
+    /** Sync satiety/energy/mood from a needs_changed event. */
+    patchAgentNeeds(agentId: string, satiety: unknown, energy: unknown, mood: unknown): void {
       const agent = this.agents.find((a) => a.agent_id === agentId);
       if (!agent) return;
-      if (typeof hunger === 'number') agent.hunger = hunger;
+      if (typeof satiety === 'number') agent.satiety = satiety;
       if (typeof energy === 'number') agent.energy = energy;
       if (typeof mood === 'number') agent.mood = mood;
     },

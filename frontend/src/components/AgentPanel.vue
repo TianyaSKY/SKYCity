@@ -322,9 +322,9 @@ function teleportLocations(): WorldLocation[] {
       <div v-if="liveAgent" class="ov-card">
         <div class="ov-section-title">状态</div>
         <div class="need-row">
-          <span class="need-label">饥饿</span>
-          <span class="need-bar"><i class="need-fill hunger" :style="{ width: barWidth(liveAgent.hunger) }" /></span>
-          <span class="need-value">{{ liveAgent.hunger }}</span>
+          <span class="need-label">饱食度</span>
+          <span class="need-bar"><i class="need-fill satiety" :style="{ width: barWidth(liveAgent.satiety) }" /></span>
+          <span class="need-value">{{ liveAgent.satiety }}</span>
         </div>
         <div class="need-row">
           <span class="need-label">精力</span>
@@ -844,7 +844,7 @@ function teleportLocations(): WorldLocation[] {
   height: 100%;
   border-radius: 999px;
 }
-.need-fill.hunger {
+.need-fill.satiety {
   background: #ffb74d;
 }
 .need-fill.energy {

@@ -23,7 +23,7 @@ class Item(Base):
     item_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     category: Mapped[str] = mapped_column(String(32), nullable=False)  # food|material|tool|decoration
-    hunger_restore: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    satiety_restore: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # M12: mood restoration (usable non-food items), work wage bonus %,
     # extra yield per produced unit.
     mood_restore: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

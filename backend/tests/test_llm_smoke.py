@@ -127,7 +127,7 @@ def test_llm_move_destination_is_visible_location(
 
     observation = (
         "【世界现状】第1天 上午 10:00 天气: 晴朗\n"
-        "【自身状态】饥饿: 85/100 精力: 90/100 金钱: 50 所在位置: 家 当前行动: 空闲\n"
+        "【自身状态】饱食度: 15/100 精力: 90/100 金钱: 50 所在位置: 家 当前行动: 空闲\n"
         "【可见地点】\n"
         f"{visible_locations_text(world_config)}\n"
         "【可做的事】\n"
@@ -159,7 +159,7 @@ def test_llm_talk_message_is_clean_dialogue(
 
     observation = (
         "【世界现状】第1天 早上 08:00 天气: 晴朗\n"
-        "【自身状态】饥饿: 20/100 精力: 90/100 金钱: 50 所在位置: 家 当前行动: 空闲\n"
+        "【自身状态】饱食度: 80/100 精力: 90/100 金钱: 50 所在位置: 家 当前行动: 空闲\n"
         "【收到的消息】\n"
         "- 张明（agent_zhangming, ask）：你今天有空吗？要不要一起去广场走走？\n"
         "【可见地点】\n"
@@ -192,7 +192,7 @@ def test_llm_adjusts_after_failed_tool(world_config: ParsedWorldConfig) -> None:
 
     observation = (
         "【世界现状】第1天 上午 10:30 天气: 晴朗\n"
-        "【自身状态】饥饿: 75/100 精力: 80/100 金钱: 2 所在位置: 村口商店 当前行动: 空闲\n"
+        "【自身状态】饱食度: 25/100 精力: 80/100 金钱: 2 所在位置: 村口商店 当前行动: 空闲\n"
         "【可见地点】\n"
         f"{visible_locations_text(world_config)}\n"
         "【可做的事】\n"

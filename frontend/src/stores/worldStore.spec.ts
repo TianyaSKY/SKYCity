@@ -60,7 +60,7 @@ const AGENT_LINXIA: AgentSnapshot = {
   col: 3,
   row: 4,
   location_id: 'village_plaza',
-  hunger: 50,
+  satiety: 50,
   energy: 80,
   mood: 100,
   money: 50,
@@ -74,7 +74,7 @@ const AGENT_ZHANGMING: AgentSnapshot = {
   col: 6,
   row: 7,
   location_id: 'village_plaza',
-  hunger: 40,
+  satiety: 40,
   energy: 70,
   mood: 100,
   money: 20,
@@ -267,10 +267,10 @@ describe('applyEvent event mapping', () => {
   it('agent_state_changed: patches the agent, no stream line', () => {
     store.applyEvent(env(1, 'agent_state_changed', {
       agent_id: 'agent_linxia',
-      state: { hunger: 90, money: 33, col: 5, row: 5, location_id: 'village_shop' },
+      state: { satiety: 90, money: 33, col: 5, row: 5, location_id: 'village_shop' },
     }));
     const linxia = store.agents[0];
-    expect(linxia.hunger).toBe(90);
+    expect(linxia.satiety).toBe(90);
     expect(linxia.money).toBe(33);
     expect(linxia.col).toBe(5);
     expect(linxia.row).toBe(5);
@@ -470,15 +470,15 @@ describe('applyEvent event mapping', () => {
     expect(store.events[0].text).toBe('林夏 出售 小麦×3（9 金币）');
   });
 
-  it('item_used: use line with hunger before/after', () => {
+  it('item_used: use line with satiety before/after', () => {
     store.applyEvent(env(1, 'item_used', {
       agent_id: 'agent_linxia',
       item_id: 'bread',
       item_name: '面包',
-      hunger_before: 80,
-      hunger_after: 40,
+      satiety_before: 80,
+      satiety_after: 100,
     }));
-    expect(store.events[0].text).toBe('林夏 使用了 面包（饥饿 80 → 40）');
+    expect(store.events[0].text).toBe('林夏 使用了 面包（饱食度 80 → 100）');
   });
 
   it('money_changed: syncs the balance + signed delta line', () => {
@@ -502,9 +502,9 @@ describe('applyEvent event mapping', () => {
     expect(store.events).toHaveLength(0);
   });
 
-  it('needs_changed: patches hunger/energy/mood, no stream line', () => {
-    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', hunger: 90, energy: 25, mood: 55 }));
-    expect(store.agents[0].hunger).toBe(90);
+  it('needs_changed: patches satiety/energy/mood, no stream line', () => {
+    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', satiety: 90, energy: 25, mood: 55 }));
+    expect(store.agents[0].satiety).toBe(90);
     expect(store.agents[0].energy).toBe(25);
     expect(store.agents[0].mood).toBe(55);
     expect(store.events).toHaveLength(0);
@@ -835,7 +835,7 @@ describe('location detail', () => {
     await flush();
     expect(getLocationDetailMock).toHaveBeenCalledTimes(2);
 
-    store.applyEvent(env(3, 'needs_changed', { agent_id: 'agent_linxia', hunger: 40 }));
+    store.applyEvent(env(3, 'needs_changed', { agent_id: 'agent_linxia', satiety: 40 }));
     await flush();
     expect(getLocationDetailMock).toHaveBeenCalledTimes(2);
 

@@ -92,8 +92,9 @@ TALK_DISTANCE = 3
 # An agent that has already sent this many messages in the current
 # conversation stops chatting and says goodbye.
 MAX_SENT_BEFORE_LEAVE = 2
-# At this hunger the agent drops everything and seeks food (branch 1.5).
-HUNGER_THRESHOLD = 80
+# At this satiety (0-100, high = full) the agent drops everything and
+# seeks food (branch 1.5).
+SATIETY_THRESHOLD = 20
 BREAD_PRICE = 12
 
 _SECTION_HEADER = "【上次工具结果】"
@@ -162,11 +163,11 @@ class FakeDecisionProvider:
                     }
                 return self._result(agent_id, tool_name, tool_arguments, started)
 
-        # 1.5. Hunger response (multi-day robustness): at high hunger the agent
+        # 1.5. Satiety response (multi-day robustness): at low satiety the agent
         # eats, buys food, or goes to earn money — before socializing. No
         # script consumption.
-        hunger = self._hunger(observation)
-        if hunger >= HUNGER_THRESHOLD:
+        satiety = self._satiety(observation)
+        if satiety <= SATIETY_THRESHOLD:
             if self._has_item(observation, "bread"):
                 return self._result(
                     agent_id,
@@ -355,13 +356,15 @@ class FakeDecisionProvider:
         return _FAILED_MARKER in section
 
     # ------------------------------------------------------------------ #
-    # Hunger-response parsing (observation section formats)
+    # Satiety-response parsing (observation section formats)
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _hunger(observation: str) -> int:
-        match = re.search(r"饥饿:\s*(\d+)/100", observation)
-        return int(match.group(1)) if match else 0
+    def _satiety(observation: str) -> int:
+        match = re.search(r"饱食度:\s*(\d+)/100", observation)
+        # Missing line defaults to full: never trigger the food path on a
+        # parse failure.
+        return int(match.group(1)) if match else 100
 
     @staticmethod
     def _money(observation: str) -> int:

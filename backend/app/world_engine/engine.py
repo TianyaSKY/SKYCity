@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
-from app.database.models.agents import Agent, INITIAL_MOOD
+from app.database.models.agents import Agent, INITIAL_MOOD, INITIAL_SATIETY
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
@@ -510,7 +510,7 @@ class WorldEngine:
             row=spawn.row,
             direction=spawn.direction,
             location_id=home_id if home_exists else None,
-            hunger=0,
+            satiety=INITIAL_SATIETY,
             energy=100,
             mood=INITIAL_MOOD,
             money=int(identity.get("initial_money") or 50),
@@ -532,7 +532,7 @@ class WorldEngine:
                     item_id=seed["item_id"],
                     name=seed["name"],
                     category=seed["category"],
-                    hunger_restore=seed["hunger_restore"],
+                    satiety_restore=seed["satiety_restore"],
                     mood_restore=seed["mood_restore"],
                     work_bonus=seed["work_bonus"],
                     yield_bonus=seed["yield_bonus"],
@@ -898,14 +898,14 @@ class WorldEngine:
         world: World,
         world_time: int,
     ) -> None:
-        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, sleep +20/h,
-        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h."""
+        """R14 defaults: satiety -1/h, energy -1/h, wait +5/h, sleep +20/h,
+        satiety==0 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
         for agent in agents:
-            before = (agent.hunger, agent.energy, agent.mood)
-            agent.hunger = min(100, agent.hunger + 1)
+            before = (agent.satiety, agent.energy, agent.mood)
+            agent.satiety = max(0, agent.satiety - 1)
             agent.energy = max(0, agent.energy - 1)
             agent.mood = max(0, agent.mood - 1)
             if agent.action_type == "wait":
@@ -914,26 +914,26 @@ class WorldEngine:
             elif agent.action_type == "sleep":
                 agent.energy = min(100, agent.energy + 20)
                 agent.mood = min(100, agent.mood + 10)
-            if agent.hunger >= 100:
+            if agent.satiety <= 0:
                 agent.energy = max(0, agent.energy - 1)  # R11 extra drain
-            if (agent.hunger, agent.energy, agent.mood) != before:
+            if (agent.satiety, agent.energy, agent.mood) != before:
                 runtime.event_bus.publish(
                     session,
                     world_time,
                     "needs_changed",
                     {
                         "agent_id": agent.agent_id,
-                        "hunger": agent.hunger,
+                        "satiety": agent.satiety,
                         "energy": agent.energy,
                         "mood": agent.mood,
                     },
                 )
-            # R11/R12/M12: hunger maxed, energy drained or mood low ->
+            # R11/R12/M12: satiety empty, energy drained or mood low ->
             # high-priority decision.
             if (
                 world.autonomous
                 and agent.action_type is None
-                and (agent.hunger >= 100 or agent.energy <= 0 or agent.mood <= 20)
+                and (agent.satiety <= 0 or agent.energy <= 0 or agent.mood <= 20)
             ):
                 runtime.scheduler.schedule(
                     session,
@@ -1137,7 +1137,7 @@ class WorldEngine:
             col=agent.col,
             row=agent.row,
             location_id=agent.location_id,
-            hunger=agent.hunger,
+            satiety=agent.satiety,
             energy=agent.energy,
             mood=agent.mood,
             money=agent.money,
@@ -1151,7 +1151,7 @@ class WorldEngine:
         """M7: one agent's detail — identity card + state + inventory + action.
 
         Contract shape: {agent_id, name, identity: {...}, col, row, location_id,
-        hunger, energy, mood, money, inventory, action, is_deciding,
+        satiety, energy, mood, money, inventory, action, is_deciding,
         consecutive_failures}. Returns None when the world or agent is missing.
         """
         runtime = self._runtimes.get(world_id)

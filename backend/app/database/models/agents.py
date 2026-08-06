@@ -11,8 +11,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
 
-# R14 defaults.
-INITIAL_HUNGER = 0
+# R14 defaults. Satiety is 0-100, high = full; it drains hourly and is
+# restored by food (the 饥饿 "hunger" concept inverted to a resource meter).
+INITIAL_SATIETY = 100
 INITIAL_ENERGY = 100
 INITIAL_MONEY = 50
 # M12: mood dimension (0-100), drains hourly, restored by sleep/wait/items.
@@ -48,7 +49,7 @@ class Agent(Base):
     # Soft reference to locations(world_id, location_id); not an FK so agents may
     # stand outside any location (spawn, moving between places).
     location_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    hunger: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_HUNGER)
+    satiety: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_SATIETY)
     energy: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_ENERGY)
     mood: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_MOOD)
     money: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_MONEY)

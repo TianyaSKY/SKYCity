@@ -60,10 +60,10 @@
 | `work_completed` | `{agent_id, job_id, job_name, wage, products: [{item_id, quantity}], energy_spent}` | 工作完成结算（工资+产物进背包，R10） |
 | `item_purchased` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 购买商品（R4/R7） |
 | `item_sold` | `{agent_id, item_id, item_name, quantity, unit_price, total}` | 出售商品 |
-| `item_used` | `{agent_id, item_id, item_name, hunger_before, hunger_after, mood_before, mood_after}` | 使用（食用）食物 / 心情物品（M12 追加 mood 字段） |
+| `item_used` | `{agent_id, item_id, item_name, satiety_before, satiety_after, mood_before, mood_after}` | 使用（食用）食物 / 心情物品（M12 追加 mood 字段） |
 | `money_changed` | `{agent_id, amount, balance, reason}` | 金钱变动（amount 带符号） |
 | `inventory_changed` | `{agent_id, items: [{item_id, quantity}]}` | 背包变化（完整列表） |
-| `needs_changed` | `{agent_id, hunger, energy, mood}` | 需求变化（每小时节奏 R14 / 进食后，M12 追加 mood） |
+| `needs_changed` | `{agent_id, satiety, energy, mood}` | 需求变化（每小时节奏 R14 / 进食后，M12 追加 mood） |
 | `store_restocked` | `{store_id, restocked: [{item_id, quantity}]}` | 商店开门补货（R15） |
 | `store_price_changed` | `{store_id, item_id, item_name, sell_price, promo}` | 商店促销/恢复原价（M12，随每日补货结算） |
 | `memory_created` | `{agent_id, memory_id, memory_type, text, importance}` | 新记忆写入（working/episodic/semantic，M6） |

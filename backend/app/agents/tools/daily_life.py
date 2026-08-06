@@ -1,7 +1,7 @@
 """use_item / sleep tools for LLM agents (M5 economy, daily life).
 
 use_item funnels through EconomyService's use_item — only food
-(hunger_restore > 0) is consumable, and exactly one unit is consumed per call.
+(satiety_restore > 0) is consumable, and exactly one unit is consumed per call.
 sleep funnels through ActionExecutionService (R1: interruptible like wait).
 """
 
@@ -23,7 +23,7 @@ async def use_item(
     item_id: str,
     reason: str,
 ) -> str:
-    """食用/使用背包中的一件物品（只有食物能恢复饥饿，每次消耗 1 件）。"""
+    """食用/使用背包中的一件物品（只有食物能提高饱食度，每次消耗 1 件）。"""
     service = ctx.context.engine.economy_service
     if service is None:
         return json.dumps({"success": False, "reason": "经济服务未初始化", "event": None}, ensure_ascii=False)

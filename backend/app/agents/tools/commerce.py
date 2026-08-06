@@ -42,7 +42,7 @@ async def work(
     reason: str,
 ) -> str:
     """在当前地点开始一份工作（job_id 必须是可见工作之一）。工作期间不能做其他事，
-    完成后一次性结算工资与产物。饥饿=100 或精力=0 时无法工作。"""
+    完成后一次性结算工资与产物。饱食度=0 或精力=0 时无法工作。"""
     service = ctx.context.engine.economy_service
     if service is None:
         return json.dumps({"success": False, "reason": "经济服务未初始化", "event": None}, ensure_ascii=False)

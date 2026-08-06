@@ -153,7 +153,7 @@ def test_mood_low_boosts_decision(world_config: ParsedWorldConfig) -> None:
 def test_mood_item_usable_and_restores(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    set_agent(engine, world_id, "agent_linxia", hunger=40, mood=50)
+    set_agent(engine, world_id, "agent_linxia", satiety=40, mood=50)
     add_inventory(engine, world_id, "agent_linxia", "candle", 1)
 
     ok, envelope, reason = engine.economy_service.use_item(
@@ -161,13 +161,13 @@ def test_mood_item_usable_and_restores(engine: WorldEngine) -> None:
     )
     assert ok is True and reason is None
     assert envelope.type == "item_used"
-    assert envelope.payload["hunger_before"] == 40
-    assert envelope.payload["hunger_after"] == 40  # candle does not feed
+    assert envelope.payload["satiety_before"] == 40
+    assert envelope.payload["satiety_after"] == 40  # candle does not feed
     assert envelope.payload["mood_before"] == 50
     assert envelope.payload["mood_after"] == 58  # +8 mood_restore
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.hunger == 40
+    assert row.satiety == 40
     assert row.mood == 58
     assert inventory_of(engine, world_id, "agent_linxia") == {}
 

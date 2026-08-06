@@ -27,10 +27,10 @@ from app.services.agent_decision_service import DecisionService
 from app.services.economy_service import (
     MSG_BUSY,
     MSG_EXHAUSTED,
-    MSG_HUNGRY_FULL,
     MSG_LOCATION_CLOSED,
     MSG_NO_MONEY,
     MSG_NO_STOCK,
+    MSG_SATIETY_EMPTY,
     MSG_NOT_AT_JOB,
     MSG_NOT_AT_STORE,
     MSG_NOT_BUYABLE,
@@ -180,18 +180,18 @@ def transaction_rows(engine: WorldEngine, world_id: str, agent_id: str):
 def test_hourly_needs_tick_and_idempotency(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    set_agent(engine, world_id, "agent_linxia", hunger=10, energy=50)
+    set_agent(engine, world_id, "agent_linxia", satiety=90, energy=50)
 
     advance_minutes(engine, world_id, 61)  # 480 -> 541: one hour boundary
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.hunger == 11  # +1/h
+    assert row.satiety == 89  # -1/h
     assert row.energy == 49  # -1/h
 
     # idempotent within the same hour
     advance_minutes(engine, world_id, 5)
     row = agent_row(engine, world_id, "agent_linxia")
-    assert (row.hunger, row.energy) == (11, 49)
+    assert (row.satiety, row.energy) == (89, 49)
 
     envelopes = engine.events_after(world_id, 0)
     needs = [
@@ -202,7 +202,7 @@ def test_hourly_needs_tick_and_idempotency(engine: WorldEngine) -> None:
     assert needs, "needs_changed must be emitted on the hourly tick"
     assert needs[0].payload == {
         "agent_id": "agent_linxia",
-        "hunger": 11,
+        "satiety": 89,
         "energy": 49,
         "mood": 99,
     }
@@ -212,26 +212,26 @@ def test_hourly_wait_recovers_energy(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     set_agent(
-        engine, world_id, "agent_linxia", hunger=0, energy=5, action_type="wait"
+        engine, world_id, "agent_linxia", satiety=100, energy=5, action_type="wait"
     )
 
     advance_minutes(engine, world_id, 61)  # crosses 540: one hour boundary
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.hunger == 1
+    assert row.satiety == 99
     assert row.energy == 9  # -1 then +5 (wait recovery)
 
 
-def test_hourly_tick_hunger_100_extra_drain(engine: WorldEngine) -> None:
+def test_hourly_tick_satiety_empty_extra_drain(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    set_agent(engine, world_id, "agent_linxia", hunger=100, energy=10)
+    set_agent(engine, world_id, "agent_linxia", satiety=0, energy=10)
 
     advance_minutes(engine, world_id, 61)
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.hunger == 100  # clamped
-    assert row.energy == 8  # -1 hourly and -1 extra for hunger == 100 (R11)
+    assert row.satiety == 0  # clamped
+    assert row.energy == 8  # -1 hourly and -1 extra for satiety == 0 (R11)
 
 
 # --------------------------------------------------------------------------- #
@@ -274,17 +274,17 @@ def test_work_rejected_busy(engine: WorldEngine) -> None:
     assert reason == MSG_BUSY  # R1/R3: one action at a time
 
 
-def test_work_rejected_hunger_full(engine: WorldEngine) -> None:
+def test_work_rejected_satiety_empty(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "village_farm", *FARM_ANCHOR)
-    set_agent(engine, world_id, "agent_linxia", hunger=100)
+    set_agent(engine, world_id, "agent_linxia", satiety=0)
 
     ok, _, reason = engine.economy_service.work_start(
         world_id, "agent_linxia", "job_farm_field", reason="干活"
     )
     assert ok is False
-    assert reason == MSG_HUNGRY_FULL  # R11
+    assert reason == MSG_SATIETY_EMPTY  # R11
 
 
 def test_work_rejected_exhausted(engine: WorldEngine) -> None:
@@ -332,7 +332,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
     assert row.money == 80  # 50 + wage 30 (R10)
     # energy: -1/h x2 (hourly) then -8 work drain (4/h x 2h) = 90
     assert row.energy == 90
-    assert row.hunger == 2  # +1/h x2 (R14)
+    assert row.satiety == 98  # -1/h x2 (R14)
 
     assert inventory_of(engine, world_id, "agent_linxia") == {"wheat": 1}
 
@@ -642,10 +642,10 @@ def test_sell_rejected_not_buyable(engine: WorldEngine) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_use_food_restores_hunger(engine: WorldEngine) -> None:
+def test_use_food_restores_satiety(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    set_agent(engine, world_id, "agent_linxia", hunger=50)
+    set_agent(engine, world_id, "agent_linxia", satiety=50)
     add_inventory(engine, world_id, "agent_linxia", "bread", 2)
 
     ok, envelope, reason = engine.economy_service.use_item(
@@ -657,20 +657,20 @@ def test_use_food_restores_hunger(engine: WorldEngine) -> None:
         "agent_id": "agent_linxia",
         "item_id": "bread",
         "item_name": "面包",
-        "hunger_before": 50,
-        "hunger_after": 20,
+        "satiety_before": 50,
+        "satiety_after": 80,
         "mood_before": 100,
         "mood_after": 100,
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.hunger == 20
+    assert row.satiety == 80
     assert inventory_of(engine, world_id, "agent_linxia") == {"bread": 1}
 
     events = engine.events_after(world_id, 0)
     assert any(
         e.type == "needs_changed"
-        and e.payload == {"agent_id": "agent_linxia", "hunger": 20, "energy": 100, "mood": 100}
+        and e.payload == {"agent_id": "agent_linxia", "satiety": 80, "energy": 100, "mood": 100}
         for e in events
     )
     assert any(
@@ -819,16 +819,16 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     assert row.money == 23  # 50 - 4*12 + 30 + 3 - 12
     assert inventory_of(eng, world_id, "agent_linxia") == {"bread": 4}
 
-    # item_used carried hunger before/after and actually reduced hunger
+    # item_used carried satiety before/after and actually restored satiety
     used_events = [
         e for e in eng.events_after(world_id, 0) if e.type == "item_used"
     ]
     assert used_events
     used = used_events[0].payload
     assert used["item_id"] == "bread"
-    assert used["hunger_before"] > used["hunger_after"]
-    assert used["hunger_after"] == 0
-    assert row.hunger < used["hunger_before"]  # hunger stayed low afterwards
+    assert used["satiety_before"] < used["satiety_after"]
+    assert used["satiety_after"] == 100
+    assert row.satiety > used["satiety_before"]  # satiety stayed high afterwards
 
     # the failed buy is recorded as a failure llm_run (T3-9 adjustment)
     session = SessionLocal()
@@ -882,18 +882,18 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Hunger-response branch of the fake provider (multi-day robustness)
+# Satiety-response branch of the fake provider (multi-day robustness)
 # --------------------------------------------------------------------------- #
 
 def test_hungry_agent_eats_bread_first(world_config) -> None:
     eng = make_engine(world_config, wire_decisions=True)
-    runtime = eng.create_world("饥饿世界", autonomous=True)
+    runtime = eng.create_world("饱食世界", autonomous=True)
     world_id = runtime.world_id
 
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        agent.hunger = 90
+        agent.satiety = 10
         # give her bread
         from app.database.models.inventories import Inventory
         session.add(Inventory(world_id=world_id, agent_id="agent_linxia", item_id="bread", quantity=2))
@@ -913,7 +913,7 @@ def test_hungry_agent_eats_bread_first(world_config) -> None:
         assert runs[-1].tool_arguments["item_id"] == "bread"
         assert runs[-1].success == 1
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent.hunger == 60  # bread restores 30
+        assert agent.satiety == 40  # bread restores 30
     finally:
         session.close()
     eng._runtimes.clear()
@@ -921,13 +921,13 @@ def test_hungry_agent_eats_bread_first(world_config) -> None:
 
 def test_hungry_agent_buys_bread_at_shop(world_config) -> None:
     eng = make_engine(world_config, wire_decisions=True)
-    runtime = eng.create_world("饥饿世界2", autonomous=True)
+    runtime = eng.create_world("饱食世界2", autonomous=True)
     world_id = runtime.world_id
 
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        agent.hunger = 95
+        agent.satiety = 5
         agent.col, agent.row = 23, 12  # park her at the shop
         agent.location_id = "village_shop"
         session.commit()

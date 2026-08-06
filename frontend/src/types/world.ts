@@ -50,7 +50,7 @@ export interface AgentSnapshot {
   col: number;
   row: number;
   location_id: string | null;
-  hunger: number;
+  satiety: number;
   energy: number;
   mood: number;
   money: number;
@@ -165,8 +165,8 @@ export interface ItemUsedPayload {
   agent_id: string;
   item_id: string;
   item_name: string;
-  hunger_before: number;
-  hunger_after: number;
+  satiety_before: number;
+  satiety_after: number;
   mood_before: number;
   mood_after: number;
 }
@@ -189,7 +189,7 @@ export interface InventoryChangedPayload {
 /** Payload of the WS needs_changed event. */
 export interface NeedsChangedPayload {
   agent_id: string;
-  hunger: number;
+  satiety: number;
   energy: number;
   mood: number;
 }
@@ -299,7 +299,7 @@ export interface AgentDetail {
   col: number;
   row: number;
   location_id: string | null;
-  hunger: number;
+  satiety: number;
   energy: number;
   mood: number;
   money: number;

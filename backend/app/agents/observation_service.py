@@ -152,7 +152,7 @@ def build_observation(
             f"{_format_clock(world_time)} 天气: {weather}"
         )
         lines.append(
-            f"【自身状态】饥饿: {agent.hunger}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
+            f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
         )
 
@@ -265,8 +265,8 @@ def build_observation(
                     )
                     tags: list[str] = []
                     if item is not None:
-                        if item.hunger_restore > 0:
-                            tags.append(f"饱腹{item.hunger_restore}")
+                        if item.satiety_restore > 0:
+                            tags.append(f"饱食+{item.satiety_restore}")
                         if item.mood_restore > 0:
                             tags.append(f"心情{item.mood_restore}")
                         if item.work_bonus > 0:
@@ -290,7 +290,7 @@ def build_observation(
                     f"- work({job.job_id}): {job.name}，{job.duration_minutes}分钟，工资{job.wage}金币"
                 )
         lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
-        lines.append("- use_item(item_id, reason): 食用背包里的食物恢复饥饿")
+        lines.append("- use_item(item_id, reason): 食用背包里的食物提高饱食度")
 
         # M10: town-wide stock quotes + own holdings (always visible: the
         # market is village news, not tied to the agent's location).

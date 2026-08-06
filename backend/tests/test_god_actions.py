@@ -617,7 +617,7 @@ def test_agent_detail_contract(world_config: ParsedWorldConfig) -> None:
     assert detail is not None
     assert set(detail) == {
         "agent_id", "name", "identity", "col", "row", "location_id",
-        "hunger", "energy", "mood", "money", "inventory", "action",
+        "satiety", "energy", "mood", "money", "inventory", "action",
         "is_deciding", "consecutive_failures",
     }
     assert detail["agent_id"] == "agent_linxia"

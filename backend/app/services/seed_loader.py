@@ -22,7 +22,7 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 @lru_cache(maxsize=4)
 def load_items(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
-    """Item seeds: (item_id, name, category, hunger_restore, base_price)."""
+    """Item seeds: (item_id, name, category, satiety_restore, base_price)."""
     base = world_data_dir or Path(get_settings().world_data_dir)
     data = _load_json(base / "items" / "items.json")
     items = tuple(
@@ -30,7 +30,7 @@ def load_items(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]
             "item_id": str(entry["item_id"]),
             "name": str(entry.get("name") or entry["item_id"]),
             "category": str(entry.get("category") or "material"),
-            "hunger_restore": int(entry.get("hunger_restore") or 0),
+            "satiety_restore": int(entry.get("satiety_restore") or 0),
             # M12: mood restore / work wage bonus % / extra yield per unit.
             "mood_restore": int(entry.get("mood_restore") or 0),
             "work_bonus": int(entry.get("work_bonus") or 0),
