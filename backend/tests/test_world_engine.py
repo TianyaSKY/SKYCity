@@ -52,14 +52,20 @@ def engine(world_config: ParsedWorldConfig) -> WorldEngine:
 def advance_minutes(engine: WorldEngine, world_id: str, minutes: int) -> None:
     """Advance a world's clock by ``minutes`` game minutes deterministically.
 
-    Each loop iteration deposits 0.9 minutes directly then lets the engine's
-    own 0.1s tick cross the remaining boundary, so the scheduler fires exactly
-    once per minute.
+    Each loop iteration resets the clock's fractional accumulator, deposits
+    0.9 minutes directly, then lets the engine's own 0.1s tick cross exactly
+    one boundary. Resetting the accumulator is required because TestClient
+    tests run the engine's live background tick loop, which deposits 0.1s into
+    the same accumulator concurrently — without the reset, a boundary can be
+    crossed by the direct 0.9 deposit and never processed by the scheduler
+    (the engine's own 0.1 tick then finds nothing left to cross), which made
+    move/work completions flaky on the app engine.
     """
     runtime = engine.get_runtime(world_id)
     assert runtime is not None
     target = runtime.clock.world_time + minutes
     while runtime.clock.world_time < target:
+        runtime.clock._accumulator = 0.0
         runtime.clock.tick(0.9)
         engine._tick_runtime(runtime)
 
