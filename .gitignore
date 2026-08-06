@@ -1,4 +1,5 @@
 backend/.venv/
+backend/.env
 backend/ai_tiny_world.db
 __pycache__/
 *.pyc
