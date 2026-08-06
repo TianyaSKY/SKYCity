@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "companies": [
+    {
+      "company_id": "company_morning_farm",
+      "name": "晨露农场",
+      "company_type": "farm",
+      "location_id": "village_farm",
+      "initial_money": 800,
+      "manager_agent_id": "agent_zhangming",
+      "positions": [
+        {
+          "position_id": "position_farm_worker",
+          "job_id": "job_farm_field",
+          "title": "农场工人",
+          "description": "负责晨露农场的播种、浇水和收获",
+          "capacity": 2,
+          "wage_per_shift": 60,
+          "shift_start_minute": 480,
+          "shift_end_minute": 720,
+          "working_days": [0, 1, 2, 3, 4, 5, 6]
+        }
+      ]
+    },
+    {
+      "company_id": "company_village_shop",
+      "name": "村庄杂货店",
+      "company_type": "retail",
+      "location_id": "village_shop",
+      "initial_money": 1000,
+      "manager_agent_id": "agent_wangfang",
+      "positions": [
+        {
+          "position_id": "position_shop_attendant",
+          "job_id": "job_shop_attendant",
+          "title": "商店店员",
+          "description": "负责接待顾客、整理货架和维持营业",
+          "capacity": 1,
+          "wage_per_shift": 90,
+          "shift_start_minute": 540,
+          "shift_end_minute": 1020,
+          "working_days": [0, 1, 2, 3, 4, 5, 6]
+        }
+      ]
+    }
+  ]
+}
