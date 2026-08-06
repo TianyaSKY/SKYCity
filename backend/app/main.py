@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
+from app.api.companies import router as companies_router
 from app.api.saves import router as saves_router
 from app.api.websocket import router as websocket_router
 from app.api.worlds import router as worlds_router
@@ -19,6 +20,7 @@ from app.config.settings import get_settings
 from app.database.session import SessionLocal
 from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
+from app.services.company_employment_service import CompanyEmploymentService
 from app.services.conversation_service import ConversationService
 from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
@@ -77,6 +79,11 @@ async def lifespan(app: FastAPI):
     engine.transfer_service = transfer_service
     save_service = SaveService(engine, SessionLocal)
     engine.save_service = save_service
+    company_employment_service = CompanyEmploymentService(
+        engine,
+        SessionLocal,
+        settings.world_data_dir,
+    )
     app.state.engine = engine
     app.state.action_service = service
     app.state.economy_service = economy_service
@@ -86,9 +93,11 @@ async def lifespan(app: FastAPI):
     app.state.stock_service = stock_service
     app.state.transfer_service = transfer_service
     app.state.save_service = save_service
+    app.state.company_employment_service = company_employment_service
 
     await engine.start()
     engine.load_existing()
+    company_employment_service.register_existing_runtimes()
     logger.info("{} ready (map v{})", settings.app_name, world.map_version)
     yield
     await engine.stop()
@@ -141,6 +150,7 @@ def health() -> dict[str, str]:
 
 
 app.include_router(worlds_router)
+app.include_router(companies_router)
 app.include_router(websocket_router)
 app.include_router(saves_router)
 
