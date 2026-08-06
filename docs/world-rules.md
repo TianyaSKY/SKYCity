@@ -104,9 +104,11 @@
 - `sleep` 是独立行动（action_type=`sleep`）：60~480 分钟，可打断，完成后恢复空闲并重新调度决策。
 - 心情 ≤ 20 触发高优先级决策（同 R11/R12 机制，调度 `agent_decide` 提前）。
 
-## R15 商店补货与地点容量
+- R15 商店补货与地点容量
 
 - 商店每天开门时按 `store_products` 配置补货至上限。
+- `initial_stock`（默认 = stock_cap）：纯收购品（如小麦/鲜花，restock_daily=0
+  且 initial_stock=0）从 0 起步，容量只用于吸收智能体产出；货架商品从满库存起步。
 - 地点容量已满：`move` 进入被拒绝（返回 `地点已满`），到达门口后等待。
 - M12 促销：商店每日开门时按 `_promo_roll`（确定性哈希，20% 概率）对每个商品
   打折 20%（下限 1 金币），次日恢复 `base_sell_price`；价格变化发布
@@ -169,3 +171,44 @@
 - 孤单 ≥ 80 触发「寻找社交」高优先级决策（同 R11/R12 机制，调度
   `agent_decide` 提前）。
 - 第一版孤单不禁止任何行动，仅影响决策优先级；无死亡机制。
+
+## R22 建造系统（M14）
+
+- R22.1 `build` 是独占行动：发起者要求空闲（R1）；建造中不能发起
+  `move`/`talk`/`work` 等；与 `work` 同性质不可打断（R3），上帝可打断
+  并按比例退还材料（R22.2）。
+- R22.2 材料预扣：发起时按 blueprint `materials` 从背包扣除进入「建造中」状态，
+  完成时落格（写 `tile_structures`）；上帝打断按 `剩余耗时 / duration` 比例退还
+  （向下取整，每类材料最小退 1 件；已完成的建造不退还）。
+- R22.3 位置校验：发起者距锚点格曼哈顿距离 ≤ 3（同 R9）；footprint 所有格必须
+  **可行走且未被占用**——有 navigation 标记、无 collision 标记、无既有
+  `tile_structures`、非 location 锚点格、非 spawn 格。
+- R22.4 连通性不变式：`blocking` 建筑放置前校验
+  `effective_walkable = static_walkable − 已阻塞格 − 新 footprint 格`，
+  要求所有 location 锚点与 spawn 点在 effective_walkable 上互相可达（BFS）；
+  不可达 → 拒绝（`会堵住村庄`）。
+- R22.5 所有权：建成后归建造者（`owner_agent_id`）；v1 仅上帝可拆除（走 R13 管道）。
+- R22.6 寻路：`find_path` 使用 effective_walkable（静态集合 − 阻塞结构），
+  与 R22.4 同一数据源，保证寻路不穿过建筑；移动起点被阻塞格覆盖时拒绝出发。
+
+## R23 种植与收获（M15）
+
+- R23.1 `plant` 是独占行动：发起者要求空闲（R1）；锚点格距发起者曼哈顿
+  距离 ≤ 3（同 R9）。
+- R23.2 种植区：仅 `farm_field` interactable 半径 ≤ 4 的可行走格可种植
+  （v1 配置值，见 crops.json `plant_radius`）；不可种在 location 锚点/spawn 格。
+- R23.3 占用：目标格必须**无作物且无结构物**（`crops` 与 `tile_structures`
+  互斥，跨表检查）；PK=(world_id,col,row) 防并发占格。
+- R23.4 种子：种植扣除 1 粒种子（背包持有校验）；种子来自商店（R15 补货）。
+- R23.5 生长：阶段由世界时钟推进（scheduler 回调，暂停即停）；每阶段到点
+  发布 `crop_grown` 并调度下一阶段；阶段时长与瓦片 gid 见 crops.json。
+  回调带 `next_stage_at` 幂等守卫：作物被移除或阶段被上帝改写后，过期回调
+  直接跳过。
+- R23.6 收获：仅最终阶段可 `harvest`（未成熟返回 `作物还没成熟`）；产物 =
+  crops.json 配置 + 持有 `fertilizer` 的 yield_bonus 求和（同 M12 C4）；
+  收获清格、产物进背包、发布 `crop_harvested`。
+- R23.7 作物不挡路：不参与 R22.4 连通性校验、不进 effective_walkable。
+- R23.8 上帝：可 `set_crop_stage`（改阶段并重排生长回调）/ `remove_crop`
+  （清格，无退还），走 R13 审计管道。
+- R23.9 存档：`crops` 行 + 未触发的 `crop_grow` 回调行随 R17 存档；恢复后
+  生长从 `next_stage_at` 续跑。

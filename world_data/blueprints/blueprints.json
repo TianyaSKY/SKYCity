@@ -1,0 +1,35 @@
+{
+  "version": "1.0.0",
+  "blueprints": [
+    {
+      "blueprint_id": "fence_wood",
+      "name": "木栅栏",
+      "footprint": [[0, 0]],
+      "tile_gids": {"0,0": [70]},
+      "blocking": true,
+      "materials": {"wood": 1},
+      "duration_minutes": 30,
+      "description": "一段结实的木栅栏，挡路也挡人"
+    },
+    {
+      "blueprint_id": "house_small",
+      "name": "小木屋",
+      "footprint": [[0, 0], [1, 0], [0, 1], [1, 1]],
+      "tile_gids": {"0,0": [96], "1,0": [97], "0,1": [98], "1,1": [99]},
+      "blocking": true,
+      "materials": {"wood": 6, "rope": 2},
+      "duration_minutes": 240,
+      "description": "两格见方的小木屋，安身之所"
+    },
+    {
+      "blueprint_id": "flower_bed",
+      "name": "花圃",
+      "footprint": [[0, 0]],
+      "tile_gids": {"0,0": [5]},
+      "blocking": false,
+      "materials": {"flower_seed": 1},
+      "duration_minutes": 20,
+      "description": "一小片花圃，让小镇更美"
+    }
+  ]
+}

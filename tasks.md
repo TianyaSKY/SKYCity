@@ -181,6 +181,24 @@
 
 ---
 
+## 里程碑 14：建造系统（M14）
+
+成果：智能体用木材在地图上建造栅栏/建筑，环境真实改变且持久化。
+
+契约：`docs/world-rules.md` R22（建造规则）、`docs/event-protocol.md` §3（build 事件）。
+
+- [x] T14-1 blueprint 配置 + 加载器：`world_data/blueprints/`（footprint/tile_gids/blocking/materials/duration），资产清单注册
+- [x] T14-2 `tile_structures` 表 + Alembic 迁移（world_id/col/row/blueprint_id/owner_agent_id/built_at，UNIQUE(world_id,col,row)）
+- [x] T14-3 `build(col, row, blueprint_id, reason)` 工具 + 位置/材料/空闲校验（R22.1~22.3，材料预扣进「建造中」状态）
+- [x] T14-4 连通性校验：effective_walkable 增量 BFS，所有 location 锚点 + spawn 点互相可达（R22.4）
+- [x] T14-5 寻路接入 effective_walkable：阻塞格不可通行、起点被阻塞拒绝出发（R22.6）
+- [x] T14-6 事件与持久化：`build_started`/`structure_built`/`structure_removed`，快照含 structures，存档含 tile_structures（R17 扩展）
+- [x] T14-7 前端动态结构层：Pixi 于 decorations_low 之上渲染，快照全量画、事件增量改
+- [x] T14-8 上帝命令：`remove_structure`（+ `build_structure`），走审计 → 事件 → 记忆（R13）
+- [x] T14-9 测试与验收：堵路被拒 / 材料不足 / 并发占格 / 上帝打断退材料 / 存档恢复结构仍在
+
+---
+
 ## 里程碑 0 前置必读文档
 
 写代码前先落地规则（do_plan.md 第八节要求），影响后续所有校验逻辑：
@@ -192,6 +210,25 @@
 
 ---
 
+## 里程碑 15：作物种植（M15）
+
+成果：智能体买种子在农田种植，作物按世界时钟生长，成熟后收获卖钱——环境被持续改变。
+
+契约：`docs/world-rules.md` R23（种植与收获）、`docs/event-protocol.md` §3（crop 事件）。
+
+- [x] T15-1 契约文档：world-rules R23（种植区/占用/生长/收获规则）+ event-protocol `crop_planted`/`crop_grown`/`crop_harvested`
+- [x] T15-2 `crops` 表 + 迁移 `m15_crops`（world_id/col/row/seed_item_id/planted_by/planted_at/stage/next_stage_at，PK=(world_id,col,row)）
+- [x] T15-3 种子物品（wheat_seed/carrot_seed/strawberry_seed + 收获物 flower）+ 商店配置 + `world_data/crops/crops.json` 加载器（阶段分钟/gid/产物）
+- [x] T15-4 `plant(col, row, item_id, reason)` 工具 + 校验（R23：farm_field 种植区、格空闲（无作物/无结构物）、持有种子、空闲、距离≤3）
+- [x] T15-5 生长调度：scheduler 回调逐阶段推进（plant 时调度 crop_grow，到点再调度下一段），`crop_grown` 事件
+- [x] T15-6 `harvest(col, row, reason)` 工具 + 结算：最终阶段才可收，产物 + fertilizer yield_bonus 加成，清格
+- [x] T15-7 事件/快照/存档：crops 进快照与 R17 存档（回调行随存档走，恢复后 load_due 续跑）
+- [x] T15-8 前端 CropLayer：按阶段 gid 渲染（复用 StructureLayer 纹理矩形逻辑），store 状态 + 三事件
+- [x] T15-9 上帝命令：`set_crop_stage` / `remove_crop`（审计 → 事件 → 记忆，R13）
+- [x] T15-10 测试与验收：种→长→收闭环、肥料加成、作物/结构物互斥、存档恢复、fake provider 自主链路（买种→种→收→卖）+ M14 建造自主链路冒烟
+
+---
+
 ## 建议执行顺序（竖切而非横铺）
 
 ```
@@ -199,6 +236,7 @@
 4. M2 WS+事件 →  5. M3 第一个 LLM 智能体（move/wait）
 6. M4 第二个智能体 + talk  →  7. M5 经济闭环
 8. M6 记忆关系  →  9. M7 上帝界面  →  10. M8 稳定性  →  11. M9 测试存档
+12. M14 建造系统（T14-1 → T14-9 竖切） →  13. M15 作物种植（T15-1 → T15-10 竖切）
 ```
 
 优先打通第一条纵向链路（地图→状态→移动→WS→LLM→工具→验证→动画），再横向扩展。

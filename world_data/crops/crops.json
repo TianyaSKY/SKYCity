@@ -1,0 +1,35 @@
+{
+  "version": "1.0.0",
+  "plant_radius": 4,
+  "farm_field_id": "farm_field",
+  "crops": [
+    {
+      "seed_item_id": "wheat_seed",
+      "name": "小麦",
+      "stages": [[15, 5], [30, 6], [60, 7], [120, 8], [240, 9]],
+      "yield": [{"item_id": "wheat", "quantity": 2}],
+      "description": "晨露农场的当家作物"
+    },
+    {
+      "seed_item_id": "carrot_seed",
+      "name": "胡萝卜",
+      "stages": [[20, 17], [40, 18], [80, 19], [160, 20], [320, 21]],
+      "yield": [{"item_id": "carrot", "quantity": 3}],
+      "description": "甜甜脆脆的胡萝卜"
+    },
+    {
+      "seed_item_id": "strawberry_seed",
+      "name": "草莓",
+      "stages": [[30, 29], [60, 30], [120, 31], [240, 32], [480, 33]],
+      "yield": [{"item_id": "strawberry", "quantity": 2}],
+      "description": "要等很久，但值得"
+    },
+    {
+      "seed_item_id": "flower_seed",
+      "name": "花",
+      "stages": [[20, 29], [40, 30], [60, 31], [80, 32], [100, 33]],
+      "yield": [{"item_id": "flower", "quantity": 2}],
+      "description": "林夏梦想花圃的起点"
+    }
+  ]
+}

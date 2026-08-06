@@ -41,7 +41,7 @@
 
 | type | 载荷要点 | 触发方 |
 |---|---|---|
-| `world_snapshot` | 完整世界状态（agents/clock/weather/locations） | 连接建立/重连 |
+| `world_snapshot` | 完整世界状态（agents/clock/weather/locations/structures） | 连接建立/重连 |
 | `world_time_changed` | `{world_time}` | 时钟推进 |
 | `world_paused` | `{reason?}` | 暂停 |
 | `world_resumed` | `{}` | 恢复 |
@@ -81,6 +81,12 @@
 | `dividend_paid` | `{stock_id, stock_name, div_per_share, payouts: [{agent_id, shares, amount}]}` | 每日分红（M10；金额经 `money_changed` 逐人到账） |
 | `money_transferred` | `{from_agent_id, to_agent_id, amount, reason}` | 智能体间转账(M11;双方余额经各自的 `money_changed` 到账) |
 | `item_given` | `{from_agent_id, to_agent_id, item_id, item_name, quantity, reason}` | 智能体间赠物(M11;双方背包经各自的 `inventory_changed` 到账) |
+| `build_started` | `{agent_id, col, row, blueprint_id, duration_minutes, ends_at, materials: [{item_id, quantity}]}` | 建造开始，材料已预扣（R22.2） |
+| `structure_built` | `{agent_id, col, row, blueprint_id, owner_agent_id}` | 建造完成落格（R22.5） |
+| `structure_removed` | `{col, row, blueprint_id, removed_by}` | 结构被移除（仅上帝，R13 管道） |
+| `crop_planted` | `{agent_id, col, row, item_id, item_name, stage, next_stage_at}` | 播种完成，种子已扣（R23.4） |
+| `crop_grown` | `{col, row, item_id, stage}` | 作物进入下一生长阶段（R23.5） |
+| `crop_harvested` | `{agent_id, col, row, item_id, item_name, products: [{item_id, quantity}]}` | 收获完成，产物进背包、清格（R23.6） |
 
 （M5 追加：`work_started` / `work_completed` / `item_purchased` / `item_sold` /
 `item_used` / `money_changed` / `inventory_changed` / `needs_changed` /
@@ -96,6 +102,12 @@ reason}`，amount 带符号），公开事件复用 `world_event_created`（无
 
 M12 追加：`store_price_changed`；`needs_changed` / `item_used` 载荷扩展
 mood 字段。
+
+M14 追加：`build_started` / `structure_built` / `structure_removed`；
+`world_snapshot` 载荷扩展 structures 列表。
+
+M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
+`world_snapshot` 载荷扩展 crops 列表。
 
 ## 4. 事件持久化
 
