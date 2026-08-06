@@ -26,8 +26,10 @@ from agents.items import ToolCallItem
 from app.agents.context import AgentToolContext
 from app.agents.instructions import build_system_prompt
 from app.agents.providers.base import DecisionError, DecisionResult
+from app.agents.tools.build import build
 from app.agents.tools.commerce import buy_item, sell_item, work
 from app.agents.tools.conversation import talk
+from app.agents.tools.crops import harvest, plant
 from app.agents.tools.daily_life import sleep, use_item
 from app.agents.tools.movement import move, wait
 from app.agents.tools.stocks import buy_stock, sell_stock
@@ -47,7 +49,7 @@ class OpenAIProvider:
                 "Set OPENAI_API_KEY or use llm_provider='fake'."
             )
         self._settings = settings
-        self._tools = [move, wait, talk, work, buy_item, sell_item, use_item, sleep, buy_stock, sell_stock, transfer_money, give_item]
+        self._tools = [move, wait, talk, work, buy_item, sell_item, use_item, sleep, buy_stock, sell_stock, transfer_money, give_item, build, plant, harvest]
         # Explicit SDK provider: routes through settings (base_url / key) and
         # uses chat completions so third-party OpenAI-compatible APIs work.
         self._sdk_provider = SdkOpenAIProvider(

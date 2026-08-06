@@ -14,7 +14,7 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item", "sleep", "buy_stock", "sell_stock", "transfer_money", "give_item"]
+    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item", "sleep", "buy_stock", "sell_stock", "transfer_money", "give_item", "build", "plant", "harvest"]
     destination_id: str | None = None
     minutes: int | None = Field(default=None, ge=1)
     reason: str | None = None
@@ -30,6 +30,10 @@ class ActionRequest(BaseModel):
     shares: int | None = Field(default=None, ge=1, le=9999)
     # M11 agent-to-agent transfer.
     amount: int | None = Field(default=None, ge=1, le=1_000_000)
+    # M14 build actions (anchor cell + blueprint).
+    col: int | None = Field(default=None, ge=0)
+    row: int | None = Field(default=None, ge=0)
+    blueprint_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_shape(self) -> "ActionRequest":
@@ -53,6 +57,16 @@ class ActionRequest(BaseModel):
             raise ValueError("give_item requires target_agent_id")
         if self.action_type == "give_item" and not self.item_id:
             raise ValueError("give_item requires item_id")
+        if self.action_type == "build":
+            if self.col is None or self.row is None:
+                raise ValueError("build requires col and row")
+            if not self.blueprint_id:
+                raise ValueError("build requires blueprint_id")
+        if self.action_type in ("plant", "harvest"):
+            if self.col is None or self.row is None:
+                raise ValueError(f"{self.action_type} requires col and row")
+            if self.action_type == "plant" and not self.item_id:
+                raise ValueError("plant requires item_id")
         return self
 
 

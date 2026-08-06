@@ -517,6 +517,12 @@ class MemoryRecorder:
             self._on_world_event(session, envelope, payload)
         elif event_type == "god_action_applied":
             self._on_god_action(session, envelope, payload)
+        elif event_type == "structure_built":
+            self._on_structure_built(session, envelope, payload)
+        elif event_type == "crop_planted":
+            self._on_crop_planted(session, envelope, payload)
+        elif event_type == "crop_harvested":
+            self._on_crop_harvested(session, envelope, payload)
 
     def record_llm_failure(
         self, session: Session, world_id: str, agent_id: str, reason: str
@@ -752,6 +758,65 @@ class MemoryRecorder:
             session=session, world_id=envelope.world_id, agent_id=agent_id,
             memory_type="episodic", text=f"神谕：{text}", importance=0.7,
             entities=[agent_id], keywords=["神谕"],
+        )
+
+    def _on_structure_built(
+        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """M14: the builder remembers its finished construction (R22.5)."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        blueprint_id = payload.get("blueprint_id") or ""
+        col = payload.get("col")
+        row = payload.get("row")
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我建造了 {blueprint_id}（{col},{row}）",
+            importance=0.7,
+            entities=[agent_id],
+            keywords=[blueprint_id, "建造"],
+        )
+
+    def _on_crop_planted(
+        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """M15: the farmer remembers sowing (R23)."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        item_id = payload.get("item_id") or ""
+        col = payload.get("col")
+        row = payload.get("row")
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我在农田（{col},{row}）种下了 {item_id}",
+            importance=0.6,
+            entities=[agent_id],
+            keywords=[item_id, "种植"],
+        )
+
+    def _on_crop_harvested(
+        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """M15: the farmer remembers the harvest."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        item_id = payload.get("item_id") or ""
+        products = payload.get("products") or []
+        summary = "、".join(
+            f"{p.get('item_id')}×{p.get('quantity')}" for p in products
+        )
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我收获了 {item_id}，得到 {summary or '（无）'}",
+            importance=0.6,
+            entities=[agent_id],
+            keywords=[item_id, "收获"],
         )
 
     def _agent_name(self, session: Session, world_id: str, agent_id: str) -> str:

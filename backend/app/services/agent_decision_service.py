@@ -675,6 +675,43 @@ class DecisionService:
                 world_id, agent_id, arguments.get("target_agent_id"), arguments.get("item_id"),
                 quantity=quantity, reason=arguments.get("reason"), trace_id=trace_id,
             )
+        # M14 build through the construction rule gate (R22).
+        if result.tool_name == "build":
+            build_service = self.engine.build_service
+            if build_service is None:
+                return False, None, "建造服务未初始化"
+            return build_service.build_start(
+                world_id,
+                agent_id,
+                arguments.get("col"),
+                arguments.get("row"),
+                arguments.get("blueprint_id"),
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        # M15 plant/harvest through the farming rule gate (R23).
+        if result.tool_name in ("plant", "harvest"):
+            crop_service = self.engine.crop_service
+            if crop_service is None:
+                return False, None, "种植服务未初始化"
+            if result.tool_name == "plant":
+                return crop_service.plant(
+                    world_id,
+                    agent_id,
+                    arguments.get("col"),
+                    arguments.get("row"),
+                    arguments.get("item_id"),
+                    reason=arguments.get("reason"),
+                    trace_id=trace_id,
+                )
+            return crop_service.harvest(
+                world_id,
+                agent_id,
+                arguments.get("col"),
+                arguments.get("row"),
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(

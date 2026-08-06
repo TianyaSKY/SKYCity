@@ -613,7 +613,10 @@ def test_sell_rejected_store_full(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "village_shop", *SHOP_ANCHOR)
-    add_inventory(engine, world_id, "agent_linxia", "wheat", 1)  # stock already at cap 30
+    add_inventory(engine, world_id, "agent_linxia", "wheat", 1)
+    # M15: wheat now starts at 0 stock (agent-produce sink) — fill it to cap
+    # explicitly so this test exercises the store-full rejection.
+    set_stock(engine, world_id, "wheat", 30)
 
     ok, envelope, reason = engine.economy_service.sell(
         world_id, "agent_linxia", "wheat", quantity=1, reason="卖小麦"

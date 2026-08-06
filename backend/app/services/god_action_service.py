@@ -18,12 +18,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.crops import Crop
 from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.locations import WorldLocation
 from app.database.models.stores import StoreProduct
 from app.database.models.stocks import Stock
+from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.world_engine.engine import WorldEngine
@@ -40,6 +42,12 @@ COMMAND_TYPES = {
     "public_event",
     "change_store_stock",
     "change_stock_price",
+    # M14 (R22): god can place or demolish structures.
+    "remove_structure",
+    "build_structure",
+    # M15 (R23): god can rewrite crop growth or clear a farm cell.
+    "set_crop_stage",
+    "remove_crop",
 }
 VALID_WEATHERS = {"clear", "cloudy", "rain", "snow"}
 VALID_SPEEDS = {1, 2, 5, 10}
@@ -57,6 +65,12 @@ MSG_SPEED_REQUIRED = "倍速必须是 1/2/5/10"
 MSG_TEXT_REQUIRED = "事件文本不能为空"
 MSG_STOCK_PRICE_REQUIRED = "股价必须为正整数"
 MSG_STOCK_MISSING = "股票不存在"
+MSG_STRUCTURE_MISSING = "该位置没有建筑"
+MSG_BLUEPRINT_MISSING = "蓝图不存在"
+MSG_CELL_OCCUPIED = "该位置已有建筑"
+MSG_CELL_REQUIRED = "col/row 必须为地图内的整数坐标"
+MSG_CROP_MISSING = "该位置没有作物"
+MSG_STAGE_REQUIRED = "stage 必须为非负整数"
 
 DEFAULT_STORE_ID = "village_shop"
 
@@ -573,3 +587,247 @@ class GodActionService:
             trace_id,
         )
         return result, [announce, changed]
+
+    # ------------------------------------------------------------------ #
+    # Structures (M14, R22)
+    # ------------------------------------------------------------------ #
+
+    def _cmd_remove_structure(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        """Demolish a structure. Interrupting a build (status="building")
+        refunds materials proportionally to remaining time (R22.2) and frees
+        the builder's action; a completed structure is simply removed."""
+        col, row = self._structure_cell(parameters)
+        structure = session.get(
+            TileStructure,
+            {"world_id": world.world_id, "col": col, "row": row},
+        )
+        if structure is None:
+            raise HTTPException(status_code=404, detail=MSG_STRUCTURE_MISSING)
+        events: list[Any] = []
+        refunded: list[dict[str, Any]] = []
+        if structure.status == "building":
+            # Cancel the owner's in-flight build + refund proportionally.
+            owner = session.get(
+                Agent,
+                {"world_id": world.world_id, "agent_id": structure.owner_agent_id},
+            )
+            blueprint = self.engine.blueprints.get(structure.blueprint_id)
+            if owner is not None and blueprint is not None:
+                started = owner.action_started_at or world_time
+                elapsed = max(world_time - started, 0)
+                remaining = max(blueprint.duration_minutes - elapsed, 0)
+                for item_id, total in (structure.materials_json or {}).items():
+                    # R22.2: refund proportional to remaining time, min 1.
+                    back = max(1, total * remaining // blueprint.duration_minutes)
+                    self._refund_inventory(
+                        session, world.world_id, owner.agent_id, item_id, back
+                    )
+                    refunded.append({"item_id": item_id, "quantity": back})
+                if owner.action_type == "build":
+                    owner.action_type = None
+                    owner.action_started_at = None
+                    owner.action_ends_at = None
+                    owner.action_data = None
+                    runtime.scheduler.cancel_for_agent(session, owner.agent_id)
+                events.append(
+                    runtime.event_bus.publish(
+                        session, world_time, "inventory_changed",
+                        {
+                            "agent_id": owner.agent_id,
+                            "items": self._inventory_list(session, world.world_id, owner.agent_id),
+                        },
+                        trace_id,
+                    )
+                )
+        result = {
+            "col": col,
+            "row": row,
+            "blueprint_id": structure.blueprint_id,
+            "status": structure.status,
+            "refunded": refunded,
+        }
+        announce = self._announce(
+            session, runtime, "remove_structure", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        removed = runtime.event_bus.publish(
+            session, world_time, "structure_removed",
+            {
+                "col": col,
+                "row": row,
+                "blueprint_id": structure.blueprint_id,
+                "removed_by": target_id,
+            },
+            trace_id,
+        )
+        session.delete(structure)
+        return result, [announce, removed, *events]
+
+    def _cmd_build_structure(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        """God places a completed structure directly (R13: god may bypass the
+        build process, but never invents blueprints or occupies an
+        existing cell)."""
+        col, row = self._structure_cell(parameters)
+        blueprint_id = str(parameters.get("blueprint_id") or "")
+        blueprint = self.engine.blueprints.get(blueprint_id)
+        if blueprint is None:
+            raise HTTPException(status_code=400, detail=MSG_BLUEPRINT_MISSING)
+        existing = session.get(
+            TileStructure,
+            {"world_id": world.world_id, "col": col, "row": row},
+        )
+        if existing is not None:
+            raise HTTPException(status_code=400, detail=MSG_CELL_OCCUPIED)
+        session.add(
+            TileStructure(
+                world_id=world.world_id,
+                col=col,
+                row=row,
+                blueprint_id=blueprint_id,
+                owner_agent_id=target_id or "",
+                status="built",
+                built_at=world_time,
+                materials_json={},
+            )
+        )
+        result = {
+            "col": col,
+            "row": row,
+            "blueprint_id": blueprint_id,
+            "owner_agent_id": target_id,
+        }
+        announce = self._announce(
+            session, runtime, "build_structure", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        built = runtime.event_bus.publish(
+            session, world_time, "structure_built",
+            {
+                "agent_id": target_id,
+                "col": col,
+                "row": row,
+                "blueprint_id": blueprint_id,
+                "owner_agent_id": target_id,
+            },
+            trace_id,
+        )
+        return result, [announce, built]
+
+    def _structure_cell(self, parameters: dict[str, Any]) -> tuple[int, int]:
+        """Validate {col, row} params -> (col, row) or 400."""
+        col = parameters.get("col")
+        row = parameters.get("row")
+        if (
+            not isinstance(col, int)
+            or isinstance(col, bool)
+            or not isinstance(row, int)
+            or isinstance(row, bool)
+        ):
+            raise HTTPException(status_code=400, detail=MSG_CELL_REQUIRED)
+        return col, row
+
+    # ------------------------------------------------------------------ #
+    # Crops (M15, R23)
+    # ------------------------------------------------------------------ #
+
+    def _cmd_set_crop_stage(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        """Jump a crop to a given stage: recompute next_stage_at and schedule
+        a fresh crop_grow callback. Stale callbacks from before the rewrite
+        are skipped by the next_stage_at guard (R23.5)."""
+        col, row = self._structure_cell(parameters)
+        stage = parameters.get("stage")
+        if not isinstance(stage, int) or isinstance(stage, bool) or stage < 0:
+            raise HTTPException(status_code=400, detail=MSG_STAGE_REQUIRED)
+        crop = session.get(
+            Crop, {"world_id": world.world_id, "col": col, "row": row}
+        )
+        if crop is None:
+            raise HTTPException(status_code=404, detail=MSG_CROP_MISSING)
+        crop_def = self.engine.crops.get(crop.item_id)
+        if crop_def is None:
+            raise HTTPException(status_code=404, detail=MSG_CROP_MISSING)
+        if stage >= len(crop_def.stages):
+            raise HTTPException(status_code=400, detail=MSG_STAGE_REQUIRED)
+        crop.stage = stage
+        crop.next_stage_at = None
+        if stage < len(crop_def.stages) - 1:
+            crop.next_stage_at = world_time + crop_def.stages[stage][0]
+            runtime.scheduler.schedule(
+                session,
+                crop.planted_by,
+                "crop_grow",
+                crop.next_stage_at,
+                {"col": col, "row": row, "stage": stage, "trace_id": trace_id},
+            )
+        result = {"col": col, "row": row, "item_id": crop.item_id, "stage": stage}
+        announce = self._announce(
+            session, runtime, "set_crop_stage", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        grown = runtime.event_bus.publish(
+            session, world_time, "crop_grown",
+            {"col": col, "row": row, "item_id": crop.item_id, "stage": stage},
+            trace_id,
+        )
+        return result, [announce, grown]
+
+    def _cmd_remove_crop(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        """Clear a farm cell (crops hold no materials, so no refund)."""
+        col, row = self._structure_cell(parameters)
+        crop = session.get(
+            Crop, {"world_id": world.world_id, "col": col, "row": row}
+        )
+        if crop is None:
+            raise HTTPException(status_code=404, detail=MSG_CROP_MISSING)
+        result = {"col": col, "row": row, "item_id": crop.item_id, "stage": crop.stage}
+        announce = self._announce(
+            session, runtime, "remove_crop", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        removed = runtime.event_bus.publish(
+            session, world_time, "crop_harvested",
+            {
+                "agent_id": crop.planted_by,
+                "col": col,
+                "row": row,
+                "item_id": crop.item_id,
+                "item_name": crop.item_id,
+                "products": [],
+                "removed_by": target_id,
+            },
+            trace_id,
+        )
+        session.delete(crop)
+        return result, [announce, removed]
+
+    @staticmethod
+    def _refund_inventory(
+        session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+    ) -> None:
+        row = session.get(
+            Inventory,
+            {"world_id": world_id, "agent_id": agent_id, "item_id": item_id},
+        )
+        if row is None:
+            session.add(
+                Inventory(
+                    world_id=world_id,
+                    agent_id=agent_id,
+                    item_id=item_id,
+                    quantity=quantity,
+                )
+            )
+        else:
+            row.quantity += quantity

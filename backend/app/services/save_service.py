@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
+from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Employment, Job
@@ -42,6 +43,7 @@ from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.world_engine.clock import WorldClock
@@ -197,6 +199,10 @@ class SaveService:
             "transactions": rows(Transaction),
             "scheduled_actions": rows(ScheduledAction),
             "llm_runs": rows(LLMRun),
+            # M14: agent-built structures (R22) — the map overlay delta.
+            "structures": rows(TileStructure),
+            # M15: planted crops (R23) — growth state + pending callbacks.
+            "crops": rows(Crop),
             # Full event log: the restored world re-points it, so its replay
             # shows the complete history (origin + continuation) contiguously.
             "events": rows(WorldEvent),
@@ -366,6 +372,15 @@ class SaveService:
         for row in payload.get("transactions", []):
             data = self._fresh_pk(Transaction, self._row_data(row))
             session.add(Transaction(world_id=world_id, **data))
+        # M14: structures re-point verbatim (composite per-world PK, like
+        # stocks) — the overlay delta survives save/restore (R17).
+        for row in payload.get("structures", []):
+            session.add(TileStructure(world_id=world_id, **self._row_data(row)))
+        # M15: crops re-point verbatim; their pending crop_grow callbacks are
+        # restored with scheduled_actions, so growth resumes at next_stage_at
+        # (R23.9).
+        for row in payload.get("crops", []):
+            session.add(Crop(world_id=world_id, **self._row_data(row)))
         # llm_runs re-pointed at the new world; run_id is a GLOBAL primary key
         # so fresh ids are required (the original rows still exist).
         for row in payload.get("llm_runs", []):

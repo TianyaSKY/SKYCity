@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
 from app.database.models.conversations import ConversationMessage
+from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
@@ -24,6 +25,7 @@ from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.worlds import World
+from app.services.seed_loader import load_blueprints, load_crops
 from app.world_engine.engine import is_location_open
 
 MAX_OBSERVATION_CHARS = 2000
@@ -83,6 +85,10 @@ def _action_text(agent: Agent, world_time: int) -> str:
         data = agent.action_data or {}
         remaining = (agent.action_ends_at or world_time) - world_time
         return f"睡觉中（{data.get('reason') or '休息'}，剩余 {max(remaining, 0)} 分钟）"
+    if agent.action_type == "build":
+        data = agent.action_data or {}
+        remaining = (agent.action_ends_at or world_time) - world_time
+        return f"正在建造（{data.get('blueprint_id') or '建筑'}，剩余 {max(remaining, 0)} 分钟）"
     return agent.action_type
 
 
@@ -153,7 +159,8 @@ def build_observation(
         )
         lines.append(
             f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
-            f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
+            f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here}（格 {agent.col},{agent.row}）"
+            f" 当前行动: {_action_text(agent, world_time)}"
         )
 
         # M5: the agent's backpack, ordered by item id.
@@ -291,6 +298,53 @@ def build_observation(
                 )
         lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
         lines.append("- use_item(item_id, reason): 食用背包里的食物提高饱食度")
+
+        # M14: build blueprints (R22) — always visible, like the stock market:
+        # construction changes the town for everyone.
+        lines.append("【可建造的蓝图】")
+        for blueprint in load_blueprints():
+            materials = "、".join(
+                f"{item_names.get(item_id, item_id)}×{quantity}"
+                for item_id, quantity in blueprint.materials.items()
+            )
+            lines.append(
+                f"- build(col, row, {blueprint.blueprint_id}, reason): {blueprint.name}"
+                f"（{blueprint.duration_minutes}分钟，需{materials}；"
+                f"{'会挡住通行' if blueprint.blocking else '不挡路'}，"
+                f"目标格需离你 ≤ 3 格且可行走）"
+            )
+        lines.append("- 建造完成后建筑会一直留在小镇地图上，所有人都要绕开它走")
+
+        # M15: plantable seeds + nearby crops (R23). The farmer sees what it
+        # can sow and what is growing near it.
+        lines.append("【可种植的种子】")
+        for crop_def in load_crops():
+            seed_name = item_names.get(crop_def.seed_item_id, crop_def.seed_item_id)
+            yield_text = "、".join(
+                f"{item_names.get(iid, iid)}×{qty}" for iid, qty in crop_def.yield_items
+            )
+            lines.append(
+                f"- plant(col, row, {crop_def.seed_item_id}, reason): 种{crop_def.name}"
+                f"（约{crop_def.total_minutes}分钟成熟，收成{yield_text}）"
+            )
+        lines.append("- harvest(col, row, reason): 收获附近已成熟的作物")
+        crops_by_id = {c.seed_item_id: c for c in load_crops()}
+        nearby_crops = [
+            row
+            for row in session.scalars(
+                select(Crop).where(
+                    Crop.world_id == world_id,
+                    func.abs(Crop.col - agent.col) + func.abs(Crop.row - agent.row) <= 5,
+                )
+            ).all()
+        ]
+        if nearby_crops:
+            lines.append("【附近作物】")
+            for row in nearby_crops:
+                crop_def = crops_by_id.get(row.item_id)
+                final = len(crop_def.stages) - 1 if crop_def is not None else 0
+                state = "成熟可收" if row.stage >= final else f"生长中（阶段{row.stage + 1}/{final + 1}）"
+                lines.append(f"- ({row.col},{row.row}) {item_names.get(row.item_id, row.item_id)}：{state}")
 
         # M10: town-wide stock quotes + own holdings (always visible: the
         # market is village news, not tied to the agent's location).

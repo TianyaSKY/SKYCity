@@ -16,6 +16,7 @@ from app.database import models  # noqa: E402,F401  (populates Base.metadata)
 from app.database.models import (
     Conversation,
     ConversationMessage,
+    Crop,
     Employment,
     GodAction,
     Inventory,
@@ -30,6 +31,7 @@ from app.database.models import (
     StoreProduct,
     Stock,
     StockHolding,
+    TileStructure,
     Transaction,
     WorldEvent,
 )
@@ -75,6 +77,10 @@ def _clean_db(_database_schema) -> None:
             Store,
             Job,
             Item,
+            # M14 structure overlay (FK agents/worlds; delete before both).
+            TileStructure,
+            # M15 crops (FK agents/worlds; delete before both).
+            Crop,
             Agent,
             WorldLocation,
             ConversationMessage,

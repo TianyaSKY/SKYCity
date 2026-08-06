@@ -30,21 +30,32 @@ from app.database.models.agents import (
     INITIAL_MOOD,
     INITIAL_SATIETY,
 )
+from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
 from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
-from app.domain.agent import AgentActionMove, AgentActionWait, AgentActionWork, AgentSnapshot
+from app.domain.agent import AgentActionBuild, AgentActionMove, AgentActionWait, AgentActionWork, AgentSnapshot
 from app.domain.event import WorldEventEnvelope
 from app.domain.location import LocationSnapshot
-from app.domain.world import WorldSnapshot, WorldSnapshotPayload
+from app.domain.world import CropSnapshot, StructureSnapshot, WorldSnapshot, WorldSnapshotPayload
 from app.services.memory_service import MemoryRecorder, MemoryService
 from app.services.relationship_service import RelationshipService
-from app.services.seed_loader import load_items, load_jobs, load_stores
+from app.services.seed_loader import (
+    BlueprintDef,
+    CropDef,
+    load_blueprints,
+    load_crop_config,
+    load_crops,
+    load_items,
+    load_jobs,
+    load_stores,
+)
 from app.services.world_config_loader import ParsedWorldConfig
 from app.world_engine.clock import WorldClock
 from app.world_engine.event_bus import EventBus
@@ -116,6 +127,26 @@ class WorldEngine:
         self.stock_service: Any = None
         # TransferService (M11) is wired after construction; transfer/give tools reach it here.
         self.transfer_service: Any = None
+        # BuildService (M14) is wired after construction; the build tool and
+        # the "build_completed" scheduler handler reach it here.
+        self.build_service: Any = None
+        # CropService (M15) is wired after construction; the plant/harvest
+        # tools and the "crop_grow" scheduler handler reach it here.
+        self.crop_service: Any = None
+        # M14: static blueprint recipes (R22) — loaded once from world_data.
+        self.blueprints: dict[str, BlueprintDef] = {
+            blueprint.blueprint_id: blueprint
+            for blueprint in load_blueprints(world_data_dir)
+        }
+        # M15: static crop recipes (R23) — seed item -> growth stages + yield.
+        self.crops: dict[str, CropDef] = {
+            crop.seed_item_id: crop for crop in load_crops(world_data_dir)
+        }
+        # R23.2: plantable cells = walkable, non-reserved cells within the
+        # plant_radius of the farm_field interactable (computed once).
+        self.plantable_cells: frozenset[tuple[int, int]] = frozenset(
+            self._compute_plantable_cells(world_data_dir)
+        )
         # M6: memory + relationship services are self-contained (engine +
         # session factory), so they are constructed here and active in every
         # engine — memory recording and relationship deltas are automatic.
@@ -126,6 +157,30 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
     # Lifecycle
     # ------------------------------------------------------------------ #
+
+    def _compute_plantable_cells(
+        self, world_data_dir: Path | None
+    ) -> set[tuple[int, int]]:
+        """R23.2: walkable cells within plant_radius of farm_field, excluding
+        location anchors and spawn points."""
+        config = load_crop_config(world_data_dir)
+        radius = int(config.get("plant_radius") or 4)
+        field_id = str(config.get("farm_field_id") or "farm_field")
+        field = next(
+            (i for i in self.world_config.interactables if i.object_id == field_id),
+            None,
+        )
+        if field is None:
+            return set()
+        reserved = {
+            (loc.col, loc.row) for loc in self.world_config.locations
+        } | {(sp.col, sp.row) for sp in self.world_config.spawn_points}
+        return {
+            (col, row)
+            for col, row in self.world_config.walkable_cells
+            if abs(col - field.col) + abs(row - field.row) <= radius
+            and (col, row) not in reserved
+        }
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._tick_loop(), name="world-engine-tick")
@@ -172,6 +227,27 @@ class WorldEngine:
 
     def get_runtime(self, world_id: str) -> WorldRuntime | None:
         return self._runtimes.get(world_id)
+
+    def effective_walkable(
+        self, session: Session, world_id: str
+    ) -> frozenset[tuple[int, int]]:
+        """R22.6: static walkable cells minus blocking built structures.
+
+        The single source for pathfinding and build connectivity checks —
+        a placed structure is a real obstacle for every agent.
+        """
+        blocked: set[tuple[int, int]] = set()
+        rows = session.scalars(
+            select(TileStructure).where(
+                TileStructure.world_id == world_id,
+                TileStructure.status == "built",
+            )
+        ).all()
+        for row in rows:
+            blueprint = self.blueprints.get(row.blueprint_id)
+            if blueprint is not None and blueprint.blocking:
+                blocked.add((row.col, row.row))
+        return frozenset(self.world_config.walkable_cells - blocked)
 
     def idle_agents_near(
         self, world_id: str, agent_id: str, distance: int
@@ -276,6 +352,10 @@ class WorldEngine:
         scheduler.register("capacity_recheck", self.action_service.handle_capacity_recheck)
         if self.economy_service is not None:
             scheduler.register("work_completed", self.economy_service.handle_work_completed)
+        if self.build_service is not None:
+            scheduler.register("build_completed", self.build_service.handle_build_completed)
+        if self.crop_service is not None:
+            scheduler.register("crop_grow", self.crop_service.handle_crop_grow)
         if self.decision_service is not None:
             scheduler.register("agent_decide", self.decision_service.handle_agent_decide)
         scheduler.register("daily_reflection", self.memory_service.handle_daily_reflection)
@@ -562,7 +642,7 @@ class WorldEngine:
                         sell_price=product["sell_price"],
                         base_sell_price=product["sell_price"],
                         buy_price=product["buy_price"],
-                        stock=product["stock_cap"],  # R15: full stock at open
+                        stock=product.get("initial_stock", product["stock_cap"]),  # R15
                         stock_cap=product["stock_cap"],
                         restock_daily=product["restock_daily"],
                     )
@@ -1073,6 +1153,16 @@ class WorldEngine:
                 .where(WorldLocation.world_id == world_id)
                 .order_by(WorldLocation.location_id)
             ).all()
+            structures = session.scalars(
+                select(TileStructure)
+                .where(TileStructure.world_id == world_id)
+                .order_by(TileStructure.col, TileStructure.row)
+            ).all()
+            crops = session.scalars(
+                select(Crop)
+                .where(Crop.world_id == world_id)
+                .order_by(Crop.col, Crop.row)
+            ).all()
             world_time = world.world_time
             payload = WorldSnapshotPayload(
                 world=WorldSnapshot(
@@ -1085,6 +1175,29 @@ class WorldEngine:
                 ),
                 agents=[self._agent_snapshot(session, agent, world_time) for agent in agents],
                 locations=[self._location_snapshot(loc, world_time) for loc in locations],
+                structures=[
+                    StructureSnapshot(
+                        col=row.col,
+                        row=row.row,
+                        blueprint_id=row.blueprint_id,
+                        owner_agent_id=row.owner_agent_id,
+                        status=row.status,
+                        built_at=row.built_at,
+                    )
+                    for row in structures
+                ],
+                crops=[
+                    CropSnapshot(
+                        col=row.col,
+                        row=row.row,
+                        item_id=row.item_id,
+                        planted_by=row.planted_by,
+                        planted_at=row.planted_at,
+                        stage=row.stage,
+                        next_stage_at=row.next_stage_at,
+                    )
+                    for row in crops
+                ],
                 latest_sequence=runtime.event_bus.sequence,
             )
             return payload.model_dump(by_alias=True)
@@ -1136,6 +1249,17 @@ class WorldEngine:
                 type="work",
                 job_id=str(data.get("job_id") or ""),
                 job_name=job.name if job is not None else None,
+                started_at=agent.action_started_at or world_time,
+                ends_at=agent.action_ends_at or world_time,
+                reason=data.get("reason"),
+            )
+        elif agent.action_type == "build":
+            data = agent.action_data or {}
+            action = AgentActionBuild(
+                type="build",
+                blueprint_id=str(data.get("blueprint_id") or ""),
+                col=int(data.get("col") or agent.col),
+                row=int(data.get("row") or agent.row),
                 started_at=agent.action_started_at or world_time,
                 ends_at=agent.action_ends_at or world_time,
                 reason=data.get("reason"),

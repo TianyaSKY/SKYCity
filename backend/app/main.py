@@ -19,7 +19,9 @@ from app.config.settings import get_settings
 from app.database.session import SessionLocal
 from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
+from app.services.build_service import BuildService
 from app.services.conversation_service import ConversationService
+from app.services.crop_service import CropService
 from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
@@ -75,6 +77,10 @@ async def lifespan(app: FastAPI):
     engine.stock_service = stock_service
     transfer_service = TransferService(engine, SessionLocal)
     engine.transfer_service = transfer_service
+    build_service = BuildService(engine, SessionLocal)
+    engine.build_service = build_service
+    crop_service = CropService(engine, SessionLocal)
+    engine.crop_service = crop_service
     save_service = SaveService(engine, SessionLocal)
     engine.save_service = save_service
     app.state.engine = engine
@@ -85,6 +91,8 @@ async def lifespan(app: FastAPI):
     app.state.god_action_service = god_service
     app.state.stock_service = stock_service
     app.state.transfer_service = transfer_service
+    app.state.build_service = build_service
+    app.state.crop_service = crop_service
     app.state.save_service = save_service
 
     await engine.start()

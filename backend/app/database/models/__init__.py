@@ -6,6 +6,7 @@ autogenerate and create_all see the full schema.
 
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
+from app.database.models.crops import Crop
 from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
@@ -18,6 +19,7 @@ from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
@@ -28,6 +30,7 @@ __all__ = [
     "Base",
     "Conversation",
     "ConversationMessage",
+    "Crop",
     "Employment",
     "GodAction",
     "Inventory",
@@ -42,6 +45,7 @@ __all__ = [
     "StoreProduct",
     "Stock",
     "StockHolding",
+    "TileStructure",
     "Transaction",
     "World",
     "WorldEvent",

@@ -39,6 +39,7 @@ MSG_PAUSED = "世界已暂停"
 MSG_BUSY = "当前行动未完成"
 MSG_NO_DESTINATION = "目标地点不存在"
 MSG_NO_PATH = "无可行路径"
+MSG_START_BLOCKED = "所在位置被建筑挡住，无法出发"
 MSG_AGENT_MISSING = "智能体不存在"
 MSG_WORLD_MISSING = "世界不存在"
 
@@ -193,6 +194,43 @@ class ActionExecutionService:
             return self.execute_sleep(
                 world_id, agent_id, request.minutes, request.reason, trace_id=trace_id
             )
+        # M14 build through the construction rule gate (R22).
+        if request.action_type == "build":
+            build_service = self.engine.build_service
+            if build_service is None:
+                return False, None, "建造服务未初始化"
+            return build_service.build_start(
+                world_id,
+                agent_id,
+                request.col,
+                request.row,
+                request.blueprint_id,
+                reason=request.reason,
+                trace_id=trace_id,
+            )
+        # M15 plant/harvest through the farming rule gate (R23).
+        if request.action_type in ("plant", "harvest"):
+            crop_service = self.engine.crop_service
+            if crop_service is None:
+                return False, None, "种植服务未初始化"
+            if request.action_type == "plant":
+                return crop_service.plant(
+                    world_id,
+                    agent_id,
+                    request.col,
+                    request.row,
+                    request.item_id,
+                    reason=request.reason,
+                    trace_id=trace_id,
+                )
+            return crop_service.harvest(
+                world_id,
+                agent_id,
+                request.col,
+                request.row,
+                reason=request.reason,
+                trace_id=trace_id,
+            )
         return self.execute_wait(world_id, agent_id, request.minutes, request.reason, trace_id)
 
     # ------------------------------------------------------------------ #
@@ -237,7 +275,17 @@ class ActionExecutionService:
                 return False, None, MSG_NO_DESTINATION
             start = (agent.col, agent.row)
             goal = (destination.col, destination.row)
-            path = find_path(start, goal, self.engine.world_config.walkable_cells)
+            # R22.6: pathfinding runs on effective_walkable — blocking built
+            # structures are real obstacles. A structure built on the agent's
+            # own cell blocks departure; location anchors (not in the static
+            # walkable set) are unaffected.
+            walkable = self.engine.effective_walkable(session, world_id)
+            if (
+                start in self.engine.world_config.walkable_cells
+                and start not in walkable
+            ):
+                return False, None, MSG_START_BLOCKED
+            path = find_path(start, goal, walkable)
             if path is None:
                 return False, None, MSG_NO_PATH
             steps = max(len(path) - 1, 0)

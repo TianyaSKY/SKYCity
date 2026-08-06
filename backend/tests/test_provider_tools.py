@@ -24,6 +24,9 @@ ALL_TOOLS = {
     "sell_stock",
     "transfer_money",
     "give_item",
+    "build",
+    "plant",
+    "harvest",
 }
 
 

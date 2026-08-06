@@ -49,7 +49,22 @@ class AgentActionWork(BaseModel):
     reason: str | None = None
 
 
-AgentAction = Union[AgentActionMove, AgentActionWait, AgentActionWork]
+class AgentActionBuild(BaseModel):
+    """An in-flight build (R22.1 exclusive; materials already pre-deducted,
+    the structure row exists with status="building")."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["build"]
+    blueprint_id: str
+    col: int
+    row: int
+    started_at: int
+    ends_at: int
+    reason: str | None = None
+
+
+AgentAction = Union[AgentActionMove, AgentActionWait, AgentActionWork, AgentActionBuild]
 
 
 class InventoryEntrySnapshot(BaseModel):
