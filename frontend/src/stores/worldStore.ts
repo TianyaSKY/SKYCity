@@ -39,6 +39,7 @@ import type {
   Cell,
   ConversationMessage,
   ConversationSummary,
+  CropSnapshot,
   DecisionRecord,
   GodActionResult,
   GodActionRequest,
@@ -47,6 +48,7 @@ import type {
   MemoryItem,
   RelationshipItem,
   StockItem,
+  StructureSnapshot,
   WorldEventEnvelope,
   WorldEventItem,
   WorldEventType,
@@ -197,6 +199,10 @@ export const ITEM_NAMES: Record<string, string> = {
   tool_rake: '耙子',
   pottery: '陶罐',
   candle: '蜡烛',
+  flower: '鲜花',
+  wheat_seed: '小麦种子',
+  carrot_seed: '胡萝卜种子',
+  strawberry_seed: '草莓种子',
 };
 
 /** Display name of an item: explicit payload name > catalog label > raw id. */
@@ -490,6 +496,37 @@ function eventText(
       const qty = typeof p.quantity === 'number' ? p.quantity : 1;
       return `${from} 把 ${item}×${qty} 给了 ${to}`;
     }
+    case 'build_started': {
+      const name = agentName(agents, p.agent_id);
+      const blueprint = typeof p.blueprint_id === 'string' && p.blueprint_id ? p.blueprint_id : '建筑';
+      return `${name} 开始建造${blueprint}`;
+    }
+    case 'structure_built': {
+      const name = agentName(agents, p.agent_id);
+      const blueprint = typeof p.blueprint_id === 'string' && p.blueprint_id ? p.blueprint_id : '建筑';
+      return `${name} 建成了${blueprint}`;
+    }
+    case 'structure_removed': {
+      const blueprint = typeof p.blueprint_id === 'string' && p.blueprint_id ? p.blueprint_id : '建筑';
+      return `${blueprint} 被拆除了`;
+    }
+    case 'crop_planted': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name) || '作物';
+      return `${name} 种下了${item}`;
+    }
+    case 'crop_grown': {
+      const item = itemLabel(p.item_id) || '作物';
+      const col = typeof p.col === 'number' ? p.col : '?';
+      const row = typeof p.row === 'number' ? p.row : '?';
+      const stage = typeof p.stage === 'number' ? p.stage : '?';
+      return `（${col},${row}）的${item}长到了阶段${stage}`;
+    }
+    case 'crop_harvested': {
+      const name = agentName(agents, p.agent_id);
+      const item = itemLabel(p.item_id, p.item_name) || '作物';
+      return `${name} 收获了${item}`;
+    }
     // inventory_changed / needs_changed carry no stream text; they only sync
     // agent state in applyEvent.
     case 'inventory_changed':
@@ -518,6 +555,7 @@ export function taskLabelOf(
   }
   if (action.type === 'wait') return '等待中';
   if (action.type === 'work') return `工作中 · ${action.job_name ?? action.job_id}`;
+  if (action.type === 'build') return '建造中';
   return '空闲';
 }
 
@@ -534,7 +572,7 @@ export function actionRemainingMinutes(
 export function taskPriority(action: AgentSnapshot['action'], inConversation: boolean): number {
   if (inConversation) return 0;
   if (!action) return 4;
-  if (action.type === 'work') return 1;
+  if (action.type === 'work' || action.type === 'build') return 1;
   if (action.type === 'move') return 2;
   return 3;
 }
@@ -560,6 +598,10 @@ export const useWorldStore = defineStore('world', {
     day: 1,
     agents: [] as AgentSnapshot[],
     locations: [] as WorldLocation[],
+    /** Agent-built structures (fences/houses/flower beds; M14). */
+    structures: [] as StructureSnapshot[],
+    /** Planted crops (single-cell; M15). */
+    crops: [] as CropSnapshot[],
     events: [] as WorldEventItem[],
     latestSequence: 0,
     agentColors: {} as Record<string, string>,
@@ -663,6 +705,14 @@ export const useWorldStore = defineStore('world', {
         inventory: Array.isArray(a.inventory) ? a.inventory : [],
       }));
       this.locations = payload.locations.map((l) => ({ ...l }));
+      // A snapshot supersedes any incremental structure state.
+      this.structures = Array.isArray(payload.structures)
+        ? payload.structures.map((s) => ({ ...s }))
+        : [];
+      // A snapshot supersedes any incremental crop state.
+      this.crops = Array.isArray(payload.crops)
+        ? payload.crops.map((c) => ({ ...c }))
+        : [];
       this.latestSequence = payload.latest_sequence;
       // A snapshot supersedes any incremental history accumulated so far.
       this.events = [];
@@ -844,6 +894,28 @@ export const useWorldStore = defineStore('world', {
           break;
         case 'dividend_paid':
           break; // 金额经 money_changed 到账, 面板显示不依赖此事件
+        case 'build_started':
+          // The build is now on the map as an in-progress (50% alpha)
+          // structure; the payload carries the anchor cell + blueprint.
+          this.upsertStructure({ ...p, status: 'building' });
+          break;
+        case 'structure_built':
+          this.upsertStructure(p);
+          break;
+        case 'structure_removed':
+          this.removeStructure(p);
+          break;
+        case 'crop_planted':
+          // The crop appears on the map immediately at the payload stage
+          // (seed); its planted_at is the event's world time.
+          this.upsertCrop(p, env.world_time);
+          break;
+        case 'crop_grown':
+          this.growCrop(p);
+          break;
+        case 'crop_harvested':
+          this.removeCrop(p);
+          break;
         default:
           break;
       }
@@ -1284,6 +1356,88 @@ export const useWorldStore = defineStore('world', {
       const agent = this.agents.find((a) => a.agent_id === p.agent_id);
       if (!agent) return;
       agent.action = null;
+    },
+
+    /** Upsert a structure by its anchor cell (structure_built; M14). */
+    upsertStructure(p: Record<string, unknown>): void {
+      const col = typeof p.col === 'number' ? p.col : NaN;
+      const row = typeof p.row === 'number' ? p.row : NaN;
+      const blueprintId = typeof p.blueprint_id === 'string' ? p.blueprint_id : '';
+      if (!Number.isFinite(col) || !Number.isFinite(row) || !blueprintId) return;
+      const owner =
+        (typeof p.owner_agent_id === 'string' ? p.owner_agent_id : '') ||
+        (typeof p.agent_id === 'string' ? p.agent_id : '');
+      const status = p.status === 'building' ? 'building' : 'built';
+      const builtAt = typeof p.built_at === 'number' ? p.built_at : null;
+      const existing = this.structures.find((s) => s.col === col && s.row === row);
+      if (existing) {
+        existing.blueprint_id = blueprintId;
+        existing.owner_agent_id = owner;
+        existing.status = status;
+        existing.built_at = builtAt;
+      } else {
+        this.structures.push({
+          col,
+          row,
+          blueprint_id: blueprintId,
+          owner_agent_id: owner,
+          status,
+          built_at: builtAt,
+        });
+      }
+    },
+
+    /** Remove the structure at the given anchor cell (structure_removed; M14). */
+    removeStructure(p: Record<string, unknown>): void {
+      const col = typeof p.col === 'number' ? p.col : NaN;
+      const row = typeof p.row === 'number' ? p.row : NaN;
+      if (!Number.isFinite(col) || !Number.isFinite(row)) return;
+      this.structures = this.structures.filter((s) => !(s.col === col && s.row === row));
+    },
+
+    /** Upsert a planted crop by its cell (crop_planted; M15). */
+    upsertCrop(p: Record<string, unknown>, worldTime: number): void {
+      const col = typeof p.col === 'number' ? p.col : NaN;
+      const row = typeof p.row === 'number' ? p.row : NaN;
+      const itemId = typeof p.item_id === 'string' ? p.item_id : '';
+      if (!Number.isFinite(col) || !Number.isFinite(row) || !itemId) return;
+      const plantedBy =
+        (typeof p.planted_by === 'string' ? p.planted_by : '') ||
+        (typeof p.agent_id === 'string' ? p.agent_id : '');
+      const plantedAt = typeof p.planted_at === 'number' ? p.planted_at : worldTime;
+      const stage = typeof p.stage === 'number' ? p.stage : 0;
+      const nextStageAt = typeof p.next_stage_at === 'number' ? p.next_stage_at : null;
+      const existing = this.crops.find((c) => c.col === col && c.row === row);
+      if (existing) {
+        existing.item_id = itemId;
+        existing.planted_by = plantedBy;
+        existing.planted_at = plantedAt;
+        existing.stage = stage;
+        existing.next_stage_at = nextStageAt;
+      } else {
+        this.crops.push({ col, row, item_id: itemId, planted_by: plantedBy, planted_at: plantedAt, stage, next_stage_at: nextStageAt });
+      }
+    },
+
+    /** Advance the crop at a cell to a new growth stage (crop_grown; M15). */
+    growCrop(p: Record<string, unknown>): void {
+      const col = typeof p.col === 'number' ? p.col : NaN;
+      const row = typeof p.row === 'number' ? p.row : NaN;
+      if (!Number.isFinite(col) || !Number.isFinite(row)) return;
+      const crop = this.crops.find((c) => c.col === col && c.row === row);
+      if (!crop) return;
+      if (typeof p.stage === 'number') crop.stage = p.stage;
+      if (typeof p.next_stage_at === 'number' || p.next_stage_at === null) {
+        crop.next_stage_at = p.next_stage_at;
+      }
+    },
+
+    /** Remove the crop at the given cell (crop_harvested; M15). */
+    removeCrop(p: Record<string, unknown>): void {
+      const col = typeof p.col === 'number' ? p.col : NaN;
+      const row = typeof p.row === 'number' ? p.row : NaN;
+      if (!Number.isFinite(col) || !Number.isFinite(row)) return;
+      this.crops = this.crops.filter((c) => !(c.col === col && c.row === row));
     },
 
     ensureAgentColors(agents: AgentSnapshot[]): void {

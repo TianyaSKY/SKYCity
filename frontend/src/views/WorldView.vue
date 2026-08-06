@@ -2,10 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { apiBase } from '../api/client';
 import { loadMapBundle } from '../pixi/AssetLoader';
+import { loadBlueprintCatalog } from '../pixi/StructureLayer';
+import { loadCropCatalog } from '../pixi/CropLayer';
 import { AgentLayer } from '../pixi/AgentLayer';
 import { CameraController } from '../pixi/CameraController';
 import { WorldRenderer } from '../pixi/WorldRenderer';
 import { useWorldStore } from '../stores/worldStore';
+import type { BlueprintCatalog, CropCatalog } from '../types/world';
 import type { ParsedWorldConfig } from '../types/tiled';
 import EventStream from '../components/EventStream.vue';
 import HealthIndicator from '../components/HealthIndicator.vue';
@@ -30,6 +33,8 @@ let renderer: WorldRenderer | null = null;
 let camera: CameraController | null = null;
 let agentLayer: AgentLayer | null = null;
 let worldConfig: ParsedWorldConfig | null = null;
+let blueprints: BlueprintCatalog | null = null;
+let cropCatalog: CropCatalog | null = null;
 let bobTime = 0;
 
 const tileLabel = computed(() =>
@@ -65,6 +70,30 @@ onMounted(async () => {
 
     store.mapLoaded = true;
     store.mapError = null;
+
+    // Fetch the blueprint catalog once; the structure layer renders from it
+    // as soon as it lands (and again whenever store.structures changes).
+    void loadBlueprintCatalog(apiBase)
+      .then((catalog) => {
+        blueprints = catalog;
+        renderer?.updateStructures(store.structures, catalog);
+      })
+      .catch(() => {
+        // The map keeps working without structures; the watch below stays a
+        // no-op until a catalog becomes available.
+      });
+
+    // Fetch the crop catalog once; the crop layer renders from it as soon as
+    // it lands (and again whenever store.crops changes).
+    void loadCropCatalog(apiBase)
+      .then((catalog) => {
+        cropCatalog = catalog;
+        renderer?.updateCrops(store.crops, catalog);
+      })
+      .catch(() => {
+        // The map keeps working without crops; the watch below stays a no-op
+        // until a catalog becomes available.
+      });
 
     const canvas = renderer.app.canvas;
     canvas.addEventListener('pointermove', handlePointerMove);
@@ -105,6 +134,26 @@ watch(
   (agents) => {
     agentLayer?.sync(agents);
     applyHighlights();
+  },
+  { deep: true },
+);
+
+// Re-render structures on snapshot hydration and on the M14 build events
+// (structure_built upserts / structure_removed deletes mutate this array).
+watch(
+  () => store.structures,
+  (structures) => {
+    if (blueprints && renderer) renderer.updateStructures(structures, blueprints);
+  },
+  { deep: true },
+);
+
+// Re-render crops on snapshot hydration and on the M15 crop events
+// (crop_planted upserts / crop_grown updates / crop_harvested deletes).
+watch(
+  () => store.crops,
+  (crops) => {
+    if (cropCatalog && renderer) renderer.updateCrops(crops, cropCatalog);
   },
   { deep: true },
 );
@@ -198,6 +247,8 @@ onBeforeUnmount(() => {
   camera = null;
   agentLayer = null;
   worldConfig = null;
+  blueprints = null;
+  cropCatalog = null;
 });
 </script>
 

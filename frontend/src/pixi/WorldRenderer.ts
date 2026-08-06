@@ -1,12 +1,16 @@
 /**
  * Owns the PIXI application and the world scene: one sprite per visual tile
  * layer inside a single scaled/panned world container, plus a location
- * highlight overlay. Camera (pan/zoom) is driven by CameraController.
+ * highlight overlay and the agent-built structure layer. Camera (pan/zoom) is
+ * driven by CameraController.
  */
 
 import { Application, Container, Graphics, Sprite } from 'pixi.js';
 import type { Texture } from 'pixi.js';
 import type { ParsedWorldConfig } from '../types/tiled';
+import type { BlueprintCatalog, CropCatalog, CropSnapshot, StructureSnapshot } from '../types/world';
+import { CropLayer } from './CropLayer';
+import { StructureLayer } from './StructureLayer';
 import { renderTileLayerToTexture } from './layers/TileLayerRenderer';
 
 export const VISUAL_LAYERS = ['ground', 'ground_detail', 'buildings', 'decorations_low', 'foreground'] as const;
@@ -18,6 +22,8 @@ export class WorldRenderer {
 
   private readonly highlight: Graphics;
   private readonly layerSprites = new Map<string, Sprite>();
+  private structureLayer: StructureLayer | null = null;
+  private cropLayer: CropLayer | null = null;
 
   private constructor(app: Application) {
     this.app = app;
@@ -52,6 +58,10 @@ export class WorldRenderer {
       sprite.destroy({ children: true });
     }
     this.layerSprites.clear();
+    this.structureLayer?.container.destroy({ children: true });
+    this.structureLayer = null;
+    this.cropLayer?.container.destroy({ children: true });
+    this.cropLayer = null;
     this.clearHighlight();
 
     for (const name of VISUAL_LAYERS) {
@@ -68,8 +78,26 @@ export class WorldRenderer {
       this.layerSprites.set(name, sprite);
     }
 
+    // Structures and crops sit above the tile layers (incl. decorations_low)
+    // and below the agent layer, which WorldView adds to this.world after
+    // this call.
+    this.structureLayer = new StructureLayer(texture, config.tileSize, tileset);
+    this.world.addChild(this.structureLayer.container);
+    this.cropLayer = new CropLayer(texture, config.tileSize, tileset);
+    this.world.addChild(this.cropLayer.container);
+
     // Re-add so the highlight stays above every layer.
     this.world.addChild(this.highlight);
+  }
+
+  /** Re-render the agent-built structure layer from store + blueprint catalog. */
+  updateStructures(structures: StructureSnapshot[], blueprints: BlueprintCatalog): void {
+    this.structureLayer?.render(structures, blueprints);
+  }
+
+  /** Re-render the planted-crop layer from store + crop catalog. */
+  updateCrops(crops: CropSnapshot[], catalog: CropCatalog): void {
+    this.cropLayer?.render(crops, catalog);
   }
 
   setHighlight(col: number, row: number, tileSize: number): void {

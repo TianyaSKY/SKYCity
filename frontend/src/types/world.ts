@@ -35,7 +35,18 @@ export interface WorkAction {
   reason?: string | null;
 }
 
-export type AgentAction = MoveAction | WaitAction | WorkAction | null;
+/** An in-flight build job (backend AgentActionBuild; M14 settles at ends_at). */
+export interface BuildAction {
+  type: 'build';
+  blueprint_id: string;
+  col: number;
+  row: number;
+  started_at: number;
+  ends_at: number;
+  reason?: string | null;
+}
+
+export type AgentAction = MoveAction | WaitAction | WorkAction | BuildAction | null;
 
 /** One inventory entry of an agent (item catalog keyed by item_id). */
 export interface InventoryItem {
@@ -118,7 +129,53 @@ export interface WorldSnapshotPayload {
   world: WorldClockState;
   agents: AgentSnapshot[];
   locations: WorldLocation[];
+  /** Agent-built structures (fences/houses/flower beds; M14). */
+  structures: StructureSnapshot[];
+  /** Planted crops (single-cell; M15). */
+  crops: CropSnapshot[];
   latest_sequence: number;
+}
+
+/** One planted crop as reported by the world snapshot (M15). */
+export interface CropSnapshot {
+  col: number;
+  row: number;
+  /** Seed item id; keys the crop catalog (crops/crops.json). */
+  item_id: string;
+  planted_by: string;
+  planted_at: number;
+  /** 0-based growth index; the final stage is harvestable. */
+  stage: number;
+  next_stage_at: number | null;
+}
+
+/** Payload of the WS crop_planted event (M15). */
+export interface CropPlantedPayload {
+  agent_id: string;
+  col: number;
+  row: number;
+  item_id: string;
+  item_name: string;
+  stage: number;
+  next_stage_at: number | null;
+}
+
+/** Payload of the WS crop_grown event (M15). */
+export interface CropGrownPayload {
+  col: number;
+  row: number;
+  item_id: string;
+  stage: number;
+}
+
+/** Payload of the WS crop_harvested event (M15). */
+export interface CropHarvestedPayload {
+  agent_id: string;
+  col: number;
+  row: number;
+  item_id: string;
+  item_name: string;
+  products: InventoryItem[];
 }
 
 /** Payload of the WS work_started event. */
@@ -211,6 +268,85 @@ export interface StorePriceChangedPayload {
   promo: boolean;
 }
 
+/** One agent-built structure as reported by the world snapshot (M14). */
+export interface StructureSnapshot {
+  /** Anchor cell of the blueprint (the cell the builder chose). */
+  col: number;
+  row: number;
+  blueprint_id: string;
+  owner_agent_id: string;
+  status: 'building' | 'built';
+  built_at: number | null;
+}
+
+/** Payload of the WS build_started event (M14). */
+export interface BuildStartedPayload {
+  agent_id: string;
+  col: number;
+  row: number;
+  blueprint_id: string;
+  duration_minutes: number;
+  ends_at: number;
+  materials: InventoryItem[];
+  reason?: string | null;
+}
+
+/** Payload of the WS structure_built event (M14). */
+export interface StructureBuiltPayload {
+  agent_id: string;
+  col: number;
+  row: number;
+  blueprint_id: string;
+  owner_agent_id: string;
+}
+
+/** Payload of the WS structure_removed event (M14). */
+export interface StructureRemovedPayload {
+  col: number;
+  row: number;
+  blueprint_id: string;
+  removed_by: string;
+}
+
+/** One blueprint entry in the catalog served at blueprints/blueprints.json (M14). */
+export interface Blueprint {
+  blueprint_id: string;
+  name: string;
+  /** Cell offsets [dcol, drow] relative to the structure anchor cell. */
+  footprint: Cell[];
+  /** Per-footprint-cell tile gids: "dcol,drow" → gids (tiny_farm tileset, firstGid 1). */
+  tile_gids: Record<string, number[]>;
+  blocking: boolean;
+  /** Materials required to build: item_id → quantity. */
+  materials: Record<string, number>;
+  duration_minutes: number;
+  description: string;
+}
+
+/** Blueprint catalog JSON (M14, backend static mount, same base as maps). */
+export interface BlueprintCatalog {
+  version: string;
+  blueprints: Blueprint[];
+}
+
+/** One crop definition in the catalog served at crops/crops.json (M15). */
+export interface CropDefinition {
+  seed_item_id: string;
+  name: string;
+  /** Growth stages: [minutes until this stage, tile gid]; 0-based index. */
+  stages: [number, number][];
+  yield: InventoryItem[];
+  description: string;
+}
+
+/** Crop catalog JSON (M15, backend static mount, same base as maps). */
+export interface CropCatalog {
+  version: string;
+  plant_radius: number;
+  farm_field_id: string;
+  crops: CropDefinition[];
+}
+
 export type WorldEventType =
   | 'world_snapshot'
   | 'world_time_changed'
@@ -251,6 +387,12 @@ export type WorldEventType =
   | 'dividend_paid'
   | 'money_transferred'
   | 'item_given'
+  | 'build_started'
+  | 'structure_built'
+  | 'structure_removed'
+  | 'crop_planted'
+  | 'crop_grown'
+  | 'crop_harvested'
   | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */

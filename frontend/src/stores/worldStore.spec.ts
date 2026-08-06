@@ -120,6 +120,8 @@ function baseSnapshot(): WorldSnapshotPayload {
     },
     agents: [AGENT_LINXIA, AGENT_ZHANGMING],
     locations: [LOCATION_SHOP, LOCATION_HOUSE],
+    structures: [],
+    crops: [],
     latest_sequence: 0,
   };
 }
@@ -176,6 +178,8 @@ describe('applySnapshot', () => {
       },
       agents: [{ ...AGENT_LINXIA, money: 99 }],
       locations: [LOCATION_SHOP],
+      structures: [],
+      crops: [],
       latest_sequence: 100,
     });
 
@@ -196,6 +200,56 @@ describe('applySnapshot', () => {
     expect(store.activeConversations).toEqual({});
     // Colors are seeded for the surviving agents.
     expect(store.agentColors['agent_linxia']).toBeTruthy();
+  });
+
+  it('hydrates structures from the payload (M14)', () => {
+    store.applySnapshot({
+      world: {
+        world_id: 'world_e2e',
+        world_time: 600,
+        speed: 1,
+        paused: false,
+        weather: 'clear',
+        day: 1,
+      },
+      agents: [AGENT_LINXIA],
+      locations: [LOCATION_SHOP],
+      latest_sequence: 0,
+      structures: [
+        { col: 5, row: 6, blueprint_id: 'bp_fence', owner_agent_id: 'agent_linxia', status: 'building', built_at: null },
+        { col: 3, row: 3, blueprint_id: 'bp_house', owner_agent_id: 'agent_zhangming', status: 'built', built_at: 720 },
+      ],
+      crops: [],
+    });
+    expect(store.structures).toEqual([
+      { col: 5, row: 6, blueprint_id: 'bp_fence', owner_agent_id: 'agent_linxia', status: 'building', built_at: null },
+      { col: 3, row: 3, blueprint_id: 'bp_house', owner_agent_id: 'agent_zhangming', status: 'built', built_at: 720 },
+    ]);
+  });
+
+  it('hydrates crops from the payload (M15)', () => {
+    store.applySnapshot({
+      world: {
+        world_id: 'world_e2e',
+        world_time: 600,
+        speed: 1,
+        paused: false,
+        weather: 'clear',
+        day: 1,
+      },
+      agents: [AGENT_LINXIA],
+      locations: [LOCATION_SHOP],
+      latest_sequence: 0,
+      structures: [],
+      crops: [
+        { col: 10, row: 8, item_id: 'wheat_seed', planted_by: 'agent_linxia', planted_at: 500, stage: 2, next_stage_at: 700 },
+        { col: 11, row: 8, item_id: 'carrot_seed', planted_by: 'agent_zhangming', planted_at: 400, stage: 0, next_stage_at: 420 },
+      ],
+    });
+    expect(store.crops).toEqual([
+      { col: 10, row: 8, item_id: 'wheat_seed', planted_by: 'agent_linxia', planted_at: 500, stage: 2, next_stage_at: 700 },
+      { col: 11, row: 8, item_id: 'carrot_seed', planted_by: 'agent_zhangming', planted_at: 400, stage: 0, next_stage_at: 420 },
+    ]);
   });
 });
 
@@ -712,6 +766,197 @@ describe('applyEvent M11 transfer events', () => {
       quantity: 2,
     }));
     expect(store.events[0].text).toBe('林夏 把 面包×2 给了 张明');
+  });
+});
+
+describe('applyEvent M14 structure events', () => {
+  let store: ReturnType<typeof useWorldStore>;
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+  });
+
+  it('build_started: adds an in-progress (building) structure row', () => {
+    store.applyEvent(env(1, 'build_started', {
+      agent_id: 'agent_linxia',
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_fence',
+      duration_minutes: 30,
+      ends_at: 510,
+      materials: [{ item_id: 'wood', quantity: 1 }],
+      reason: '围菜园',
+    }));
+    expect(store.structures).toEqual([
+      { col: 5, row: 6, blueprint_id: 'bp_fence', owner_agent_id: 'agent_linxia', status: 'building', built_at: null },
+    ]);
+    expect(store.events[0].text).toBe('林夏 开始建造bp_fence');
+  });
+
+  it('structure_built: upserts the structure at its anchor cell', () => {
+    store.applyEvent(env(1, 'structure_built', {
+      agent_id: 'agent_linxia',
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_fence',
+      owner_agent_id: 'agent_linxia',
+    }));
+    expect(store.structures).toEqual([
+      { col: 5, row: 6, blueprint_id: 'bp_fence', owner_agent_id: 'agent_linxia', status: 'built', built_at: null },
+    ]);
+    expect(store.events[0].text).toBe('林夏 建成了bp_fence');
+  });
+
+  it('structure_built: replaces an existing structure at the same cell', () => {
+    store.applyEvent(env(1, 'structure_built', {
+      agent_id: 'agent_linxia',
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_fence',
+      owner_agent_id: 'agent_linxia',
+    }));
+    store.applyEvent(env(2, 'structure_built', {
+      agent_id: 'agent_zhangming',
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_house',
+      owner_agent_id: 'agent_zhangming',
+    }));
+    expect(store.structures).toEqual([
+      { col: 5, row: 6, blueprint_id: 'bp_house', owner_agent_id: 'agent_zhangming', status: 'built', built_at: null },
+    ]);
+    expect(store.structures).toHaveLength(1);
+  });
+
+  it('structure_removed: deletes the structure at the anchor cell', () => {
+    store.applyEvent(env(1, 'structure_built', {
+      agent_id: 'agent_linxia',
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_fence',
+      owner_agent_id: 'agent_linxia',
+    }));
+    store.applyEvent(env(2, 'structure_removed', {
+      col: 5,
+      row: 6,
+      blueprint_id: 'bp_fence',
+      removed_by: 'agent_zhangming',
+    }));
+    expect(store.structures).toEqual([]);
+    expect(store.events[0].text).toBe('bp_fence 被拆除了');
+  });
+
+  it('structure_built / structure_removed: malformed payloads are ignored defensively', () => {
+    store.applyEvent(env(1, 'structure_built', { blueprint_id: 'bp_fence' }));
+    store.applyEvent(env(2, 'structure_removed', {}));
+    expect(store.structures).toEqual([]);
+    // Malformed events still flow through without throwing.
+    expect(store.latestSequence).toBe(2);
+  });
+});
+
+describe('applyEvent M15 crop events', () => {
+  let store: ReturnType<typeof useWorldStore>;
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+  });
+
+  it('crop_planted: adds the crop at the payload stage + line', () => {
+    store.applyEvent(env(1, 'crop_planted', {
+      agent_id: 'agent_linxia',
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      item_name: '小麦',
+      stage: 0,
+      next_stage_at: 615,
+    }));
+    expect(store.crops).toEqual([
+      { col: 10, row: 8, item_id: 'wheat_seed', planted_by: 'agent_linxia', planted_at: 600, stage: 0, next_stage_at: 615 },
+    ]);
+    expect(store.events[0].text).toBe('林夏 种下了小麦');
+  });
+
+  it('crop_planted: replaces an existing crop at the same cell (upsert)', () => {
+    store.applyEvent(env(1, 'crop_planted', {
+      agent_id: 'agent_linxia',
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      item_name: '小麦',
+      stage: 0,
+      next_stage_at: 615,
+    }));
+    store.applyEvent(env(2, 'crop_planted', {
+      agent_id: 'agent_zhangming',
+      col: 10,
+      row: 8,
+      item_id: 'carrot_seed',
+      item_name: '胡萝卜',
+      stage: 0,
+      next_stage_at: 620,
+    }));
+    expect(store.crops).toHaveLength(1);
+    expect(store.crops[0].item_id).toBe('carrot_seed');
+    expect(store.crops[0].planted_by).toBe('agent_zhangming');
+  });
+
+  it('crop_grown: advances the stage at the cell + line', () => {
+    store.applyEvent(env(1, 'crop_planted', {
+      agent_id: 'agent_linxia',
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      item_name: '小麦',
+      stage: 0,
+      next_stage_at: 615,
+    }));
+    store.applyEvent(env(2, 'crop_grown', {
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      stage: 1,
+      next_stage_at: 700,
+    }));
+    expect(store.crops[0].stage).toBe(1);
+    expect(store.crops[0].next_stage_at).toBe(700);
+    expect(store.events[0].text).toBe('（10,8）的小麦种子长到了阶段1');
+  });
+
+  it('crop_harvested: removes the crop at the cell + line', () => {
+    store.applyEvent(env(1, 'crop_planted', {
+      agent_id: 'agent_linxia',
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      item_name: '小麦',
+      stage: 3,
+      next_stage_at: null,
+    }));
+    store.applyEvent(env(2, 'crop_harvested', {
+      agent_id: 'agent_linxia',
+      col: 10,
+      row: 8,
+      item_id: 'wheat_seed',
+      item_name: '小麦',
+      products: [{ item_id: 'wheat', quantity: 2 }],
+    }));
+    expect(store.crops).toEqual([]);
+    expect(store.events[0].text).toBe('林夏 收获了小麦');
+  });
+
+  it('crop events: malformed payloads are ignored defensively', () => {
+    store.applyEvent(env(1, 'crop_planted', { agent_id: 'agent_linxia' }));
+    store.applyEvent(env(2, 'crop_grown', {}));
+    store.applyEvent(env(3, 'crop_harvested', {}));
+    expect(store.crops).toEqual([]);
+    // Malformed events still flow through without throwing.
+    expect(store.latestSequence).toBe(3);
   });
 });
 
