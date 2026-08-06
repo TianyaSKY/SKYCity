@@ -1,0 +1,27 @@
+"""Pydantic contracts for company and formal-employment endpoints."""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class JobApplicationRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=64)
+    reason: str = Field(default="", max_length=512)
+
+
+class JobApplicationReviewRequest(BaseModel):
+    manager_agent_id: str = Field(min_length=1, max_length=64)
+    decision: Literal["accept", "reject"]
+    reason: str = Field(default="", max_length=512)
+
+
+class ShiftStartRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=64)
+
+
+class EmploymentResignRequest(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=64)
+    reason: str = Field(default="", max_length=512)
