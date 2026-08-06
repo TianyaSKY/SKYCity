@@ -49,7 +49,7 @@ cell_walkable(col, row) =
 |---|---|---|
 | `location_id` | string | 稳定 ID，全局唯一（如 `village_shop`） |
 | `name` | string | 中文显示名（如 `村庄杂货店`） |
-| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` |
+| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` |
 | `capacity` | int | 同时容纳的最大智能体数 |
 | `open_hour` | int | 开门小时（世界时 0..24，`0` 表示 24 小时开放） |
 | `close_hour` | int | 关门小时（`24` 表示整日开放） |
@@ -62,10 +62,14 @@ cell_walkable(col, row) =
 | `village_shop` | store | 8-20 | 8 |
 | `village_farm` | farm | 6-18 | 12 |
 | `town_hall` | office | 9-17 | 10 |
+| `village_hotel` | hotel | 0-24 | 10 |
 | `linxia_home` | house | 0-24 | 4 |
 | `zhangming_home` | house | 0-24 | 4 |
 | `chenyu_home` | house | 0-24 | 4 |
 | `wangfang_home` | house | 0-24 | 4 |
+
+> `hotel`（小镇旅店）与 `house`/`plaza` 一样全天开放（R8）；无家智能体的
+> 睡觉地点（R14），入住收取每晚 15 金币房费。
 
 ## 4. `interactables` 对象层
 

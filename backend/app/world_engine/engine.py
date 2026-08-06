@@ -50,6 +50,17 @@ TICK_INTERVAL = 0.1  # real seconds per engine tick
 # M12 D6: daily cost of living, deducted at 00:00 (floor 0, never debt).
 UPKEEP_PER_DAY = 5
 
+# Sleep place rule: an agent with a home sleeps only at home; a homeless
+# agent sleeps at the hotel, paying a nightly fee (R7: no credit).
+HOTEL_LOCATION_ID = "village_hotel"
+HOTEL_NIGHTLY_FEE = 15  # priced well above the 5-coin daily upkeep
+
+# Night sleep steering: idle agents with low energy get a boosted decision
+# during night hours so they go home / to the hotel (world-rules R14).
+NIGHT_START_HOUR = 22
+NIGHT_END_HOUR = 7
+NIGHT_SLEEP_ENERGY_THRESHOLD = 40
+
 def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
     """M12 D5: deterministic 20% chance of a promo day for one product.
 
@@ -89,6 +100,9 @@ class WorldEngine:
         self.world_data_dir = world_data_dir
         self._runtimes: dict[str, WorldRuntime] = {}
         self._task: asyncio.Task | None = None
+        # agent_id -> home location id, built lazily from the character cards
+        # (single source of truth, see home_location_id()).
+        self._home_by_agent: dict[str, str] | None = None
         # ActionExecutionService is wired after construction (it needs the engine).
         self.action_service: Any = None
         # DecisionService (M3) is wired after construction; when set, the
@@ -164,6 +178,22 @@ class WorldEngine:
 
     def get_runtime(self, world_id: str) -> WorldRuntime | None:
         return self._runtimes.get(world_id)
+
+    def home_location_id(self, agent_id: str) -> str | None:
+        """The agent's home location id from its character card.
+
+        ``None`` means the agent has no home (sleeping requires the hotel).
+        The card is the single source of truth (world_config.spawn_points);
+        a home id whose location is missing from the map counts as no home.
+        """
+        if self._home_by_agent is None:
+            valid = {loc.location_id for loc in self.world_config.locations}
+            self._home_by_agent = {
+                spawn.agent_id: spawn.home_id
+                for spawn in self.world_config.spawn_points
+                if spawn.home_id and spawn.home_id in valid
+            }
+        return self._home_by_agent.get(agent_id)
 
     def idle_agents_near(
         self, world_id: str, agent_id: str, distance: int
@@ -897,11 +927,13 @@ class WorldEngine:
         world: World,
         world_time: int,
     ) -> None:
-        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, sleep +20/h,
-        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h."""
+        """R14 defaults: hunger +1/h, energy -1/h, wait +5/h, sleep +40/h,
+        hunger==100 -1/h. M12: mood -1/h, wait +2/h, sleep +20/h."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
+        hour = (world_time % 1440) // 60
+        night = hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
         for agent in agents:
             before = (agent.hunger, agent.energy, agent.mood)
             agent.hunger = min(100, agent.hunger + 1)
@@ -911,8 +943,8 @@ class WorldEngine:
                 agent.energy = min(100, agent.energy + 5)
                 agent.mood = min(100, agent.mood + 2)
             elif agent.action_type == "sleep":
-                agent.energy = min(100, agent.energy + 20)
-                agent.mood = min(100, agent.mood + 10)
+                agent.energy = min(100, agent.energy + 40)
+                agent.mood = min(100, agent.mood + 20)
             if agent.hunger >= 100:
                 agent.energy = max(0, agent.energy - 1)  # R11 extra drain
             if (agent.hunger, agent.energy, agent.mood) != before:
@@ -928,11 +960,17 @@ class WorldEngine:
                     },
                 )
             # R11/R12/M12: hunger maxed, energy drained or mood low ->
-            # high-priority decision.
+            # high-priority decision. Night + low energy -> go home/hotel to
+            # sleep (R14 sleep steering).
             if (
                 world.autonomous
                 and agent.action_type is None
-                and (agent.hunger >= 100 or agent.energy <= 0 or agent.mood <= 20)
+                and (
+                    agent.hunger >= 100
+                    or agent.energy <= 0
+                    or agent.mood <= 20
+                    or (night and agent.energy <= NIGHT_SLEEP_ENERGY_THRESHOLD)
+                )
             ):
                 runtime.scheduler.schedule(
                     session,
@@ -1312,8 +1350,8 @@ class WorldEngine:
 def is_location_open(
     location_type: str, open_hour: int, close_hour: int, world_time: int
 ) -> bool:
-    """R8: houses and plazas are always open; others honour [open_hour, close_hour)."""
-    if location_type in ("house", "plaza"):
+    """R8: houses, hotels and plazas are always open; others honour [open_hour, close_hour)."""
+    if location_type in ("house", "hotel", "plaza"):
         return True
     hour = (world_time % 1440) // 60
     return open_hour <= hour < close_hour

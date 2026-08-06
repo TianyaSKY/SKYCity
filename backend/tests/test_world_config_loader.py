@@ -74,6 +74,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "village_farm",
         "village_plaza",
         "town_hall",
+        "village_hotel",
         "linxia_home",
         "zhangming_home",
         "chenyu_home",

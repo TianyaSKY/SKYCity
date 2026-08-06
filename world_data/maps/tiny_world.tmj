@@ -6468,7 +6468,7 @@
         0,
         0,
         0,
-        0,
+        127,
         0,
         0,
         0,
@@ -14187,7 +14187,7 @@
         0,
         0,
         0,
-        0,
+        133,
         0,
         0,
         0,
@@ -16760,7 +16760,7 @@
         133,
         133,
         133,
-        133,
+        0,
         133,
         133,
         133,
@@ -18194,6 +18194,49 @@
         {
           "height": 16,
           "id": 5,
+          "name": "village_hotel",
+          "properties": [
+            {
+              "name": "location_id",
+              "type": "string",
+              "value": "village_hotel"
+            },
+            {
+              "name": "name",
+              "type": "string",
+              "value": "小镇旅店"
+            },
+            {
+              "name": "location_type",
+              "type": "string",
+              "value": "hotel"
+            },
+            {
+              "name": "capacity",
+              "type": "int",
+              "value": 10
+            },
+            {
+              "name": "open_hour",
+              "type": "int",
+              "value": 0
+            },
+            {
+              "name": "close_hour",
+              "type": "int",
+              "value": 24
+            }
+          ],
+          "rotation": 0,
+          "type": "location",
+          "visible": true,
+          "width": 16,
+          "x": 592,
+          "y": 320
+        },
+        {
+          "height": 16,
+          "id": 6,
           "name": "chenyu_home",
           "properties": [
             {
@@ -18236,7 +18279,7 @@
         },
         {
           "height": 16,
-          "id": 6,
+          "id": 7,
           "name": "linxia_home",
           "properties": [
             {
@@ -18279,7 +18322,7 @@
         },
         {
           "height": 16,
-          "id": 7,
+          "id": 8,
           "name": "wangfang_home",
           "properties": [
             {
@@ -18322,7 +18365,7 @@
         },
         {
           "height": 16,
-          "id": 8,
+          "id": 9,
           "name": "zhangming_home",
           "properties": [
             {
@@ -18377,7 +18420,7 @@
       "objects": [
         {
           "height": 16,
-          "id": 9,
+          "id": 10,
           "name": "shop_counter",
           "properties": [
             {
@@ -18405,7 +18448,7 @@
         },
         {
           "height": 16,
-          "id": 10,
+          "id": 11,
           "name": "farm_field",
           "properties": [
             {
@@ -18433,7 +18476,7 @@
         },
         {
           "height": 16,
-          "id": 11,
+          "id": 12,
           "name": "well",
           "properties": [
             {
@@ -18461,7 +18504,7 @@
         },
         {
           "height": 16,
-          "id": 12,
+          "id": 13,
           "name": "fountain",
           "properties": [
             {
@@ -18489,7 +18532,7 @@
         },
         {
           "height": 16,
-          "id": 13,
+          "id": 14,
           "name": "town_hall_desk",
           "properties": [
             {
@@ -18529,7 +18572,7 @@
       "objects": [
         {
           "height": 0,
-          "id": 14,
+          "id": 15,
           "name": "spawn_chenyu",
           "point": true,
           "properties": [
@@ -18558,7 +18601,7 @@
         },
         {
           "height": 0,
-          "id": 15,
+          "id": 16,
           "name": "spawn_laozhang",
           "point": true,
           "properties": [
@@ -18587,7 +18630,7 @@
         },
         {
           "height": 0,
-          "id": 16,
+          "id": 17,
           "name": "spawn_linxia",
           "point": true,
           "properties": [
@@ -18616,7 +18659,7 @@
         },
         {
           "height": 0,
-          "id": 17,
+          "id": 18,
           "name": "spawn_touzi",
           "point": true,
           "properties": [
@@ -18645,7 +18688,7 @@
         },
         {
           "height": 0,
-          "id": 18,
+          "id": 19,
           "name": "spawn_wangfang",
           "point": true,
           "properties": [
@@ -18674,7 +18717,7 @@
         },
         {
           "height": 0,
-          "id": 19,
+          "id": 20,
           "name": "spawn_zhangming",
           "point": true,
           "properties": [
@@ -18710,7 +18753,7 @@
     }
   ],
   "nextlayerid": 11,
-  "nextobjectid": 20,
+  "nextobjectid": 21,
   "orientation": "orthogonal",
   "renderorder": "right-down",
   "tiledversion": "1.10.2",

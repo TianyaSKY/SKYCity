@@ -49,8 +49,9 @@ async def sleep(
     minutes: int,
     reason: str,
 ) -> str:
-    """睡觉恢复精力（比 wait 快得多，每小时 +20）：minutes 60~480，
-    建议深夜或精力低时使用。睡觉与 wait 一样可被打断。"""
+    """睡觉恢复精力和心情（比 wait 快得多，每小时 +40 精力 / +20 心情）：
+    minutes 60~480，建议深夜或精力低时使用。有家必须在家睡，无家必须去
+    小镇旅店(village_hotel)睡（每晚 15 金币）。睡觉与 wait 一样可被打断。"""
     minutes = max(SLEEP_MIN_MINUTES, min(int(minutes), SLEEP_MAX_MINUTES))
     ok, envelope, err = ctx.context.action_service.execute_sleep(
         world_id=ctx.context.world_id,

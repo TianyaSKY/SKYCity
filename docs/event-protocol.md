@@ -51,6 +51,8 @@
 | `agent_move_completed` | `{agent_id, at: [c,r]}` | 移动完成 |
 | `agent_wait_started` | `{agent_id, minutes, reason}` | 等待开始 |
 | `agent_wait_completed` | `{agent_id}` | 等待结束 |
+| `agent_sleep_started` | `{agent_id, minutes, ends_at, reason, place, fee}` | 睡觉开始（R14：有家在家、无家在旅店；`fee`=旅店房费，家睡为 0） |
+| `agent_sleep_completed` | `{agent_id, at: [c,r]}` | 睡觉结束 |
 | `world_event_created` | `{agent_id?, text, importance}` | 世界内叙事事件 |
 | `conversation_message` | `{from_agent_id, to_agent_id, message, intent}` | 对话消息 |
 | `conversation_started` | `{a, b}` | 会话开始 |

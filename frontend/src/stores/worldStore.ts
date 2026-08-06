@@ -595,10 +595,15 @@ export const useWorldStore = defineStore('world', {
     isOpen: (state) => (locationId: string): boolean => {
       const loc = state.locations.find((l) => l.location_id === locationId);
       if (!loc) return false;
-      // Mirrors backend is_location_open (R8): houses and plazas never
-      // close; everything else honours [open_hour, close_hour) against the
-      // world clock (worldTime = minutes since midnight).
-      if (loc.location_type === 'house' || loc.location_type === 'plaza') return true;
+      // Mirrors backend is_location_open (R8): houses, hotels and plazas
+      // never close; everything else honours [open_hour, close_hour) against
+      // the world clock (worldTime = minutes since midnight).
+      if (
+        loc.location_type === 'house' ||
+        loc.location_type === 'hotel' ||
+        loc.location_type === 'plaza'
+      )
+        return true;
       const hour = (state.worldTime % 1440) / 60;
       return loc.open_hour <= hour && hour < loc.close_hour;
     },

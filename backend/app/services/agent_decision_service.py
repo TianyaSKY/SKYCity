@@ -238,6 +238,7 @@ class DecisionService:
             agent_id,
             self._session_factory,
             memory_service=self.engine.memory_service,
+            home_id=self.engine.home_location_id(agent_id),
         )
 
         # M8: observation cache (T8-5) + world daily budget (T8) gates run

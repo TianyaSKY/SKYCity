@@ -125,6 +125,8 @@ BUILDINGS: dict[str, tuple[int, int, int]] = {
     "village_farm": (47, 24, BARN),
     "town_hall": (28, 8, HOUSE_TOPS[0]),
     "town_hall_2": (29, 8, HOUSE_TOPS[1]),
+    # 小镇旅店: on the main road at the plaza's east edge; door at (37, 21).
+    "village_hotel": (37, 20, HOUSE_SHOP),
 }
 
 LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
@@ -132,6 +134,7 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "village_farm": (47, 24),
     "village_plaza": (32, 20),
     "town_hall": (29, 8),
+    "village_hotel": (37, 20),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -150,6 +153,10 @@ LOCATIONS: dict[str, dict] = {
     "town_hall": {
         "name": "小镇政务厅", "location_type": "office", "capacity": 10,
         "open_hour": 9, "close_hour": 17,
+    },
+    "village_hotel": {
+        "name": "小镇旅店", "location_type": "hotel", "capacity": 10,
+        "open_hour": 0, "close_hour": 24,
     },
 }
 
@@ -603,7 +610,7 @@ def main() -> None:
     loc_layer = next(l for l in tmj["layers"] if l["name"] == "locations")
     loc_ids = {o["name"] for o in loc_layer["objects"]}
     assert {"village_shop", "village_farm", "village_plaza",
-            "town_hall", "linxia_home"} <= loc_ids
+            "town_hall", "village_hotel", "linxia_home"} <= loc_ids
     card_homes = {c["home"]["location_id"] for _, c in CARDS if c.get("home")}
     assert card_homes <= loc_ids, f"missing home locations: {card_homes - loc_ids}"
     spawn_layer = next(l for l in tmj["layers"] if l["name"] == "spawn_points")

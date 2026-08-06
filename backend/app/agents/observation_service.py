@@ -24,7 +24,7 @@ from app.database.models.locations import WorldLocation
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.worlds import World
-from app.world_engine.engine import is_location_open
+from app.world_engine.engine import HOTEL_NIGHTLY_FEE, is_location_open
 
 MAX_OBSERVATION_CHARS = 2000
 
@@ -91,12 +91,16 @@ def build_observation(
     agent_id: str,
     session_factory: sessionmaker[Session],
     memory_service: Any = None,
+    home_id: str | None = None,
 ) -> str:
     """Compose the observation text for one agent decision.
 
     ``memory_service`` (M6) enables the real 【相关记忆】 section: up to 4
     retrieved memories weighted by entity/keyword/importance/recency. When
     None (no memory system wired) the legacy stub is emitted instead.
+
+    ``home_id`` (R14 sleep steering): the agent's home location id from its
+    character card, or None for homeless agents (sleeping requires the hotel).
     """
     session = session_factory()
     try:
@@ -151,9 +155,22 @@ def build_observation(
             f"【世界现状】第{world_time // 1440 + 1}天 {_time_word(world_time)} "
             f"{_format_clock(world_time)} 天气: {weather}"
         )
+        if home_id is not None and home_id in location_by_id:
+            home_name = location_by_id[home_id].name
+        elif home_id is not None:
+            home_name = home_id  # card home missing from the map: treat as hotel
+            home_id = None
+        else:
+            home_name = None
+        home_text = (
+            f" 家: {home_name}"
+            if home_id is not None
+            else f" 无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）"
+        )
         lines.append(
             f"【自身状态】饥饿: {agent.hunger}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
+            f"{home_text}"
         )
 
         # M5: the agent's backpack, ordered by item id.
@@ -232,7 +249,11 @@ def build_observation(
         lines.append("【可做的事】")
         lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
         lines.append("- wait(minutes, reason): 原地等待 1~240 分钟")
-        lines.append("- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 20 点精力（比 wait 快）")
+        lines.append(
+            "- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 40 点精力、20 点心情"
+            "（比 wait 快）；有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)"
+            f"（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
+        )
         if same_location:
             lines.append(
                 "- talk(target_agent_id, message, intent): 与【可见人物】中的人对话，"
