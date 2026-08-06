@@ -341,6 +341,11 @@ function teleportLocations(): WorldLocation[] {
           <span class="need-bar"><i class="need-fill mood" :style="{ width: barWidth(liveAgent.mood ?? 100) }" /></span>
           <span class="need-value">{{ liveAgent.mood ?? 100 }}</span>
         </div>
+        <div class="need-row">
+          <span class="need-label">孤单</span>
+          <span class="need-bar"><i class="need-fill loneliness" :style="{ width: barWidth(liveAgent.loneliness ?? 0) }" /></span>
+          <span class="need-value">{{ liveAgent.loneliness ?? 0 }}</span>
+        </div>
         <div class="ov-section-title">物品</div>
         <p class="ov-inventory">{{ inventoryText(liveAgent.inventory) }}</p>
         <div class="ov-section-title">当前行为</div>
@@ -855,6 +860,9 @@ function teleportLocations(): WorldLocation[] {
 }
 .need-fill.mood {
   background: #ba68c8;
+}
+.need-fill.loneliness {
+  background: #90caf9;
 }
 .need-value {
   width: 28px;

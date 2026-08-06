@@ -153,7 +153,7 @@ def build_observation(
         )
         lines.append(
             f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
-            f"金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
+            f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here} 当前行动: {_action_text(agent, world_time)}"
         )
 
         # M5: the agent's backpack, ordered by item id.

@@ -798,7 +798,7 @@ export const useWorldStore = defineStore('world', {
           this.replaceAgentInventory(p.agent_id as string, p.items);
           break;
         case 'needs_changed':
-          this.patchAgentNeeds(p.agent_id as string, p.satiety, p.energy, p.mood);
+          this.patchAgentNeeds(p.agent_id as string, p.satiety, p.energy, p.mood, p.loneliness);
           break;
         case 'memory_created':
           // Panels are REST-backed; a fresh memory for the selected agent
@@ -1155,6 +1155,8 @@ export const useWorldStore = defineStore('world', {
       if (!agent) return;
       if (typeof patch.satiety === 'number') agent.satiety = patch.satiety;
       if (typeof patch.energy === 'number') agent.energy = patch.energy;
+      if (typeof patch.mood === 'number') agent.mood = patch.mood;
+      if (typeof patch.loneliness === 'number') agent.loneliness = patch.loneliness;
       if (typeof patch.money === 'number') agent.money = patch.money;
       if (typeof patch.col === 'number') agent.col = patch.col;
       if (typeof patch.row === 'number') agent.row = patch.row;
@@ -1176,13 +1178,20 @@ export const useWorldStore = defineStore('world', {
       agent.inventory = cleaned;
     },
 
-    /** Sync satiety/energy/mood from a needs_changed event. */
-    patchAgentNeeds(agentId: string, satiety: unknown, energy: unknown, mood: unknown): void {
+    /** Sync satiety/energy/mood/loneliness from a needs_changed event. */
+    patchAgentNeeds(
+      agentId: string,
+      satiety: unknown,
+      energy: unknown,
+      mood: unknown,
+      loneliness: unknown,
+    ): void {
       const agent = this.agents.find((a) => a.agent_id === agentId);
       if (!agent) return;
       if (typeof satiety === 'number') agent.satiety = satiety;
       if (typeof energy === 'number') agent.energy = energy;
       if (typeof mood === 'number') agent.mood = mood;
+      if (typeof loneliness === 'number') agent.loneliness = loneliness;
     },
 
     /** Sync money from a money_changed event's authoritative balance. */

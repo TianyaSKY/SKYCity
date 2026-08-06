@@ -187,6 +187,7 @@ def test_hourly_needs_tick_and_idempotency(engine: WorldEngine) -> None:
     row = agent_row(engine, world_id, "agent_linxia")
     assert row.satiety == 89  # -1/h
     assert row.energy == 49  # -1/h
+    assert row.loneliness == 1  # +1/h (R21)
 
     # idempotent within the same hour
     advance_minutes(engine, world_id, 5)
@@ -205,6 +206,7 @@ def test_hourly_needs_tick_and_idempotency(engine: WorldEngine) -> None:
         "satiety": 89,
         "energy": 49,
         "mood": 99,
+        "loneliness": 1,
     }
 
 
@@ -670,7 +672,8 @@ def test_use_food_restores_satiety(engine: WorldEngine) -> None:
     events = engine.events_after(world_id, 0)
     assert any(
         e.type == "needs_changed"
-        and e.payload == {"agent_id": "agent_linxia", "satiety": 80, "energy": 100, "mood": 100}
+        and e.payload
+        == {"agent_id": "agent_linxia", "satiety": 80, "energy": 100, "mood": 100, "loneliness": 0}
         for e in events
     )
     assert any(

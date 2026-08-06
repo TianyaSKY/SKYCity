@@ -24,7 +24,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
-from app.database.models.agents import Agent, INITIAL_MOOD, INITIAL_SATIETY
+from app.database.models.agents import (
+    Agent,
+    INITIAL_LONELINESS,
+    INITIAL_MOOD,
+    INITIAL_SATIETY,
+)
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
@@ -513,6 +518,7 @@ class WorldEngine:
             satiety=INITIAL_SATIETY,
             energy=100,
             mood=INITIAL_MOOD,
+            loneliness=INITIAL_LONELINESS,
             money=int(identity.get("initial_money") or 50),
             action_type=None,
             action_started_at=None,
@@ -899,15 +905,17 @@ class WorldEngine:
         world_time: int,
     ) -> None:
         """R14 defaults: satiety -1/h, energy -1/h, wait +5/h, sleep +20/h,
-        satiety==0 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h."""
+        satiety==0 -1/h. M12: mood -1/h, wait +2/h, sleep +10/h.
+        R21: loneliness +1/h, high loneliness boosts decisions."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
         for agent in agents:
-            before = (agent.satiety, agent.energy, agent.mood)
+            before = (agent.satiety, agent.energy, agent.mood, agent.loneliness)
             agent.satiety = max(0, agent.satiety - 1)
             agent.energy = max(0, agent.energy - 1)
             agent.mood = max(0, agent.mood - 1)
+            agent.loneliness = min(100, agent.loneliness + 1)
             if agent.action_type == "wait":
                 agent.energy = min(100, agent.energy + 5)
                 agent.mood = min(100, agent.mood + 2)
@@ -916,7 +924,7 @@ class WorldEngine:
                 agent.mood = min(100, agent.mood + 10)
             if agent.satiety <= 0:
                 agent.energy = max(0, agent.energy - 1)  # R11 extra drain
-            if (agent.satiety, agent.energy, agent.mood) != before:
+            if (agent.satiety, agent.energy, agent.mood, agent.loneliness) != before:
                 runtime.event_bus.publish(
                     session,
                     world_time,
@@ -926,14 +934,20 @@ class WorldEngine:
                         "satiety": agent.satiety,
                         "energy": agent.energy,
                         "mood": agent.mood,
+                        "loneliness": agent.loneliness,
                     },
                 )
-            # R11/R12/M12: satiety empty, energy drained or mood low ->
-            # high-priority decision.
+            # R11/R12/M12/R21: satiety empty, energy drained, mood low or
+            # loneliness high -> high-priority decision.
             if (
                 world.autonomous
                 and agent.action_type is None
-                and (agent.satiety <= 0 or agent.energy <= 0 or agent.mood <= 20)
+                and (
+                    agent.satiety <= 0
+                    or agent.energy <= 0
+                    or agent.mood <= 20
+                    or agent.loneliness >= 80
+                )
             ):
                 runtime.scheduler.schedule(
                     session,
@@ -1140,6 +1154,7 @@ class WorldEngine:
             satiety=agent.satiety,
             energy=agent.energy,
             mood=agent.mood,
+            loneliness=agent.loneliness,
             money=agent.money,
             action=action,
             inventory=[
@@ -1151,8 +1166,9 @@ class WorldEngine:
         """M7: one agent's detail — identity card + state + inventory + action.
 
         Contract shape: {agent_id, name, identity: {...}, col, row, location_id,
-        satiety, energy, mood, money, inventory, action, is_deciding,
-        consecutive_failures}. Returns None when the world or agent is missing.
+        satiety, energy, mood, loneliness, money, inventory, action,
+        is_deciding, consecutive_failures}. Returns None when the world or
+        agent is missing.
         """
         runtime = self._runtimes.get(world_id)
         if runtime is None:

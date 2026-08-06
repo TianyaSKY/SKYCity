@@ -53,6 +53,7 @@ export interface AgentSnapshot {
   satiety: number;
   energy: number;
   mood: number;
+  loneliness: number;
   money: number;
   inventory: InventoryItem[];
   action: AgentAction;
@@ -192,6 +193,7 @@ export interface NeedsChangedPayload {
   satiety: number;
   energy: number;
   mood: number;
+  loneliness: number;
 }
 
 /** Payload of the WS store_restocked event. */
@@ -302,6 +304,7 @@ export interface AgentDetail {
   satiety: number;
   energy: number;
   mood: number;
+  loneliness: number;
   money: number;
   inventory: InventoryItem[];
   action: AgentAction;

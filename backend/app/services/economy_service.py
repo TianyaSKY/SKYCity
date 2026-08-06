@@ -587,6 +587,7 @@ class EconomyService:
                     "satiety": agent.satiety,
                     "energy": agent.energy,
                     "mood": agent.mood,
+                    "loneliness": agent.loneliness,
                 },
                 trace_id,
             )

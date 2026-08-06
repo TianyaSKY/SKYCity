@@ -74,6 +74,7 @@ class AgentSnapshot(BaseModel):
     satiety: int
     energy: int
     mood: int
+    loneliness: int
     money: int
     action: AgentAction | None = None
     inventory: list[InventoryEntrySnapshot] = Field(default_factory=list)

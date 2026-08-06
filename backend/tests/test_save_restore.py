@@ -117,6 +117,7 @@ def world_state(world_id: str) -> dict:
                     "row": agent.row,
                     "satiety": agent.satiety,
                     "energy": agent.energy,
+                    "loneliness": agent.loneliness,
                     "money": agent.money,
                     "action_type": agent.action_type,
                 }

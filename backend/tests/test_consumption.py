@@ -150,6 +150,29 @@ def test_mood_low_boosts_decision(world_config: ParsedWorldConfig) -> None:
     eng._runtimes.clear()
 
 
+def test_loneliness_high_boosts_decision(world_config: ParsedWorldConfig) -> None:
+    eng = make_engine(world_config, wire_decisions=True)
+    runtime = eng.create_world("孤单世界", autonomous=True)
+    world_id = runtime.world_id
+    # Drop the autonomous initial decision so linxia stays idle until the
+    # hourly boost window (see test_mood_low_boosts_decision).
+    session = SessionLocal()
+    try:
+        eng.get_runtime(world_id).scheduler.cancel_for_agent(session, "agent_linxia")
+        session.commit()
+    finally:
+        session.close()
+    set_agent(eng, world_id, "agent_linxia", loneliness=79)
+
+    advance_minutes(eng, world_id, 60)  # 480 -> 540; tick at 540 raises loneliness to 80
+
+    decides = pending_decides(eng, world_id, "agent_linxia")
+    assert decides, "high loneliness must schedule an agent_decide"
+    assert decides[0].due_at == 541
+    assert decides[0].payload == {"origin": "needs_boost"}
+    eng._runtimes.clear()
+
+
 def test_mood_item_usable_and_restores(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id

@@ -149,6 +149,7 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     assert by_id["agent_linxia"].name == "林夏"
     assert by_id["agent_linxia"].satiety == 100
     assert by_id["agent_linxia"].energy == 100
+    assert by_id["agent_linxia"].loneliness == 0
     assert by_id["agent_linxia"].money == 50
     assert by_id["agent_linxia"].action_type is None
 

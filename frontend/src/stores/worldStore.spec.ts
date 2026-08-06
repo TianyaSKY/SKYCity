@@ -63,6 +63,7 @@ const AGENT_LINXIA: AgentSnapshot = {
   satiety: 50,
   energy: 80,
   mood: 100,
+  loneliness: 30,
   money: 50,
   inventory: [{ item_id: 'bread', quantity: 1 }],
   action: null,
@@ -77,6 +78,7 @@ const AGENT_ZHANGMING: AgentSnapshot = {
   satiety: 40,
   energy: 70,
   mood: 100,
+  loneliness: 20,
   money: 20,
   inventory: [],
   action: null,
@@ -502,11 +504,12 @@ describe('applyEvent event mapping', () => {
     expect(store.events).toHaveLength(0);
   });
 
-  it('needs_changed: patches satiety/energy/mood, no stream line', () => {
-    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', satiety: 90, energy: 25, mood: 55 }));
+  it('needs_changed: patches satiety/energy/mood/loneliness, no stream line', () => {
+    store.applyEvent(env(1, 'needs_changed', { agent_id: 'agent_linxia', satiety: 90, energy: 25, mood: 55, loneliness: 40 }));
     expect(store.agents[0].satiety).toBe(90);
     expect(store.agents[0].energy).toBe(25);
     expect(store.agents[0].mood).toBe(55);
+    expect(store.agents[0].loneliness).toBe(40);
     expect(store.events).toHaveLength(0);
   });
 

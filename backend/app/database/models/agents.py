@@ -18,6 +18,9 @@ INITIAL_ENERGY = 100
 INITIAL_MONEY = 50
 # M12: mood dimension (0-100), drains hourly, restored by sleep/wait/items.
 INITIAL_MOOD = 100
+# R21: loneliness dimension (0-100, high = lonely), rises hourly, relieved
+# by talking with other agents.
+INITIAL_LONELINESS = 0
 
 
 class Agent(Base):
@@ -52,6 +55,7 @@ class Agent(Base):
     satiety: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_SATIETY)
     energy: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_ENERGY)
     mood: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_MOOD)
+    loneliness: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_LONELINESS)
     money: Mapped[int] = mapped_column(Integer, nullable=False, default=INITIAL_MONEY)
 
     # Current action (R1: at most one in flight). None = idle.

@@ -236,6 +236,50 @@ def test_priority_boost(world_config: ParsedWorldConfig) -> None:
     eng._runtimes.clear()
 
 
+def test_talk_relieves_loneliness(world_config: ParsedWorldConfig) -> None:
+    """R21: a delivered talk message cuts loneliness for both parties and
+    publishes needs_changed with the relieved value."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("孤单缓解")
+    world_id = runtime.world_id
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+    park_at(eng, world_id, "agent_zhangming", "village_plaza")
+    service = eng.conversation_service
+
+    session = SessionLocal()
+    try:
+        for agent_id in ("agent_linxia", "agent_zhangming"):
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            agent.loneliness = 50
+        session.commit()
+    finally:
+        session.close()
+
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀，今天天气不错", "greet"
+    )
+    assert ok is True and reason is None
+
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        zhangming = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
+        assert linxia.loneliness == 40  # both relieved by LONELINESS_RELIEF
+        assert zhangming.loneliness == 40
+    finally:
+        session.close()
+
+    events = eng.events_after(world_id, 0)
+    for agent_id in ("agent_linxia", "agent_zhangming"):
+        assert any(
+            e.type == "needs_changed"
+            and e.payload["agent_id"] == agent_id
+            and e.payload["loneliness"] == 40
+            for e in events
+        ), f"needs_changed must carry the relieved loneliness for {agent_id}"
+    eng._runtimes.clear()
+
+
 def test_max_turns_and_cooldown(world_config: ParsedWorldConfig) -> None:
     eng = make_engine(world_config)
     runtime = eng.create_world("最大轮数与冷却")

@@ -33,6 +33,9 @@ MAX_TURNS = 6  # total messages per conversation; the 7th is rejected and ends i
 MAX_MESSAGE_CHARS = 200
 TALK_DISTANCE = 3  # R9: manhattan distance (inclusive of 0)
 
+# R21: each delivered talk message relieves loneliness for both parties.
+LONELINESS_RELIEF = 10
+
 # conversation_ended reasons (event contract).
 REASON_LEAVE = "leave"
 REASON_DISTANCE = "distance"
@@ -157,6 +160,28 @@ class ConversationService:
                 )
             )
             conversation.turns += 1
+
+            # R21: a delivered message is social contact — relieve loneliness
+            # for both parties and sync the frontend via needs_changed.
+            relieved = []
+            for _agent in (sender, target):
+                if _agent.loneliness > 0:
+                    _agent.loneliness = max(0, _agent.loneliness - LONELINESS_RELIEF)
+                    relieved.append(_agent)
+            for _agent in relieved:
+                runtime.event_bus.publish(
+                    session,
+                    world_time,
+                    "needs_changed",
+                    {
+                        "agent_id": _agent.agent_id,
+                        "satiety": _agent.satiety,
+                        "energy": _agent.energy,
+                        "mood": _agent.mood,
+                        "loneliness": _agent.loneliness,
+                    },
+                    trace_id,
+                )
 
             if created:
                 runtime.event_bus.publish(
