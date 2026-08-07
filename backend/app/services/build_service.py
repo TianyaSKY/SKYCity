@@ -398,9 +398,18 @@ class BuildService:
     def _connectivity_ok(
             self, session: Session, world_id: str, extra_blocked: list[tuple[int, int]]
     ) -> bool:
-        """R22.4: after blocking ``extra_blocked``, every location anchor and
-        spawn point must stay mutually reachable (BFS, 8-connected; anchor
-        cells themselves count as passable — they sit on building tiles)."""
+        """R22.4: after blocking ``extra_blocked``, the walkable network stays
+        connected for every agent that lives in the town.
+
+        Checked in the pure-walkable view (anchors are goal cells — reachable
+        without being walkable — but they must NOT bridge components: an
+        agent cannot stand on them):
+          - every spawn cell stays in the main walkable component
+            (a spawn isolated behind the new build = the agent can never
+            leave home → rejected);
+          - every location anchor keeps itself or a neighbor in that
+            component (so the destination remains reachable).
+        """
         blocked = set(extra_blocked)
         paved: set[tuple[int, int]] = set()
         for row in session.scalars(
@@ -416,13 +425,13 @@ class BuildService:
                 blocked.add((row.col, row.row))
             elif blueprint.paving:
                 paved.add((row.col, row.row))
-        anchors = [(loc.col, loc.row) for loc in self.engine.world_config.locations]
-        anchors += [(sp.col, sp.row) for sp in self.engine.world_config.spawn_points]
-        if not anchors:
+        spawns = [(sp.col, sp.row) for sp in self.engine.world_config.spawn_points]
+        if not spawns:
             return True
         walkable = (self.engine.world_config.walkable_cells - blocked) | paved
-        passable = walkable | {tuple(a) for a in anchors}
-        start = tuple(anchors[0])
+        start = spawns[0]
+        if start not in walkable:
+            return False
         seen = {start}
         frontier: deque[tuple[int, int]] = deque([start])
         while frontier:
@@ -432,11 +441,25 @@ class BuildService:
                     if dcol == 0 and drow == 0:
                         continue
                     neighbour = (col + dcol, row + drow)
-                    if neighbour in seen or neighbour not in passable:
+                    if neighbour in seen or neighbour not in walkable:
                         continue
                     seen.add(neighbour)
                     frontier.append(neighbour)
-        return all(tuple(a) in seen for a in anchors)
+        if any((col, row) not in seen for col, row in spawns[1:]):
+            return False
+        for loc in self.engine.world_config.locations:
+            col, row = loc.col, loc.row
+            if (col, row) in seen:
+                continue  # anchor itself is walkable and connected
+            if any(
+                (col + dcol, row + drow) in seen
+                for dcol in (-1, 0, 1)
+                for drow in (-1, 0, 1)
+                if not (dcol == 0 and drow == 0)
+            ):
+                continue
+            return False  # no reachable walkable cell touches the anchor
+        return True
 
     @staticmethod
     def _inventory_list(

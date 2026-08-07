@@ -144,16 +144,20 @@ def nearby_walkable(
         engine: WorldEngine, world_id: str, col: int, row: int
 ) -> tuple[int, int]:
     """A walkable cell within manhattan distance 3 of (col, row) that is not
-    an articulation point (its removal must not disconnect the town, so a
-    fence there would be legal for the lifecycle tests)."""
+    an articulation point under the pure-walkable R22.4 semantics (its
+    removal must not isolate any spawn cell or location anchor, so a fence
+    there would be legal for the lifecycle tests)."""
     walkable = engine.world_config.walkable_cells
-    anchors = [(loc.col, loc.row) for loc in engine.world_config.locations] + [
-        (sp.col, sp.row) for sp in engine.world_config.spawn_points
-    ]
-    passable = walkable | {tuple(a) for a in anchors}
-    start = tuple(anchors[0])
+    spawns = [(sp.col, sp.row) for sp in engine.world_config.spawn_points]
+    anchors = [(loc.col, loc.row) for loc in engine.world_config.locations]
 
     def is_cut(cell: tuple[int, int]) -> bool:
+        remaining = walkable - {cell}
+        if not spawns:
+            return False
+        start = spawns[0]
+        if start not in remaining:
+            return True
         seen = {start}
         frontier = [start]
         while frontier:
@@ -163,11 +167,24 @@ def nearby_walkable(
                     if dc == 0 and dr == 0:
                         continue
                     n = (c + dc, r + dr)
-                    if n in seen or n == cell or n not in passable:
+                    if n in seen or n not in remaining:
                         continue
                     seen.add(n)
                     frontier.append(n)
-        return not all(tuple(a) in seen for a in anchors)
+        if any((c, r) not in seen for c, r in spawns[1:]):
+            return True
+        for ac, ar in anchors:
+            if (ac, ar) in seen:
+                continue
+            if any(
+                (ac + dc, ar + dr) in seen
+                for dc in (-1, 0, 1)
+                for dr in (-1, 0, 1)
+                if not (dc == 0 and dr == 0)
+            ):
+                continue
+            return True
+        return False
 
     for dc in range(-3, 4):
         for dr in range(-3, 4):
@@ -224,7 +241,7 @@ def test_build_lifecycle_materials_deducted_and_built(engine: WorldEngine) -> No
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
 
     ok, envelope, err = engine.build_service.build_start(
@@ -308,7 +325,7 @@ def test_build_rejected_when_busy(engine: WorldEngine) -> None:
         session.commit()
     finally:
         session.close()
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
     )
@@ -319,7 +336,7 @@ def test_build_rejected_missing_materials(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     agent_id = "agent_linxia"
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -379,7 +396,7 @@ def test_build_rejected_too_far(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, 10, 10)  # far away
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -392,7 +409,7 @@ def test_build_rejected_occupied_cell(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -468,6 +485,22 @@ def test_build_non_blocking_flower_bed_at_choke_point_allowed(
     assert ok, err
 
 
+def test_build_blocking_at_limujiang_bridge_rejected(engine: WorldEngine) -> None:
+    """R22.4 (pure-walkable view): a fence on the (11,6) bridge would isolate
+    spawn_limujiang from the road network — rejected even though the old
+    anchor-bridge view considered the town connected."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, 10, 6)  # main road beside the bridge
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, 11, 6, FENCE
+    )
+    assert not ok and err == MSG_BLOCKS_VILLAGE
+    assert structure_rows(engine, world_id) == []  # nothing was placed
+
+
 # --------------------------------------------------------------------------- #
 # Pathfinding integration (R22.6)
 # --------------------------------------------------------------------------- #
@@ -478,7 +511,7 @@ def test_effective_walkable_excludes_built_only(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     session = SessionLocal()
     try:
@@ -573,7 +606,7 @@ def test_move_rejected_when_start_blocked(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     agent_id = "agent_linxia"
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0], target[1])
     # God drops a fence right on the agent's cell.
     result = engine.god_action_service.apply(
@@ -600,7 +633,7 @@ def test_god_remove_building_refunds_materials(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -628,7 +661,7 @@ def test_god_remove_built_structure(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -659,7 +692,7 @@ def test_god_remove_missing_structure_404(engine: WorldEngine) -> None:
 def test_god_build_structure_places_directly(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     result = engine.god_action_service.apply(
         world_id, "build_structure", target_id="agent_laozhang",
         parameters={"col": target[0], "row": target[1], "blueprint_id": FENCE},
@@ -692,7 +725,7 @@ def test_save_restore_keeps_structures(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     agent_id = "agent_linxia"
     give_item(engine, world_id, agent_id, "wood", 5)
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
     ok, _, err = engine.build_service.build_start(
         world_id, agent_id, target[0], target[1], FENCE
@@ -945,7 +978,7 @@ def test_api_build_action_end_to_end(client: TestClient) -> None:
     engine = main_app.state.engine
     runtime = engine.get_runtime(world_id)
     assert runtime is not None
-    target = nearby_walkable(engine, world_id, 20, 25)
+    target = nearby_walkable(engine, world_id, 32, 22)
     place_agent(engine, world_id, agent_id, target[0] + 1, target[1])
 
     body = {

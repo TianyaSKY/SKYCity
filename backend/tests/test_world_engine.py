@@ -220,6 +220,20 @@ def test_bfs_no_path(world_config: ParsedWorldConfig) -> None:
     assert find_path((0, 0), (63, 39), world_config.walkable_cells) is None
 
 
+def test_limujiang_spawn_connected_to_main_network(
+        world_config: ParsedWorldConfig,
+) -> None:
+    """Regression: spawn_limujiang (12,6) used to sit on a 12-cell island
+    separated from the road network by the chenyu_home anchor — every move
+    was rejected with MSG_NO_PATH. The map now bridges it at (11,6)."""
+    spawn = next(s for s in world_config.spawn_points if s.spawn_id == "spawn_limujiang")
+    assert (spawn.col, spawn.row) in world_config.walkable_cells
+    shop = next(l for l in world_config.locations if l.location_id == "village_shop")
+    path = find_path((spawn.col, spawn.row), (shop.col, shop.row), world_config.walkable_cells)
+    assert path is not None, "limujiang must be able to reach the shop"
+    assert (11, 6) in path  # the bridge cell is actually used
+
+
 def test_bfs_path_string_pulled_on_open_grid() -> None:
     """Uniform-cost BFS zigzags along a straight run; smoothing must pull the
     waypoints into a single chord when every interior cell is walkable."""

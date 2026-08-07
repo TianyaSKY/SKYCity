@@ -456,6 +456,34 @@ def _load_world_cached(world_data_dir: Path, map_name: str) -> ParsedWorldConfig
         len(world.spawn_points),
         len(world.walkable_cells),
     )
+    # M17: spawn cells must live in the main walkable component — an agent
+    # born on an island can never leave (pathfinding is pure-walkable).
+    from collections import deque
+
+    spawns = [(sp.col, sp.row) for sp in world.spawn_points]
+    if spawns and all(s in world.walkable_cells for s in spawns):
+        start = spawns[0]
+        seen = {start}
+        frontier: deque[tuple[int, int]] = deque([start])
+        while frontier:
+            col, row = frontier.popleft()
+            for dcol in (-1, 0, 1):
+                for drow in (-1, 0, 1):
+                    if dcol == 0 and drow == 0:
+                        continue
+                    neighbour = (col + dcol, row + drow)
+                    if neighbour in seen or neighbour not in world.walkable_cells:
+                        continue
+                    seen.add(neighbour)
+                    frontier.append(neighbour)
+        stranded = [sp.spawn_id for sp in world.spawn_points if (sp.col, sp.row) not in seen]
+        if stranded:
+            logger.warning(
+                "Map {}: spawn points NOT connected to the main walkable "
+                "network (agents can never leave): {}",
+                map_name,
+                sorted(stranded),
+            )
     return world
 
 
