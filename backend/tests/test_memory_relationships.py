@@ -511,7 +511,11 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
             "agent_wangfang", "agent_laozhang",
             "agent_touzi",
     ):
-        assert len(memories_for(world_id, agent_id)) == 2
+        # Only semantic memories: the day-2 midnight crossing also records an
+        # episodic upkeep money_changed memory (M12 upkeep -120 >= threshold).
+        assert len(
+            [m for m in memories_for(world_id, agent_id) if m.memory_type == "semantic"]
+        ) == 2
     eng._runtimes.clear()
 
 

@@ -105,6 +105,9 @@ reason}`，amount 带符号），公开事件复用 `world_event_created`（无
 
 M12 追加：`store_price_changed`；`needs_changed` / `item_used` 载荷扩展 mood 字段。
 
+M12 负债：每日生活开销（`money_changed`，reason=每日生活开销）余额不足时 balance 为负（负债）；负债者的
+心情惩罚复用 `needs_changed` 发布，负债本身不新增事件类型。
+
 M14 追加：`build_started` / `structure_built` / `structure_removed`；
 `world_snapshot` 载荷扩展 structures 列表。
 

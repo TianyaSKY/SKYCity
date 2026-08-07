@@ -1409,12 +1409,14 @@ def test_first_version_acceptance_script(system) -> None:
     finally:
         session.close()
 
-    # 12. 居民购物 → 销售款进企业
+    # 12. 居民购物 → 销售款进企业（剧本跨天，林夏可能已因每日开销负债；
+    # 补足余额只验证商店销售入账这条链，不涉及开销机制）
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         assert agent is not None
         agent.location_id = "village_shop"
+        agent.money = 200
         session.commit()
     finally:
         session.close()

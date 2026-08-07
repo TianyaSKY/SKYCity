@@ -189,9 +189,12 @@ def build_observation(
             if home_id is not None
             else f" 无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）"
         )
+        money_text = f"金钱: {agent.money}"
+        if agent.money < 0:
+            money_text += f"（负债 {-agent.money} 金币：负债期间不能购物/住店/买股票/转账，尽快打工赚钱还清）"
         lines.append(
             f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
-            f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here}（格 {agent.col},{agent.row}）"
+            f"孤单: {agent.loneliness}/100 {money_text} 所在位置: {here}（格 {agent.col},{agent.row}）"
             f" 当前行动: {_action_text(agent, world_time)}{home_text}"
         )
 

@@ -175,8 +175,24 @@ class FakeDecisionProvider:
                     {"item_id": "bread", "reason": "肚子饿了，吃点面包"},
                     started,
                 )
+            money = self._money(observation)
+            if money < 0:
+                # In debt: earning comes first — food waits until the debt is
+                # paid off (buying is rejected anyway while balance < 0).
+                if self._at_farm(observation):
+                    return self._result(
+                        agent_id,
+                        "work",
+                        {"job_id": "job_farm_field", "reason": "欠债了，先干活赚钱还债"},
+                        started,
+                    )
+                return self._result(
+                    agent_id,
+                    "move",
+                    {"destination_id": "village_farm", "reason": "欠债了，去农场干活赚钱还债"},
+                    started,
+                )
             if self._at_shop(observation):
-                money = self._money(observation)
                 if money >= BREAD_PRICE:
                     return self._result(
                         agent_id,
@@ -197,7 +213,7 @@ class FakeDecisionProvider:
                     {"minutes": 15, "reason": "钱不够，休息想想办法"},
                     started,
                 )
-            if self._money(observation) >= BREAD_PRICE:
+            if money >= BREAD_PRICE:
                 return self._result(
                     agent_id,
                     "move",
@@ -368,7 +384,7 @@ class FakeDecisionProvider:
 
     @staticmethod
     def _money(observation: str) -> int:
-        match = re.search(r"金钱:\s*(\d+)", observation)
+        match = re.search(r"金钱:\s*(-?\d+)", observation)
         return int(match.group(1)) if match else 0
 
     @staticmethod

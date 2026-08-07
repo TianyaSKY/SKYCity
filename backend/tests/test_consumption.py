@@ -268,18 +268,19 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
 
     advance_minutes(engine, world_id, 961)  # 480 -> 1441: crosses 00:00
 
+    # Shortfall is allowed: the balance goes negative (debt), it is not floored.
     for agent_id in ("agent_linxia", "agent_zhangming"):
         row = agent_row(engine, world_id, agent_id)
-        assert row.money == 45  # 50 - 5 upkeep
+        assert row.money == -70  # 50 - 120 upkeep
     row = agent_row(engine, world_id, "agent_touzi")
-    assert row.money == 495  # 500 - 5 upkeep (identity initial_money)
+    assert row.money == 380  # 500 - 120 upkeep (identity initial_money)
 
     txs = transaction_rows(engine, world_id, "agent_linxia")
     upkeep = [t for t in txs if t.type == "upkeep"]
     assert len(upkeep) == 1
-    assert upkeep[0].amount == -5
+    assert upkeep[0].amount == -120
     assert upkeep[0].reason == "每日生活开销"
-    assert upkeep[0].balance_after == 45
+    assert upkeep[0].balance_after == -70
 
     events = engine.events_after(world_id, 0)
     moved = [
@@ -291,10 +292,67 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
     ]
     assert moved and moved[-1].payload == {
         "agent_id": "agent_linxia",
-        "amount": -5,
-        "balance": 45,
+        "amount": -120,
+        "balance": -70,
         "reason": "每日生活开销",
     }
+
+
+def test_debt_penalizes_mood_daily_until_repaid(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+
+    advance_minutes(engine, world_id, 959)  # 480 -> 1439: just before 00:00
+    set_agent(
+        engine, world_id, "agent_linxia",
+        money=50, mood=40, satiety=100, energy=100, loneliness=0,
+        action_type=None, action_data=None, action_started_at=None, action_ends_at=None,
+    )
+    set_agent(
+        engine, world_id, "agent_touzi",
+        money=500, mood=40, satiety=100, energy=100, loneliness=0,
+        action_type=None, action_data=None, action_started_at=None, action_ends_at=None,
+    )
+    advance_minutes(engine, world_id, 2)  # 1439 -> 1441: crosses 00:00
+
+    row = agent_row(engine, world_id, "agent_linxia")
+    assert row.money == -70  # 50 - 120: the shortfall becomes debt
+    assert row.mood == 31  # 40 - 1 hourly drain - 8 debt penalty (D6)
+    row = agent_row(engine, world_id, "agent_touzi")
+    assert row.money == 380  # 500 - 120: fully covered, no debt
+    assert row.mood == 39  # 40 - 1 hourly drain only, no debt penalty
+
+    needs = [
+        e
+        for e in engine.events_after(world_id, 0)
+        if e.type == "needs_changed"
+           and e.payload["agent_id"] == "agent_linxia"
+           and e.payload["mood"] == 31
+    ]
+    assert needs, "the debt mood penalty must publish needs_changed"
+
+
+def test_debt_boosts_decision(world_config: ParsedWorldConfig) -> None:
+    eng = make_engine(world_config, wire_decisions=True)
+    runtime = eng.create_world("负债世界", autonomous=True)
+    world_id = runtime.world_id
+    # Drop the autonomous initial decision so linxia stays idle until the
+    # hourly boost window (see test_mood_low_boosts_decision).
+    session = SessionLocal()
+    try:
+        eng.get_runtime(world_id).scheduler.cancel_for_agent(session, "agent_linxia")
+        session.commit()
+    finally:
+        session.close()
+    set_agent(eng, world_id, "agent_linxia", money=-30)
+
+    advance_minutes(eng, world_id, 60)  # 480 -> 540; tick at 540 sees the debt
+
+    decides = pending_decides(eng, world_id, "agent_linxia")
+    assert decides, "debt must schedule an agent_decide"
+    assert decides[0].due_at == 541
+    assert decides[0].payload == {"origin": "debt"}
+    eng._runtimes.clear()
 
 
 # --------------------------------------------------------------------------- #

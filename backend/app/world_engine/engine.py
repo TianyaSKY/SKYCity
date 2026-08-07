@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
 from app.config.gameplay import (
+    DEBT_MOOD_PENALTY_PER_DAY,
     ENERGY_DRAIN_PER_HOUR,
     HOTEL_LOCATION_ID,
     HOTEL_NIGHTLY_FEE,
@@ -1009,24 +1010,26 @@ class WorldEngine:
     ) -> None:
         """M12 D6: daily cost of living at 00:00.
 
-        Every agent pays UPKEEP_PER_DAY out of money (floor 0 — R7: no
-        credit, never into debt). Recorded as an ``upkeep`` transaction plus
-        a money_changed event.
+        Every agent pays the full UPKEEP_PER_DAY out of money. A balance
+        shortfall is allowed to go negative — that shortfall is the agent's
+        debt, and the daily upkeep is the *only* source of debt: voluntary
+        purchases still reject on insufficient balance (R7). While in debt
+        (money < 0) the agent also takes a daily mood penalty
+        (DEBT_MOOD_PENALTY_PER_DAY, floor 0 — the anxiety of owing money).
+        Recorded as an ``upkeep`` transaction plus a ``money_changed`` event;
+        the mood penalty, when it moves mood, publishes ``needs_changed``.
         """
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
         for agent in agents:
-            if agent.money <= 0:
-                continue  # R7: never into debt
-            pay = min(agent.money, UPKEEP_PER_DAY)
-            agent.money -= pay
+            agent.money -= UPKEEP_PER_DAY
             session.add(
                 Transaction(
                     world_id=world.world_id,
                     agent_id=agent.agent_id,
                     type="upkeep",
-                    amount=-pay,
+                    amount=-UPKEEP_PER_DAY,
                     balance_after=agent.money,
                     item_id=None,
                     quantity=None,
@@ -1041,11 +1044,27 @@ class WorldEngine:
                 "money_changed",
                 {
                     "agent_id": agent.agent_id,
-                    "amount": -pay,
+                    "amount": -UPKEEP_PER_DAY,
                     "balance": agent.money,
                     "reason": "每日生活开销",
                 },
             )
+            if agent.money < 0:
+                before_mood = agent.mood
+                agent.mood = max(0, agent.mood - DEBT_MOOD_PENALTY_PER_DAY)
+                if agent.mood != before_mood:
+                    runtime.event_bus.publish(
+                        session,
+                        world_time,
+                        "needs_changed",
+                        {
+                            "agent_id": agent.agent_id,
+                            "satiety": agent.satiety,
+                            "energy": agent.energy,
+                            "mood": agent.mood,
+                            "loneliness": agent.loneliness,
+                        },
+                    )
 
     def _reset_daily_counters(self, session: Session, world_id: str) -> None:
         """M8: zero every agent's daily LLM call/token counters (day change)."""
@@ -1097,9 +1116,11 @@ class WorldEngine:
                         "loneliness": agent.loneliness,
                     },
                 )
-            # R11/R12/M12/R21: satiety empty, energy drained, mood low or
-            # loneliness high -> high-priority decision. Night + low energy ->
-            # go home/hotel to sleep (R14 sleep steering).
+            # R11/R12/M12/R21: satiety empty, energy drained, mood low,
+            # loneliness high or in debt (money < 0 — owed from daily upkeep)
+            # -> high-priority decision. Night + low energy -> go home/hotel
+            # to sleep (R14 sleep steering). A debt boost gets its own origin
+            # so the reason is visible in the scheduler payload.
             if (
                     world.autonomous
                     and agent.action_type is None
@@ -1108,6 +1129,7 @@ class WorldEngine:
                     or agent.energy <= 0
                     or agent.mood <= MOOD_BOOST_THRESHOLD
                     or agent.loneliness >= LONELINESS_BOOST_THRESHOLD
+                    or agent.money < 0
                     or (night and agent.energy <= NIGHT_SLEEP_ENERGY_THRESHOLD)
             )
             ):
@@ -1116,7 +1138,7 @@ class WorldEngine:
                     agent.agent_id,
                     "agent_decide",
                     world_time + 1,
-                    {"origin": "needs_boost"},
+                    {"origin": "debt" if agent.money < 0 else "needs_boost"},
                 )
 
     def _maybe_restock(

@@ -344,14 +344,14 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
     assert row.last_div_per_share == 2
     assert row.prev_price == row.price  # close price snapshot
 
-    assert agent_row_money(engine, world_id, "agent_linxia") == 10 + 4 - 5  # 50-40, +4 dividend, -5 M12 daily upkeep
+    assert agent_row_money(engine, world_id, "agent_linxia") == 10 + 4 - 120  # 50-40, +4 dividend, -120 M12 daily upkeep
     txs = transaction_rows(engine, world_id, "agent_linxia")
     dividend_tx = [t for t in txs if t.type == "dividend"][-1]
     assert dividend_tx.amount == 4
     assert dividend_tx.item_id == STOCK_SHOP
     assert dividend_tx.quantity == 2
     upkeep_tx = [t for t in txs if t.type == "upkeep"][-1]
-    assert upkeep_tx.amount == -5
+    assert upkeep_tx.amount == -120
 
     money = [
         e
