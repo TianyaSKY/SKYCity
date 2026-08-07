@@ -9,7 +9,7 @@
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {createPinia, setActivePinia} from 'pinia';
 import {getLocationDetail as getLocationDetailApi} from '../api/client';
-import {actionRemainingMinutes, taskLabelOf, taskPriority, useWorldStore} from './worldStore';
+import {actionRemainingMinutes, TOOL_LABELS, taskLabelOf, taskPriority, useWorldStore} from './worldStore';
 import type {
     AgentSnapshot,
     LocationDetail,
@@ -1213,6 +1213,17 @@ function baseShopDetail(): LocationDetail {
 
 describe('task label helpers', () => {
     const locations: WorldLocation[] = [LOCATION_SHOP, LOCATION_HOUSE];
+
+    it('TOOL_LABELS: 企业/招聘/班次工具显示中文标签', () => {
+        expect(TOOL_LABELS['review_job_application']).toBe('审核申请');
+        expect(TOOL_LABELS['withdraw_job_application']).toBe('撤回申请');
+        expect(TOOL_LABELS['apply_job']).toBe('求职申请');
+        expect(TOOL_LABELS['resign_job']).toBe('辞职');
+        expect(TOOL_LABELS['terminate_employment']).toBe('解雇');
+        expect(TOOL_LABELS['start_shift']).toBe('签到上班');
+        expect(TOOL_LABELS['purchase_company_goods']).toBe('企业采购');
+        expect(TOOL_LABELS['stock_store']).toBe('上架货架');
+    });
 
     it('taskLabelOf: idle / move-to-named-location / wait / work / conversation', () => {
         expect(taskLabelOf(null, locations)).toBe('空闲');
