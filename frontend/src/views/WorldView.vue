@@ -21,6 +21,7 @@ import AgentNameplates from '../components/AgentNameplates.vue';
 import TaskBoard from '../components/TaskBoard.vue';
 import StockPanel from '../components/StockPanel.vue';
 import CompanyPanel from '../components/CompanyPanel.vue';
+import {vDraggable} from '../directives/draggable';
 
 const DEFAULT_AGENT_COLOR = '#9ee6b0';
 
@@ -256,25 +257,25 @@ onBeforeUnmount(() => {
 <template>
     <div class="world-view">
         <div ref="host" class="canvas-host"/>
-        <div class="hud hud-top-left">
+        <div v-draggable="'health'" class="hud hud-top-left">
             <HealthIndicator/>
         </div>
-        <div class="hud hud-top-center">
+        <div v-draggable="'clock'" class="hud hud-top-center">
             <WorldClockBar/>
         </div>
-        <div class="hud hud-top-right">
+        <div v-draggable="'tile-readout'" class="hud hud-top-right">
             <span class="tile-readout">tile {{ tileLabel }}</span>
         </div>
-        <div class="hud hud-top-left" style="top: 44px">
+        <div v-draggable="'task-board'" class="hud hud-top-left" style="top: 44px">
             <TaskBoard/>
         </div>
-        <div class="hud hud-top-left" style="top: calc(44px + min(46vh, 460px) + 12px)">
+        <div v-draggable="'company'" class="hud hud-top-left" style="top: calc(44px + min(46vh, 460px) + 12px)">
             <CompanyPanel/>
         </div>
-        <div class="hud hud-top-right" style="top: 44px">
+        <div v-draggable="'stock'" class="hud hud-top-right" style="top: 44px">
             <StockPanel/>
         </div>
-        <div class="hud hud-bottom">
+        <div v-draggable="'events'" class="hud hud-bottom">
             <EventStream/>
         </div>
         <SpeechBubble :agent-screen-pos="bubbleScreenPos" :bubbles="store.bubbles"/>
@@ -288,10 +289,10 @@ onBeforeUnmount(() => {
             :agents="store.agents"
             :bubbles="store.bubbles"
         />
-        <div class="hud hud-right">
+        <div v-draggable="'agent'" class="hud hud-right">
             <AgentPanel/>
         </div>
-        <LocationPanel class="hud hud-bottom-left"/>
+        <LocationPanel v-draggable="'location'" class="hud hud-bottom-left"/>
         <div v-if="!store.mapLoaded && !store.mapError" class="status-banner">正在加载世界…</div>
         <div v-if="store.mapError" class="status-banner error">{{ store.mapError }}</div>
     </div>
