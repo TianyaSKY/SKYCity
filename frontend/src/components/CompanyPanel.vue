@@ -100,8 +100,8 @@ function positionTitleOf(companyId: string, positionId: string): string {
     return position?.title ?? store.jobOpenings.find((o) => o.position_id === positionId)?.title ?? positionId;
 }
 
-async function loadDetail(companyId: string): Promise<void> {
-    if (!store.worldId || details.value[companyId]) return;
+async function loadDetail(companyId: string, force = false): Promise<void> {
+    if (!store.worldId || (!force && details.value[companyId])) return;
     try {
         const [positions, employees, transactions] = await Promise.all([
             getCompanyPositions(store.worldId, companyId),
@@ -119,10 +119,24 @@ function selectCompany(companyId: string): void {
     void loadDetail(companyId);
 }
 
+let lastWorldId: string | null = null;
 watch(
-    () => store.companies,
-    (list) => {
-        for (const c of list) void loadDetail(c.company_id);
+    () => [store.worldId, store.companies] as const,
+    ([worldId, list]) => {
+        // Switching worlds invalidates details cached for the previous world.
+        if (worldId !== lastWorldId) {
+            details.value = {};
+            selectedCompanyId.value = null;
+            lastWorldId = worldId;
+        }
+        for (const c of list) {
+            const cached = details.value[c.company_id];
+            // details 只加载一次：入职/辞职后 employees 列表会过期，与权威
+            // employee_count 不一致时强制重载（员工 tab 数据保鲜）。
+            if (!cached || cached.employees.length !== c.employee_count) {
+                void loadDetail(c.company_id, true);
+            }
+        }
         if (!selectedCompanyId.value && list.length > 0) selectedCompanyId.value = list[0].company_id;
     },
     {immediate: true, deep: true},

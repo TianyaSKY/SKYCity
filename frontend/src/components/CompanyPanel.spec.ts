@@ -6,6 +6,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {createPinia, setActivePinia} from 'pinia';
 import {flushPromises, mount} from '@vue/test-utils';
 import CompanyPanel from './CompanyPanel.vue';
+import {getCompanyEmployees} from '../api/client';
 import {useWorldStore} from '../stores/worldStore';
 
 vi.mock('../api/client', () => ({
@@ -127,5 +128,43 @@ describe('CompanyPanel inventory tab', () => {
         await wrapper.findAll('button.cp-tab').find((b) => b.text() === '库存')!.trigger('click');
         await flushPromises();
         expect(wrapper.text()).toContain('仓库暂无货物');
+    });
+
+    it('入职后员工列表自动重载（details 缓存过期保鲜）', async () => {
+        const pinia = createPinia();
+        setActivePinia(pinia);
+        const store = useWorldStore();
+        store.worldId = 'world_e2e';
+        store.companies = [
+            {
+                company_id: 'company_morning_farm',
+                name: '晨露农场',
+                company_type: 'farm',
+                location_id: 'village_farm',
+                manager_agent_id: 'agent_zhangming',
+                money: 800,
+                status: 'active',
+                employee_count: 0,
+                open_vacancies: 2,
+                unpaid_wage_total: 0,
+            },
+        ];
+        const getCompanyEmployeesMock = vi.mocked(getCompanyEmployees);
+        getCompanyEmployeesMock.mockResolvedValue([]);
+        const wrapper = mount(CompanyPanel, {global: {plugins: [pinia]}});
+        await flushPromises();
+        expect(getCompanyEmployeesMock).toHaveBeenCalledTimes(1);
+        // 权威计数变化（入职 ×2）→ 缓存列表长度失配 → 强制重载
+        getCompanyEmployeesMock.mockResolvedValue([
+            {employment_id: 'emp_1', agent_name: '老张', position_id: 'position_farm_worker', attendance_score: 100, unpaid_wage: 0},
+            {employment_id: 'emp_2', agent_name: '林夏', position_id: 'position_farm_worker', attendance_score: 100, unpaid_wage: 0},
+        ] as never);
+        store.companies[0].employee_count = 2;
+        await flushPromises();
+        expect(getCompanyEmployeesMock).toHaveBeenCalledTimes(2);
+        await wrapper.findAll('button.cp-tab').find((b) => b.text() === '员工')!.trigger('click');
+        await flushPromises();
+        expect(wrapper.text()).toContain('老张');
+        expect(wrapper.text()).toContain('林夏');
     });
 });
