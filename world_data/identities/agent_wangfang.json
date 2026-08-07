@@ -13,5 +13,7 @@
     "extraversion": 0.35,
     "agreeableness": 0.68,
     "emotional_stability": 0.74
-  }
+  },
+  "spawn": { "col": 48, "row": 35, "direction": "down" },
+  "home": { "location_id": "wangfang_home", "name": "王芳的家", "col": 48, "row": 34 }
 }

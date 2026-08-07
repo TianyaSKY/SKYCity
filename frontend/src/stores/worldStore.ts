@@ -14,8 +14,11 @@ import {
   createWorld,
   deleteWorld as deleteWorldApi,
   getAgentDetail,
+  getAgentEmployment,
+  getCompanies,
   getConversations,
   getDecisions,
+  getJobOpenings,
   getLocationDetail,
   getMemories,
   getRelationships,
@@ -35,8 +38,11 @@ import type { MapLocation } from '../types/tiled';
 import type {
   ActionResponse,
   AgentDetail,
+  AgentEmploymentResponse,
+  AgentShiftInfo,
   AgentSnapshot,
   Cell,
+  CompanyInfo,
   ConversationMessage,
   ConversationSummary,
   CropSnapshot,
@@ -44,6 +50,7 @@ import type {
   GodActionResult,
   GodActionRequest,
   InventoryItem,
+  JobOpening,
   LocationDetail,
   MemoryItem,
   RelationshipItem,
@@ -149,6 +156,24 @@ export const GOD_COMMAND_LABELS: Record<string, string> = {
   public_event: '公共事件',
   change_store_stock: '修改库存',
   change_stock_price: '调整股价',
+};
+
+/** Map backend company status tokens onto Chinese labels (M13). */
+export const COMPANY_STATUS_LABELS: Record<string, string> = {
+  active: '经营中',
+  suspended: '停业',
+  paused: '暂停',
+};
+
+/** Map backend shift status tokens onto Chinese labels (M13). */
+export const SHIFT_STATUS_LABELS: Record<string, string> = {
+  scheduled: '已排班',
+  in_progress: '进行中',
+  late: '迟到',
+  completed: '已完成',
+  absent: '缺勤',
+  cancelled: '已取消',
+  leave: '请假',
 };
 
 /** A live speech bubble; at most one per agent (newest wins). */
@@ -277,6 +302,25 @@ function locationNameById(locations: WorldLocation[], locationId: unknown): stri
   return locations.find((l) => l.location_id === locationId)?.name ?? '';
 }
 
+/** "HH:MM" from minutes since midnight (M13); '?' when missing. */
+function clockTime(minutes: unknown): string {
+  if (typeof minutes !== 'number') return '?';
+  const m = Math.max(0, minutes % 1440);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/** Display name of a company: REST name, raw company_id as fallback (M13). */
+function companyName(companies: CompanyInfo[], companyId?: unknown): string {
+  if (typeof companyId !== 'string' || !companyId) return '';
+  return companies.find((c) => c.company_id === companyId)?.name ?? companyId;
+}
+
+/** Chinese title of a position via the open-job list; raw id as fallback (M13). */
+function positionTitle(openings: JobOpening[], positionId?: unknown): string {
+  if (typeof positionId !== 'string' || !positionId) return '';
+  return openings.find((o) => o.position_id === positionId)?.title ?? positionId;
+}
+
 /**
  * The two participants of a conversation from an event payload:
  * new shape {agent_ids: [a, b]}, with a legacy {a, b} fallback.
@@ -298,6 +342,8 @@ function eventText(
   env: WorldEventEnvelope,
   agents: AgentSnapshot[],
   locations: WorldLocation[],
+  companies: CompanyInfo[],
+  jobOpenings: JobOpening[],
   endedPair: [string, string] | null = null,
 ): string {
   const p = env.payload as Record<string, unknown>;
@@ -526,6 +572,144 @@ function eventText(
       const name = agentName(agents, p.agent_id);
       const item = itemLabel(p.item_id, p.item_name) || '作物';
       return `${name} 收获了${item}`;
+    // ---- M13 company & formal-work events ----
+    case 'job_application_submitted': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      return `${name} 申请了 ${company}·${title}`;
+    }
+    case 'job_application_rejected': {
+      const name = agentName(agents, p.agent_id);
+      const manager = agentName(agents, p.manager_agent_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `${name} 的${title}求职被 ${manager} 拒绝${reason ? `（${reason}）` : ''}`;
+    }
+    case 'job_application_withdrawn': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      return `${name} 撤回了对 ${company}·${title} 的求职申请`;
+    }
+    case 'employment_started': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      return `${name} 入职 ${company}，担任${title}`;
+    }
+    case 'employment_resigned': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `${name} 从 ${company} 辞职${reason ? `（${reason}）` : ''}`;
+    }
+    case 'employment_terminated': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `${name} 被 ${company} 解雇${reason ? `（${reason}）` : ''}`;
+    }
+    case 'shift_scheduled': {
+      const name = agentName(agents, p.agent_id);
+      return `${name} 的班次已排定（${clockTime(p.scheduled_start)}–${clockTime(p.scheduled_end)}）`;
+    }
+    case 'shift_upcoming': {
+      const name = agentName(agents, p.agent_id);
+      const mins = typeof p.minutes_until_start === 'number' ? p.minutes_until_start : '?';
+      return `${name} 的班次即将开始（${mins} 分钟后）`;
+    }
+    case 'shift_started': {
+      const name = agentName(agents, p.agent_id);
+      const late = typeof p.late_minutes === 'number' ? p.late_minutes : 0;
+      return late > 0 ? `${name} 开始上班（迟到 ${late} 分钟）` : `${name} 开始上班`;
+    }
+    case 'shift_completed': {
+      const name = agentName(agents, p.agent_id);
+      const minutes = typeof p.worked_minutes === 'number' ? p.worked_minutes : '?';
+      const products = itemsText(p.products);
+      return products
+        ? `${name} 完成班次（工作 ${minutes} 分钟，产出 ${products}）`
+        : `${name} 完成班次（工作 ${minutes} 分钟）`;
+    }
+    case 'shift_absent': {
+      const name = agentName(agents, p.agent_id);
+      return `${name} 缺勤了班次`;
+    }
+    case 'shift_leave_requested': {
+      const name = agentName(agents, p.agent_id);
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `${name} 提交了请假申请${reason ? `（${reason}）` : ''}`;
+    }
+    case 'shift_leave_approved': {
+      const name = agentName(agents, p.agent_id);
+      const manager = agentName(agents, p.manager_agent_id);
+      return `${name} 的请假申请已批准（${manager}）`;
+    }
+    case 'shift_leave_rejected': {
+      const name = agentName(agents, p.agent_id);
+      const manager = agentName(agents, p.manager_agent_id);
+      const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+      return `${name} 的请假申请被 ${manager} 驳回${reason ? `（${reason}）` : ''}`;
+    }
+    case 'shift_cancelled': {
+      const name = agentName(agents, p.agent_id);
+      return `${name} 的班次已取消`;
+    }
+    case 'wage_paid': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const due = typeof p.wage_due === 'number' ? p.wage_due : '?';
+      return `企业 ${company} 向 ${name} 支付工资 ${due} 金币`;
+    }
+    case 'wage_unpaid': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const due = typeof p.wage_due === 'number' ? p.wage_due : '?';
+      return `企业 ${company} 未能支付 ${name} 的工资（欠 ${due} 金币）`;
+    }
+    case 'wage_repaid': {
+      const name = agentName(agents, p.agent_id);
+      const company = companyName(companies, p.company_id);
+      const amount = typeof p.amount === 'number' ? p.amount : '?';
+      return `企业 ${company} 向 ${name} 补发欠薪 ${amount} 金币`;
+    }
+    case 'company_status_changed': {
+      const company = companyName(companies, p.company_id);
+      const oldLabel =
+        typeof p.old_status === 'string' ? (COMPANY_STATUS_LABELS[p.old_status] ?? p.old_status) : '?';
+      const newLabel =
+        typeof p.new_status === 'string' ? (COMPANY_STATUS_LABELS[p.new_status] ?? p.new_status) : '?';
+      return `企业 ${company} 状态：${oldLabel} → ${newLabel}`;
+    }
+    case 'company_money_changed': {
+      const company = companyName(companies, p.company_id);
+      const amount = signedAmount(p.amount);
+      const balance = typeof p.balance === 'number' ? p.balance : '?';
+      return `企业 ${company} 资金变化 ${amount}（当前 ${balance}）`;
+    }
+    case 'company_sale_completed': {
+      const company = companyName(companies, p.company_id);
+      const item = itemLabel(p.item_id, p.item_name);
+      const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+      const total = typeof p.total === 'number' ? p.total : '?';
+      return `企业 ${company} 售出 ${item}×${qty}（${total} 金币）`;
+    }
+    case 'company_inventory_changed': {
+      const company = companyName(companies, p.company_id);
+      const items = itemsText(p.items);
+      return items ? `企业 ${company} 库存变化（${items}）` : `企业 ${company} 库存变化`;
+    }
+    case 'job_opening_created': {
+      const company = companyName(companies, p.company_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      const vacancies = typeof p.vacancies === 'number' ? p.vacancies : '?';
+      return `企业 ${company} 发布新职位 ${title}（招聘 ${vacancies} 人）`;
+    }
+    case 'job_opening_closed': {
+      const company = companyName(companies, p.company_id);
+      const title = positionTitle(jobOpenings, p.position_id);
+      return `企业 ${company} 关闭了 ${title} 的招聘`;
     }
     // inventory_changed / needs_changed carry no stream text; they only sync
     // agent state in applyEvent.
@@ -625,6 +809,16 @@ export const useWorldStore = defineStore('world', {
     stocks: [] as StockItem[],
     /** M10: shares per agent per stock (agent_id → stock_id → shares). */
     holdings: {} as Record<string, Record<string, number>>,
+    /** M13: companies of the active world (REST-loaded after snapshot). */
+    companies: [] as CompanyInfo[],
+    /** M13: open job openings of the active world (REST-loaded after snapshot). */
+    jobOpenings: [] as JobOpening[],
+    /** M13: employment + recent shifts cache per agent (REST-backed, display-only). */
+    agentEmployment: {} as Record<string, AgentEmploymentResponse>,
+    /** M13: latest shift per agent as tracked from WS events (display-only). */
+    agentShifts: {} as Record<string, AgentShiftInfo>,
+    /** M13: today's shift attendance counters, reset on each game day. */
+    shiftDayStats: { day: 1, attended: 0, late: 0, absent: 0 },
   }),
   getters: {
     agentById: (state) => (agentId: string): AgentSnapshot | undefined =>
@@ -637,10 +831,15 @@ export const useWorldStore = defineStore('world', {
     isOpen: (state) => (locationId: string): boolean => {
       const loc = state.locations.find((l) => l.location_id === locationId);
       if (!loc) return false;
-      // Mirrors backend is_location_open (R8): houses and plazas never
-      // close; everything else honours [open_hour, close_hour) against the
-      // world clock (worldTime = minutes since midnight).
-      if (loc.location_type === 'house' || loc.location_type === 'plaza') return true;
+      // Mirrors backend is_location_open (R8): houses, hotels and plazas
+      // never close; everything else honours [open_hour, close_hour) against
+      // the world clock (worldTime = minutes since midnight).
+      if (
+        loc.location_type === 'house' ||
+        loc.location_type === 'hotel' ||
+        loc.location_type === 'plaza'
+      )
+        return true;
       const hour = (state.worldTime % 1440) / 60;
       return loc.open_hour <= hour && hour < loc.close_hour;
     },
@@ -661,6 +860,65 @@ export const useWorldStore = defineStore('world', {
     /** Newest live bubble for an agent (one per agent, so the only one). */
     bubbleForAgent: (state) => (agentId: string): BubbleItem | null =>
       state.bubbles.find((b) => b.agent_id === agentId) ?? null,
+    /** M13: one company by id (for panels and event text lookups). */
+    companyById: (state) => (companyId: string): CompanyInfo | undefined =>
+      state.companies.find((c) => c.company_id === companyId),
+    /** M13: residents with formal employment (sum of company headcounts). */
+    employedCount(state): number {
+      return state.companies.reduce((sum, c) => sum + c.employee_count, 0);
+    },
+    /** M13: residents without formal employment. */
+    unemployedCount(state): number {
+      const employed = state.companies.reduce((sum, c) => sum + c.employee_count, 0);
+      return Math.max(0, state.agents.length - employed);
+    },
+    /** M13: open vacancies across all companies (from the opening list). */
+    openPositionCount(state): number {
+      return state.jobOpenings.reduce((sum, o) => sum + o.vacancies, 0);
+    },
+    /** M13: total unpaid wages across all companies. */
+    unpaidWageTotal(state): number {
+      return state.companies.reduce((sum, c) => sum + c.unpaid_wage_total, 0);
+    },
+    /** M13: today's shift attendance counters (attended/late/absent). */
+    todayShiftStats(state): { attended: number; late: number; absent: number } {
+      return {
+        attended: state.shiftDayStats.attended,
+        late: state.shiftDayStats.late,
+        absent: state.shiftDayStats.absent,
+      };
+    },
+    /** M13: whether the agent is currently inside a formal shift (WS-tracked). */
+    isAgentOnShift: (state) => (agentId: string): boolean => {
+      const s = state.agentShifts[agentId];
+      return s?.status === 'in_progress' || s?.status === 'late';
+    },
+    /** M13: employment info of one agent (null when unemployed/unknown). */
+    employmentOf: (state) => (agentId: string): AgentEmploymentResponse['employment'] =>
+      state.agentEmployment[agentId]?.employment ?? null,
+    /** M13: the next upcoming scheduled shift of an agent (WS-tracked, REST fallback). */
+    nextShiftOf: (state) => (agentId: string): AgentShiftInfo | null => {
+      const cached = state.agentShifts[agentId];
+      if (cached && cached.status === 'scheduled' && cached.scheduled_start >= state.worldTime) {
+        return cached;
+      }
+      const shifts = state.agentEmployment[agentId]?.shifts ?? [];
+      const next = shifts.find((s) => s.status === 'scheduled' && s.scheduled_start >= state.worldTime);
+      if (!next) return null;
+      return {
+        shift_id: next.shift_id,
+        employment_id: next.employment_id,
+        company_id: next.company_id,
+        position_id: next.position_id,
+        agent_id: next.agent_id,
+        scheduled_start: next.scheduled_start,
+        scheduled_end: next.scheduled_end,
+        status: next.status,
+        late_minutes: next.late_minutes,
+        worked_minutes: next.worked_minutes,
+        products: next.output_json ?? undefined,
+      };
+    },
   },
   actions: {
     async checkHealth(): Promise<void> {
@@ -724,6 +982,12 @@ export const useWorldStore = defineStore('world', {
       // M10: snapshots arrive on connect/reconnect/ensureWorld, so a REST
       // refresh naturally supersedes any stale incremental stock state.
       void this.loadStocks();
+      // M13: the same snapshot resync refreshes companies/openings; the day
+      // change resets today's attendance counters, and the shift cache is
+      // rebuilt from the surviving per-agent employment REST cache.
+      this.shiftDayStats = { day: payload.world.day, attended: 0, late: 0, absent: 0 };
+      this.rebuildAgentShifts();
+      void this.loadCompanyData();
     },
 
     /** M10: fetch all quotes + holdings (REST full state). */
@@ -738,6 +1002,113 @@ export const useWorldStore = defineStore('world', {
       } catch {
         // Best-effort; the next snapshot or WS events will refresh the panel.
       }
+    },
+
+    /** M13: fetch companies + open job openings (REST full state). */
+    async loadCompanyData(): Promise<void> {
+      if (!this.worldId) return;
+      try {
+        const [companies, jobOpenings] = await Promise.all([
+          getCompanies(this.worldId),
+          getJobOpenings(this.worldId),
+        ]);
+        this.companies = companies;
+        this.jobOpenings = jobOpenings;
+      } catch {
+        // Best-effort; the next snapshot retries the load.
+      }
+    },
+
+    /** M13: (re)fetch one agent's employment + recent shifts into the cache. */
+    async fetchAgentEmployment(agentId: string): Promise<void> {
+      if (!this.worldId || !agentId) return;
+      try {
+        const data = await getAgentEmployment(this.worldId, agentId);
+        this.agentEmployment[agentId] = data;
+        // Merge REST shifts into the WS-driven cache (list is newest first,
+        // so later entries only ever carry an older shift).
+        for (const shift of data.shifts) {
+          const existing = this.agentShifts[shift.agent_id];
+          if (!existing || shift.scheduled_start >= existing.scheduled_start) {
+            this.agentShifts[shift.agent_id] = {
+              shift_id: shift.shift_id,
+              employment_id: shift.employment_id,
+              company_id: shift.company_id,
+              position_id: shift.position_id,
+              agent_id: shift.agent_id,
+              scheduled_start: shift.scheduled_start,
+              scheduled_end: shift.scheduled_end,
+              status: shift.status,
+              late_minutes: shift.late_minutes,
+              worked_minutes: shift.worked_minutes,
+              products: shift.output_json ?? undefined,
+            };
+          }
+        }
+      } catch {
+        // Keep the previous cache; the next event or selection retries.
+      }
+    },
+
+    /**
+     * M13: upsert the latest shift of one agent from a WS payload
+     * (display-only; the backend is authoritative via REST).
+     */
+    upsertShift(p: Record<string, unknown>, status: string, extra: Record<string, unknown> = {}): void {
+      const agentId = String(p.agent_id ?? '');
+      if (!agentId) return;
+      const prev = this.agentShifts[agentId];
+      const shift: AgentShiftInfo = {
+        shift_id: String(p.shift_id ?? ''),
+        employment_id: String(p.employment_id ?? ''),
+        company_id: String(p.company_id ?? ''),
+        position_id: String(p.position_id ?? ''),
+        agent_id: agentId,
+        scheduled_start:
+          typeof p.scheduled_start === 'number' ? p.scheduled_start : (prev?.scheduled_start ?? 0),
+        scheduled_end:
+          typeof p.scheduled_end === 'number' ? p.scheduled_end : (prev?.scheduled_end ?? 0),
+        status,
+      };
+      if (typeof extra.worked_minutes === 'number') shift.worked_minutes = extra.worked_minutes;
+      if (Array.isArray(extra.products)) {
+        shift.products = (extra.products as { item_id: string; quantity: number }[]).filter(
+          (x) => x && typeof x.item_id === 'string' && typeof x.quantity === 'number',
+        );
+      }
+      this.agentShifts[agentId] = shift;
+    },
+
+    /** M13: roll the per-day shift counters to the event's game day, then bump one. */
+    bumpShiftStat(env: WorldEventEnvelope, key: 'attended' | 'late' | 'absent'): void {
+      const day = Math.floor(env.world_time / 1440) + 1;
+      if (this.shiftDayStats.day !== day) {
+        this.shiftDayStats = { day, attended: 0, late: 0, absent: 0 };
+      }
+      this.shiftDayStats[key] += 1;
+    },
+
+    /** M13: rebuild the WS shift cache from the per-agent employment REST cache. */
+    rebuildAgentShifts(): void {
+      const next: Record<string, AgentShiftInfo> = {};
+      for (const data of Object.values(this.agentEmployment)) {
+        const latest = data.shifts[0];
+        if (!latest) continue;
+        next[latest.agent_id] = {
+          shift_id: latest.shift_id,
+          employment_id: latest.employment_id,
+          company_id: latest.company_id,
+          position_id: latest.position_id,
+          agent_id: latest.agent_id,
+          scheduled_start: latest.scheduled_start,
+          scheduled_end: latest.scheduled_end,
+          status: latest.status,
+          late_minutes: latest.late_minutes,
+          worked_minutes: latest.worked_minutes,
+          products: latest.output_json ?? undefined,
+        };
+      }
+      this.agentShifts = next;
     },
 
     /** M10: apply a signed share delta to one agent's holding (WS events). */
@@ -877,6 +1248,64 @@ export const useWorldStore = defineStore('world', {
             this.teleportAgent(p.agent_id, [p.to[0], p.to[1]], typeof p.location_id === 'string' ? p.location_id : null);
           }
           break;
+        // ---- M13 company & formal-work events (display-only state sync) ----
+        case 'job_application_submitted':
+        case 'job_application_rejected':
+        case 'job_application_withdrawn':
+          // Stream text only; applications live in the backend.
+          break;
+        case 'employment_started': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company) {
+            company.employee_count += 1;
+            company.open_vacancies = Math.max(0, company.open_vacancies - 1);
+          }
+          if (this.selectedAgentId && p.agent_id === this.selectedAgentId) {
+            void this.fetchAgentEmployment(this.selectedAgentId);
+          }
+          break;
+        }
+        case 'employment_resigned':
+        case 'employment_terminated': {
+          const agentId = String(p.agent_id ?? '');
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company) {
+            company.employee_count = Math.max(0, company.employee_count - 1);
+            company.open_vacancies += 1;
+          }
+          delete this.agentShifts[agentId];
+          if (this.selectedAgentId === agentId) {
+            delete this.agentEmployment[agentId];
+            void this.fetchAgentEmployment(agentId);
+          }
+          break;
+        }
+        case 'company_status_changed': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company && typeof p.new_status === 'string') company.status = p.new_status;
+          break;
+        }
+        case 'company_money_changed': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company) {
+            // balance is authoritative from the same transaction (mirrors patchAgentMoney).
+            if (typeof p.balance === 'number') company.money = p.balance;
+            else if (typeof p.amount === 'number') company.money += p.amount;
+          }
+          break;
+        }
+        case 'company_sale_completed':
+        case 'company_inventory_changed':
+          // Stream text only; the ledger/money arrive via company_money_changed.
+          break;
+        case 'job_opening_created': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company && typeof p.vacancies === 'number') company.open_vacancies += p.vacancies;
+          break;
+        }
+        case 'job_opening_closed':
+          // Openings are REST-loaded; the next snapshot refreshes the list.
+          break;
         case 'stock_price_changed': {
           const s = this.stocks.find((x) => x.stock_id === p.stock_id);
           if (s) {
@@ -916,11 +1345,65 @@ export const useWorldStore = defineStore('world', {
         case 'crop_harvested':
           this.removeCrop(p);
           break;
+        // ---- M13 shift lifecycle (light WS cache, REST is authoritative) ----
+        case 'shift_scheduled':
+          this.upsertShift(p, 'scheduled');
+          if (this.selectedAgentId && p.agent_id === this.selectedAgentId) {
+            void this.fetchAgentEmployment(this.selectedAgentId);
+          }
+          break;
+        case 'shift_upcoming':
+          this.upsertShift(p, 'scheduled');
+          break;
+        case 'shift_started': {
+          const late = typeof p.late_minutes === 'number' ? p.late_minutes : 0;
+          this.upsertShift(p, late > 0 ? 'late' : 'in_progress');
+          this.bumpShiftStat(env, 'attended');
+          if (late > 0) this.bumpShiftStat(env, 'late');
+          break;
+        }
+        case 'shift_completed':
+          this.upsertShift(p, 'completed', {
+            worked_minutes: p.worked_minutes,
+            products: p.products,
+          });
+          break;
+        case 'shift_absent':
+          this.upsertShift(p, 'absent');
+          this.bumpShiftStat(env, 'absent');
+          break;
+        case 'shift_leave_requested':
+          break; // stream text only; the request lives in the backend
+        case 'shift_leave_approved':
+          this.upsertShift(p, 'leave');
+          break;
+        case 'shift_leave_rejected':
+          break; // the shift stays scheduled
+        case 'shift_cancelled':
+          this.upsertShift(p, 'cancelled');
+          break;
+        case 'wage_paid': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company && typeof p.company_balance === 'number') company.money = p.company_balance;
+          break;
+        }
+        case 'wage_unpaid': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company && typeof p.wage_due === 'number') company.unpaid_wage_total += p.wage_due;
+          break;
+        }
+        case 'wage_repaid': {
+          const company = this.companies.find((c) => c.company_id === p.company_id);
+          if (company && typeof p.amount === 'number') {
+            company.unpaid_wage_total = Math.max(0, company.unpaid_wage_total - p.amount);
+          }
+          break;
+        }
         default:
           break;
       }
 
-      const text = eventText(env, this.agents, this.locations, endedPair);
+      const text = eventText(env, this.agents, this.locations, this.companies, this.jobOpenings, endedPair);
       if (text) {
         this.events.unshift({
           sequence: env.sequence,
@@ -1084,6 +1567,7 @@ export const useWorldStore = defineStore('world', {
         void this.fetchRelationships(agentId);
         void this.fetchAgentDetail(agentId);
         void this.fetchDecisions(agentId);
+        void this.fetchAgentEmployment(agentId);
       }
     },
 

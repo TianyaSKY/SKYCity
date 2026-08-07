@@ -37,7 +37,8 @@
 ```text
 move(destination_id, reason)
 wait(minutes)
-sleep(minutes, reason)
+sleep(minutes, reason)   # 60~480 分钟，每小时 +40 精力 / +20 心情；
+                         # 有家必须在家睡觉，无家必须去小镇旅店(village_hotel)睡（每晚 15 金币）
 talk(target_agent_id, message, intent)
 buy_item(item_id, quantity, reason)
 sell_item(item_id, quantity, reason)
@@ -98,3 +99,93 @@ error_type、trace_id。
 - 每天结束时独立调用（单独限频，可用更强模型），产出：
   今天发生了什么 / 目标进展 / 关系变化 / 明日重点。
 - 反思结果写入语义记忆，不产生世界状态变更。
+
+## 8. 企业与正式工作工具（M13，R21–R35）
+
+### 8.1 普通居民/员工工具
+
+```text
+apply_job(opening_id, reason)                      # 申请职位
+withdraw_job_application(application_id, reason)   # 撤回申请
+start_shift(shift_id, reason)                      # 签到开始班次
+request_leave(shift_id, reason)                    # 请假
+resign_job(employment_id, reason)                  # 辞职
+```
+
+### 8.2 企业经理工具
+
+```text
+review_job_application(application_id, decision, reason)   # accept | reject
+review_leave_request(request_id, decision, reason)         # approve | reject
+terminate_employment(employment_id, reason)                # 解雇
+pause_recruitment(position_id, reason)                     # 暂停招聘
+resume_recruitment(position_id, reason)                    # 恢复招聘
+```
+
+### 8.3 约定
+
+- 工具只传意图参数（opening_id / shift_id / reason / decision）。
+  **禁止 LLM 传入**：工资金额、企业余额、合同状态、实际签到时间、
+  工资是否支付成功、岗位剩余人数 —— 全部由服务端确定。
+- `agent_id` / `manager_agent_id` 由服务端从 `AgentToolContext` 注入，
+  不作为工具参数（防止冒充他人，同 §3）。
+- 经理工具校验：只有 `company.manager_agent_id` 可操作本企业资源；
+  引擎做硬性校验，决策由真实 LLM 作出。
+- 工具失败返回可读原因（`{"success": false, "reason": "岗位已满"}`），
+  不吞异常；失败不重试同一调用（同 §2 T3-9）。
+
+### 8.4 观察内容
+
+员工观察追加：
+
+```text
+【正式职业】
+企业：晨露农场
+岗位：农场工人
+合同状态：在职
+每班工资：60金币
+出勤评分：92
+未支付工资：0
+
+【今天班次】
+时间：08:00–12:00
+状态：尚未签到
+距离开始：45分钟
+工作地点：晨露农场
+```
+
+求职者观察追加：
+
+```text
+【公开招聘】
+晨露农场：农场工人，60金币/班，剩余2个名额
+村庄杂货店：商店店员，90金币/班，剩余1个名额
+
+【我的申请】
+晨露农场：等待审核
+```
+
+企业经理观察追加：
+
+```text
+【企业经营】
+企业余额：800
+员工人数：1/2
+今日应付工资：60
+欠薪：0
+今日收入：0
+
+【待审核事项】
+求职申请1条
+请假申请0条
+
+【待审核求职申请】
+申请人：林夏
+职位：农场工人
+申请理由：希望获得稳定收入
+当前职业：无
+出勤历史：暂无
+与你的关系：熟悉度25，好感18
+```
+
+观察必须控制长度，只提供与当前决策相关的数据（同 §1 限长约束）。

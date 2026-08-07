@@ -20,6 +20,7 @@ import LocationLabels from '../components/LocationLabels.vue';
 import AgentNameplates from '../components/AgentNameplates.vue';
 import TaskBoard from '../components/TaskBoard.vue';
 import StockPanel from '../components/StockPanel.vue';
+import CompanyPanel from '../components/CompanyPanel.vue';
 
 const DEFAULT_AGENT_COLOR = '#9ee6b0';
 
@@ -266,6 +267,9 @@ onBeforeUnmount(() => {
     </div>
     <div class="hud hud-top-left" style="top: 44px">
       <TaskBoard />
+    </div>
+    <div class="hud hud-top-left" style="top: calc(44px + min(46vh, 460px) + 12px)">
+      <CompanyPanel />
     </div>
     <div class="hud hud-top-right" style="top: 44px">
       <StockPanel />

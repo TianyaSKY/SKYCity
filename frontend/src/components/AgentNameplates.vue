@@ -58,9 +58,15 @@ function inConversation(agentId: string): boolean {
   return Object.values(store.activeConversations).some((c) => c.agent_ids.includes(agentId));
 }
 
+/** Whether the agent is currently inside a formal shift (M13 WS-tracked). */
+function isOnShift(agentId: string): boolean {
+  return store.isAgentOnShift(agentId);
+}
+
 /** Task chip class: colored by what the agent is doing. */
 function taskClass(agent: AgentSnapshot): string {
   if (inConversation(agent.agent_id)) return 'task-talk';
+  if (isOnShift(agent.agent_id)) return 'task-work';
   if (!agent.action) return 'task-idle';
   return `task-${agent.action.type}`;
 }
@@ -78,7 +84,12 @@ function taskClass(agent: AgentSnapshot): string {
       <span class="np-name" :style="{ color: store.agentColors[agent.agent_id] }">
         {{ agent.name }}
       </span>
-      <span class="np-task" :class="taskClass(agent)">{{ taskLabelOf(agent.action, store.locations, inConversation(agent.agent_id)) }}</span>
+      <span class="np-task" :class="taskClass(agent)">
+        <template v-if="isOnShift(agent.agent_id)">
+          <span class="np-work" title="正式班次中">⚒</span> 上班中
+        </template>
+        <template v-else>{{ taskLabelOf(agent.action, store.locations, inConversation(agent.agent_id)) }}</template>
+      </span>
     </div>
   </div>
 </template>
@@ -124,6 +135,9 @@ function taskClass(agent: AgentSnapshot): string {
   color: rgba(205, 232, 213, 0.75);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.np-work {
+  color: #ffd54f;
 }
 .np-task.task-work {
   color: #ffd54f;

@@ -60,7 +60,7 @@
 - 地点开放区间 `[open_hour, close_hour)`；区间外视为关闭。
 - 关闭时 `move` 到该地点被拒绝；到达门前才发现关闭 → 在门口 `wait`，
   直到开门（引擎自动调度开门后的重新评估）。
-- `house`、`plaza` 全天开放（0-24）。
+- `house`、`hotel`、`plaza` 全天开放（0-24）。
 
 ## R9 对话距离
 
@@ -96,12 +96,21 @@
 | 需求 | 变化 |
 |---|---|
 | 饱食度 | 每小时 -1；使用食物按物品效果恢复 |
-| 精力 | 每小时 -1；`work` 每小时额外 -4（按 job 强度）；`wait` 每小时 +5；`sleep` 每小时 +20 |
-| 心情 | 每小时 -1；`sleep` 每小时 +10；`wait` 每小时 +2；使用心情物品按效果恢复（M12） |
+| 精力 | 每小时 -1；`work` 每小时额外 -4（按 job 强度）；`wait` 每小时 +5；`sleep` 每小时 +40 |
+| 心情 | 每小时 -1；`sleep` 每小时 +20；`wait` 每小时 +2；使用心情物品按效果恢复（M12） |
 | 孤单 | 每小时 +1；与智能体对话每条消息 -10（R21） |
 | 金钱 | 初始 50；工资/交易改变 |
 
 - `sleep` 是独立行动（action_type=`sleep`）：60~480 分钟，可打断，完成后恢复空闲并重新调度决策。
+- **睡觉地点规则（R14 扩展）**：有家的智能体**只能在家睡觉**（`sleep` 要求当前在
+  自己的家）；没有家的智能体**只能在小镇旅店**（`village_hotel`，24 小时开放）睡觉，
+  每次入睡收取 `HOTEL_NIGHTLY_FEE=15` 金币房费（入住即扣，记 `hotel_fee` 流水 +
+  `money_changed` 事件；余额不足拒绝，不赊账 R7）。
+  在错误地点睡觉被拒绝（`有家必须回家睡觉（当前不在家）` /
+  `没有家的智能体需要去小镇旅店睡觉`），智能体需先 `move` 回家/旅店再睡。
+- **夜间睡觉引导**：22:00–07:00 且精力 ≤ 40 的空闲智能体，每小时触发一次
+  高优先级决策（`needs_boost`），引导其回家/去旅店睡觉；LLM 提示词与观察
+  文本同步说明睡觉地点与房费。
 - 心情 ≤ 20 触发高优先级决策（同 R11/R12 机制，调度 `agent_decide` 提前）。
 
 - R15 商店补货与地点容量
@@ -151,7 +160,7 @@
 
 ## R20 消费与心情（M12）
 
-- R20.1 心情维度：0~100，每小时基础 -1；`sleep` 每小时 +10、`wait` 每小时 +2
+- R20.1 心情维度：0~100，每小时基础 -1；`sleep` 每小时 +20、`wait` 每小时 +2
   （上限 100）；心情 ≤ 20 触发高优先级决策（同 R11/R12）。
 - R20.2 非食物心情物品可 `use_item`：蜂蜜(+15)/草莓(+10)/蜡烛(+8)/陶罐(+12)/
   花种(+15) 恢复心情；`satiety_restore` 与 `mood_restore` 均为 0 的物品仍拒绝
@@ -212,3 +221,121 @@
   （清格，无退还），走 R13 审计管道。
 - R23.9 存档：`crops` 行 + 未触发的 `crop_grow` 回调行随 R17 存档；恢复后
   生长从 `next_stage_at` 续跑。
+## 企业与正式工作（R21–R35，详见 company-employment.md）
+
+## R21 企业账户独立性
+
+- 企业拥有独立余额（`companies.money`），与老板/经理个人余额严格分离，
+  任何逻辑不得合并两者。
+- 企业资金变化必须写 `CompanyTransaction` 流水并发布事件；企业余额不得为负。
+- 企业创建时写入 `initial_capital` 流水；第一版不赊账、不贷款、无银行。
+
+## R22 Job 与 Position 分离
+
+- `Job`（临时工作定义）与 `Position`（企业正式岗位）并存；岗位通过 `job_id`
+  引用 Job，继承其执行方式（地点、时长、精力消耗、产物）。
+- 临时工作（`work` 行动）结算走 `EconomyService`：工资进个人背包、产物进个人背包。
+- 正式工作（`formal_work` 行动）结算走班次完成处理器：工资从企业账户支付、
+  产物进 `CompanyInventory`。
+
+## R23 招聘与岗位容量
+
+- `JobOpening.vacancies` 为当前空缺；录用时 `-1`（归零转 `filled`），
+  离职时 `+1`（转回 `open`，无招聘则新建）。
+- 岗位已满（`vacancies <= 0`）拒绝新申请；容量并发安全依赖唯一约束 +
+  事务内校验（同一名额不能录用两人）。
+- 接受申请与创建合同必须在同一事务内完成，杜绝重复建合同。
+
+## R24 求职申请
+
+- 同一居民同一招聘最多一条**活跃**申请（submitted/reviewing）；撤回或拒绝后
+  可重新申请（SQLite 部分唯一索引 `uq_job_application_active_opening_agent` 强制）。
+- 申请状态：`submitted` → `accepted` / `rejected` / `withdrawn`；同一申请只能处理一次。
+- 已关闭（非 `open`）招聘不接受申请。
+- 一个居民最多持有一份 active/on_leave 合同；录用前校验，冲突则拒绝。
+
+## R25 经理审核权限
+
+- 只有 `company.manager_agent_id` 可以审核本企业申请。
+- 审核决策（accept/reject）由真实 LLM 作出；引擎只做硬性校验
+  （申请有效、有空缺、企业正常、权限正确、无重复合同）。
+
+## R26 班次生成
+
+- 班次只为 `active` 合同生成；只在岗位工作日（`working_days_json`，`% 7`）生成。
+- 同一 `(employment_id, scheduled_start)` 不重复生成（幂等，存档恢复后同样成立）。
+- 生成时注册缺勤检查（`scheduled_start + 120`）并发布 `shift_scheduled`。
+
+## R27 签到窗口与迟到
+
+- 允许提前 30 分钟、允许迟到 120 分钟：
+  `scheduled_start - 30 ≤ 世界时间 ≤ scheduled_start + 120`，窗口外拒绝。
+- 要求：班次属于该居民、合同 `active`、居民空闲（R1）、居民位于企业地点。
+- `late_minutes = max(actual_start - scheduled_start, 0)`；迟到记合同
+  `late_shifts + 1`、`attendance_score - 2`（下限 0）。
+
+## R28 缺勤判定
+
+- `scheduled_start + 120` 时班次仍为 `scheduled` → 自动转 `absent`，
+  `wage_due = 0`；合同 `absent_shifts + 1`、`attendance_score - 10`（下限 0）。
+- 由调度器判定，不依赖 LLM 主动承认；判定后生成下一班次。
+
+## R28.5 请假
+
+- 员工可对未开始的班次（`scheduled`）申请请假；同一班次最多一条待审批申请。
+- 经理审批：准假 → 班次转 `leave`（不判缺勤、`wage_due = 0`、不发工资），
+  并生成下一空槽班次；拒绝 → 班次保持 `scheduled`。
+- 缺勤判定时待审批申请自动转 `expired`；辞职时转 `cancelled`。
+- 请假事件与求职申请一样提升经理决策优先级。
+
+## R29 工资支付
+
+- `wage_due = wage_per_shift × min(worked, scheduled) // scheduled`（向下取整，
+  最小单位 1）；只按实际工作分钟支付，不做带薪假、不做绩效奖金。
+- 企业余额充足：企业扣款、员工入账、班次 `paid`，`CompanyTransaction`
+  （`wage_payment`，负额）与 `Transaction`（`work_wage`，正额）使用同一
+  `trace_id`。
+- 余额不足：班次 `unpaid`，欠薪记入合同 `unpaid_wage` 与企业
+  `unpaid_wage_total`，不凭空发钱；欠薪不因辞职/合同终止消失。
+- 支付处理器必须幂等：班次状态非 `in_progress`/`late` 直接返回，
+  同一班次绝不重复支付。
+
+## R30 正式工作产物
+
+- 正式班次完成的 `job.products_json` 产物全部进入 `CompanyInventory`，不进个人背包。
+- 企业库存数量只增不减（第一版）；库存变化随 `shift_completed` 事件发布。
+
+## R31 辞职
+
+- 仅员工本人可辞职；合同转 `resigned`，未来 `scheduled` 班次转 `cancelled`。
+- 招聘空缺恢复并重开；欠薪保留；双方获得记忆；发布 `employment_resigned`。
+
+## R32 解雇、暂停与停业
+
+- `terminate_employment` 仅经理可操作、不能解雇他企业员工、不能重复终止；
+  未来班次取消、名额恢复；欠薪不消失。
+- 企业 `suspended` 停止招聘与排班但保留企业（未来 scheduled 班次取消、
+  进行中班次照常完成但不续排）；恢复后重新招聘并为缺班次的合同续排。
+- `bankrupt`：资不抵薪且满足破产条件（后续定义）；上帝注资（`god_injection`
+  流水）可恢复经营并立即补发欠薪。
+
+## R33 企业销售
+
+- `Store.company_id` 绑定企业；居民购买时同一事务内：居民扣钱、商店库存减少、
+  居民获得商品、企业余额增加、双流水 + `company_sale_completed` 事件。
+- 居民出售给商店：企业必须有足够资金（校验先于库存更新，避免失败事务残留
+  库存变更），不足则拒绝交易（不赊账 R7）；企业扣款写 `material_purchase`
+  流水 + `company_money_changed` 事件。
+
+## R34 企业事件与流水（完整列表见 event-protocol）
+
+- 企业/招聘/申请/合同/班次/工资/库存/销售全部有对应事件；事件 payload 必须
+  包含关联 ID（company_id、employment_id、shift_id、agent_id、amount）。
+- 同一事务内事件共享 `trace_id` 与 `world_time`。
+
+## R35 存档恢复
+
+- 存档版本为 2：保存企业、岗位、招聘、申请、合同、班次、请假、企业库存、企业流水。
+- V1 存档迁移：保留旧工作历史，按种子重建企业，旧历史不转正式合同。
+- 恢复后：班次不重复生成（R26 幂等）、工资不重复支付（R29 幂等）、
+  事件 sequence 连续；班次/合同/调度器 payload 的全局主键引用重映射后仍命中。

@@ -13,5 +13,7 @@
     "extraversion": 0.85,
     "agreeableness": 0.72,
     "emotional_stability": 0.66
-  }
+  },
+  "spawn": { "col": 40, "row": 11, "direction": "down" },
+  "home": { "location_id": "zhangming_home", "name": "张明的家", "col": 40, "row": 10 }
 }

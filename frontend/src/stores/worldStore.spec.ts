@@ -22,8 +22,16 @@ vi.mock('../api/client', () => ({
   checkHealth: vi.fn(),
   createWorld: vi.fn(),
   getAgentDetail: vi.fn(),
+  getAgentEmployment: vi.fn(async () => ({ employment: null, shifts: [] })),
+  getAgentShifts: vi.fn(async () => []),
+  getCompanies: vi.fn(async () => []),
+  getCompany: vi.fn(),
+  getCompanyEmployees: vi.fn(async () => []),
+  getCompanyPositions: vi.fn(async () => []),
+  getCompanyTransactions: vi.fn(async () => []),
   getConversations: vi.fn(),
   getDecisions: vi.fn(),
+  getJobOpenings: vi.fn(async () => []),
   getLocationDetail: vi.fn(async () => ({
     location_id: '',
     name: '',
@@ -1146,5 +1154,528 @@ describe('task label helpers', () => {
     expect(taskPriority({ type: 'move', from: [3, 4], to: [5, 5], started_at: 600, ends_at: 610 }, false)).toBe(2);
     expect(taskPriority({ type: 'wait', ends_at: 610 }, false)).toBe(3);
     expect(taskPriority(null, false)).toBe(4);
+  });
+});
+
+describe('applyEvent M13 company & employment events', () => {
+  let store: ReturnType<typeof useWorldStore>;
+
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+    // Let the mocked loadCompanyData() land, then seed the fixtures the
+    // event assertions depend on.
+    await Promise.resolve();
+    await Promise.resolve();
+    store.companies = [
+      {
+        company_id: 'company_morning_farm',
+        name: '晨露农场',
+        company_type: 'farm',
+        location_id: 'village_farm',
+        manager_agent_id: 'agent_zhangming',
+        money: 800,
+        status: 'active',
+        employee_count: 1,
+        open_vacancies: 1,
+        unpaid_wage_total: 0,
+      },
+    ];
+    store.jobOpenings = [
+      {
+        opening_id: 'opening_farm_1',
+        company_id: 'company_morning_farm',
+        company_name: '晨露农场',
+        position_id: 'position_farm_worker',
+        title: '农场工人',
+        description: '负责播种、浇水和收获',
+        location_id: 'village_farm',
+        vacancies: 1,
+        wage_per_shift: 60,
+        shift_start_minute: 480,
+        shift_end_minute: 720,
+      },
+    ];
+  });
+
+  it('job_application_submitted: 求职申请行（公司 + 岗位标题）', () => {
+    store.applyEvent(env(1, 'job_application_submitted', {
+      application_id: 'app_1',
+      opening_id: 'opening_farm_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      reason: '想种田',
+    }));
+    expect(store.events[0].text).toBe('林夏 申请了 晨露农场·农场工人');
+  });
+
+  it('job_application_rejected: 拒绝行（审批人 + 原因）', () => {
+    store.applyEvent(env(1, 'job_application_rejected', {
+      application_id: 'app_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      manager_agent_id: 'agent_zhangming',
+      reason: '名额已满',
+    }));
+    expect(store.events[0].text).toBe('林夏 的农场工人求职被 张明 拒绝（名额已满）');
+  });
+
+  it('job_application_withdrawn: 撤回行', () => {
+    store.applyEvent(env(1, 'job_application_withdrawn', {
+      application_id: 'app_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+    }));
+    expect(store.events[0].text).toBe('林夏 撤回了对 晨露农场·农场工人 的求职申请');
+  });
+
+  it('employment_started: 入职行 + 员工/空缺本地同步', () => {
+    store.applyEvent(env(1, 'employment_started', {
+      application_id: 'app_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      manager_agent_id: 'agent_zhangming',
+      employment_id: 'emp_1',
+      reason: '录用',
+    }));
+    expect(store.events[0].text).toBe('林夏 入职 晨露农场，担任农场工人');
+    expect(store.companies[0].employee_count).toBe(2);
+    expect(store.companies[0].open_vacancies).toBe(0);
+  });
+
+  it('employment_resigned: 辞职行 + 员工/空缺回退', () => {
+    store.applyEvent(env(1, 'employment_resigned', {
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      agent_id: 'agent_linxia',
+      reason: '另谋高就',
+    }));
+    expect(store.events[0].text).toBe('林夏 从 晨露农场 辞职（另谋高就）');
+    expect(store.companies[0].employee_count).toBe(0);
+    expect(store.companies[0].open_vacancies).toBe(2);
+  });
+
+  it('employment_terminated: 解雇行', () => {
+    store.applyEvent(env(1, 'employment_terminated', {
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      agent_id: 'agent_linxia',
+      manager_agent_id: 'agent_zhangming',
+      reason: '违纪',
+    }));
+    expect(store.events[0].text).toBe('林夏 被 晨露农场 解雇（违纪）');
+  });
+
+  it('shift_scheduled: 排班行 + 班次缓存', () => {
+    store.applyEvent(env(1, 'shift_scheduled', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      scheduled_start: 1440 + 480,
+      scheduled_end: 1440 + 720,
+    }));
+    expect(store.events[0].text).toBe('林夏 的班次已排定（08:00–12:00）');
+    expect(store.agentShifts['agent_linxia']?.status).toBe('scheduled');
+  });
+
+  it('shift_upcoming: 班次提醒行', () => {
+    store.applyEvent(env(1, 'shift_upcoming', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      scheduled_start: 1920,
+      scheduled_end: 2160,
+      minutes_until_start: 60,
+    }));
+    expect(store.events[0].text).toBe('林夏 的班次即将开始（60 分钟后）');
+  });
+
+  it('shift_started: 上班行 + 出勤统计 + 上班标记', () => {
+    store.applyEvent(env(1, 'shift_started', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      late_minutes: 0,
+      ends_at: 2160,
+    }));
+    expect(store.events[0].text).toBe('林夏 开始上班');
+    expect(store.isAgentOnShift('agent_linxia')).toBe(true);
+    expect(store.todayShiftStats.attended).toBe(1);
+    expect(store.todayShiftStats.late).toBe(0);
+
+    store.applyEvent(env(2, 'shift_started', {
+      shift_id: 'shift_2',
+      employment_id: 'emp_2',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_zhangming',
+      late_minutes: 15,
+      ends_at: 2160,
+    }));
+    expect(store.events[0].text).toBe('张明 开始上班（迟到 15 分钟）');
+    expect(store.todayShiftStats.attended).toBe(2);
+    expect(store.todayShiftStats.late).toBe(1);
+  });
+
+  it('shift_completed: 完成行 + 产出 + 班次缓存', () => {
+    store.applyEvent(env(1, 'shift_completed', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      worked_minutes: 240,
+      products: [
+        { item_id: 'wheat', quantity: 1 },
+        { item_id: 'egg', quantity: 2 },
+      ],
+    }));
+    expect(store.events[0].text).toBe('林夏 完成班次（工作 240 分钟，产出 小麦×1、鸡蛋×2）');
+    expect(store.agentShifts['agent_linxia']?.status).toBe('completed');
+    expect(store.isAgentOnShift('agent_linxia')).toBe(false);
+  });
+
+  it('shift_absent: 缺勤行 + 缺勤统计', () => {
+    store.applyEvent(env(1, 'shift_absent', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+    }));
+    expect(store.events[0].text).toBe('林夏 缺勤了班次');
+    expect(store.agentShifts['agent_linxia']?.status).toBe('absent');
+    expect(store.todayShiftStats.absent).toBe(1);
+  });
+
+  it('shift_leave_requested: 请假申请行', () => {
+    store.applyEvent(env(1, 'shift_leave_requested', {
+      request_id: 'req_1',
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      reason: '身体不适',
+    }));
+    expect(store.events[0].text).toBe('林夏 提交了请假申请（身体不适）');
+  });
+
+  it('shift_leave_approved: 批准行 + 班次状态置为请假', () => {
+    store.applyEvent(env(1, 'shift_leave_approved', {
+      request_id: 'req_1',
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      manager_agent_id: 'agent_zhangming',
+      reason: '准假',
+    }));
+    expect(store.events[0].text).toBe('林夏 的请假申请已批准（张明）');
+    expect(store.agentShifts['agent_linxia']?.status).toBe('leave');
+  });
+
+  it('shift_leave_rejected: 驳回行（班次保持排班）', () => {
+    store.applyEvent(env(1, 'shift_leave_rejected', {
+      request_id: 'req_1',
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      manager_agent_id: 'agent_zhangming',
+      reason: '人手不够',
+    }));
+    expect(store.events[0].text).toBe('林夏 的请假申请被 张明 驳回（人手不够）');
+  });
+
+  it('shift_cancelled: 取消行 + 班次缓存', () => {
+    store.applyEvent(env(1, 'shift_cancelled', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+    }));
+    expect(store.events[0].text).toBe('林夏 的班次已取消');
+    expect(store.agentShifts['agent_linxia']?.status).toBe('cancelled');
+  });
+
+  it('wage_paid: 工资行 + 余额同步', () => {
+    store.applyEvent(env(1, 'wage_paid', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      wage_due: 60,
+      wage_paid: 60,
+      company_balance: 740,
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 向 林夏 支付工资 60 金币');
+    expect(store.companies[0].money).toBe(740);
+  });
+
+  it('wage_unpaid: 欠薪行 + 欠薪总额累计', () => {
+    store.applyEvent(env(1, 'wage_unpaid', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      wage_due: 60,
+      wage_paid: 0,
+      company_balance: 0,
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 未能支付 林夏 的工资（欠 60 金币）');
+    expect(store.companies[0].unpaid_wage_total).toBe(60);
+  });
+
+  it('wage_repaid: 补发欠薪行 + 欠薪总额扣减', () => {
+    store.companies[0].unpaid_wage_total = 60;
+    store.applyEvent(env(1, 'wage_repaid', {
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      agent_id: 'agent_linxia',
+      amount: 60,
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 向 林夏 补发欠薪 60 金币');
+    expect(store.companies[0].unpaid_wage_total).toBe(0);
+  });
+
+  it('company_status_changed: 状态行 + 状态同步', () => {
+    store.applyEvent(env(1, 'company_status_changed', {
+      company_id: 'company_morning_farm',
+      old_status: 'active',
+      new_status: 'suspended',
+      reason: '资金不足',
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 状态：经营中 → 停业');
+    expect(store.companies[0].status).toBe('suspended');
+  });
+
+  it('company_money_changed: 资金行 + 余额同步', () => {
+    store.applyEvent(env(1, 'company_money_changed', {
+      company_id: 'company_morning_farm',
+      amount: 120,
+      balance: 920,
+      reason: '商店售出 小麦×4',
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 资金变化 +120（当前 920）');
+    expect(store.companies[0].money).toBe(920);
+  });
+
+  it('company_sale_completed: 售出行', () => {
+    store.applyEvent(env(1, 'company_sale_completed', {
+      company_id: 'company_morning_farm',
+      store_id: 'village_shop',
+      item_id: 'wheat',
+      item_name: '小麦',
+      quantity: 4,
+      unit_price: 3,
+      total: 12,
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 售出 小麦×4（12 金币）');
+  });
+
+  it('company_inventory_changed: 库存变化行', () => {
+    store.applyEvent(env(1, 'company_inventory_changed', {
+      company_id: 'company_morning_farm',
+      items: [{ item_id: 'wheat', quantity: 5 }],
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 库存变化（小麦×5）');
+  });
+
+  it('job_opening_created: 发布职位行 + 空缺累计', () => {
+    store.applyEvent(env(1, 'job_opening_created', {
+      opening_id: 'opening_farm_2',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      vacancies: 2,
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 发布新职位 农场工人（招聘 2 人）');
+    expect(store.companies[0].open_vacancies).toBe(3);
+  });
+
+  it('job_opening_closed: 关闭招聘行', () => {
+    store.applyEvent(env(1, 'job_opening_closed', {
+      opening_id: 'opening_farm_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      reason: '已招满',
+    }));
+    expect(store.events[0].text).toBe('企业 晨露农场 关闭了 农场工人 的招聘');
+  });
+});
+
+describe('M13 getters', () => {
+  it('employment stats aggregate from companies/openings', () => {
+    setActivePinia(createPinia());
+    const store = useWorldStore();
+    store.agents = [AGENT_LINXIA, AGENT_ZHANGMING, { ...AGENT_LINXIA, agent_id: 'agent_c', name: '王芳' }];
+    store.companies = [
+      {
+        company_id: 'company_morning_farm',
+        name: '晨露农场',
+        company_type: 'farm',
+        location_id: 'village_farm',
+        manager_agent_id: null,
+        money: 800,
+        status: 'active',
+        employee_count: 2,
+        open_vacancies: 1,
+        unpaid_wage_total: 60,
+      },
+      {
+        company_id: 'company_village_shop',
+        name: '村庄杂货店',
+        company_type: 'retail',
+        location_id: 'village_shop',
+        manager_agent_id: null,
+        money: 1000,
+        status: 'active',
+        employee_count: 1,
+        open_vacancies: 0,
+        unpaid_wage_total: 0,
+      },
+    ];
+    store.jobOpenings = [
+      {
+        opening_id: 'opening_farm_1',
+        company_id: 'company_morning_farm',
+        company_name: '晨露农场',
+        position_id: 'position_farm_worker',
+        title: '农场工人',
+        description: '',
+        location_id: 'village_farm',
+        vacancies: 1,
+        wage_per_shift: 60,
+        shift_start_minute: 480,
+        shift_end_minute: 720,
+      },
+      {
+        opening_id: 'opening_shop_1',
+        company_id: 'company_village_shop',
+        company_name: '村庄杂货店',
+        position_id: 'position_shop_attendant',
+        title: '商店店员',
+        description: '',
+        location_id: 'village_shop',
+        vacancies: 3,
+        wage_per_shift: 90,
+        shift_start_minute: 540,
+        shift_end_minute: 1020,
+      },
+    ];
+    expect(store.employedCount).toBe(3);
+    expect(store.unemployedCount).toBe(0);
+    expect(store.openPositionCount).toBe(4);
+    expect(store.unpaidWageTotal).toBe(60);
+    expect(store.companyById('company_morning_farm')?.name).toBe('晨露农场');
+    expect(store.companyById('nope')).toBeUndefined();
+  });
+
+  it('isAgentOnShift / nextShiftOf follow the WS shift cache with REST fallback', async () => {
+    setActivePinia(createPinia());
+    const store = useWorldStore();
+    store.applySnapshot(baseSnapshot());
+    await Promise.resolve();
+    await Promise.resolve();
+    store.worldTime = 1000;
+
+    // Scheduled: not on shift yet, but the next shift is visible.
+    store.applyEvent(env(1, 'shift_scheduled', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      scheduled_start: 1920,
+      scheduled_end: 2160,
+    }, 1000));
+    expect(store.isAgentOnShift('agent_linxia')).toBe(false);
+    expect(store.nextShiftOf('agent_linxia')?.scheduled_start).toBe(1920);
+
+    // In progress: marked on shift; the cached scheduled shift is gone.
+    store.applyEvent(env(2, 'shift_started', {
+      shift_id: 'shift_1',
+      employment_id: 'emp_1',
+      company_id: 'company_morning_farm',
+      position_id: 'position_farm_worker',
+      agent_id: 'agent_linxia',
+      late_minutes: 0,
+      ends_at: 2160,
+    }, 1000));
+    expect(store.isAgentOnShift('agent_linxia')).toBe(true);
+    expect(store.nextShiftOf('agent_linxia')).toBeNull();
+
+    // REST employment fallback supplies the next scheduled shift.
+    store.agentEmployment['agent_linxia'] = {
+      employment: null,
+      shifts: [
+        {
+          shift_id: 'shift_2',
+          employment_id: 'emp_1',
+          company_id: 'company_morning_farm',
+          position_id: 'position_farm_worker',
+          agent_id: 'agent_linxia',
+          scheduled_start: 2880 + 540,
+          scheduled_end: 2880 + 780,
+          actual_start: null,
+          actual_end: null,
+          status: 'scheduled',
+          late_minutes: 0,
+          worked_minutes: 0,
+          wage_due: 0,
+          wage_paid: 0,
+          payroll_status: 'not_due',
+          output_json: null,
+          absence_reason: null,
+        },
+      ],
+    };
+    expect(store.nextShiftOf('agent_linxia')?.scheduled_start).toBe(3420);
+    expect(store.employmentOf('agent_linxia')).toBeNull();
+  });
+
+  it('employmentOf returns the REST employment of an agent', () => {
+    setActivePinia(createPinia());
+    const store = useWorldStore();
+    store.agentEmployment['agent_linxia'] = {
+      employment: {
+        employment_id: 'emp_1',
+        company_id: 'company_morning_farm',
+        position_id: 'position_farm_worker',
+        job_id: 'job_farm_field',
+        agent_id: 'agent_linxia',
+        status: 'active',
+        hired_at: 600,
+        started_at: 600,
+        ended_at: null,
+        wage_per_shift: 60,
+        attendance_score: 100,
+        performance_score: 80,
+        completed_shifts: 3,
+        late_shifts: 0,
+        absent_shifts: 0,
+        unpaid_wage: 0,
+        termination_reason: null,
+      },
+      shifts: [],
+    };
+    expect(store.employmentOf('agent_linxia')?.wage_per_shift).toBe(60);
+    expect(store.employmentOf('agent_zhangming')).toBeNull();
   });
 });

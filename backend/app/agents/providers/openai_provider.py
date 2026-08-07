@@ -1,12 +1,14 @@
 """Real LLM decision provider built on the openai-agents SDK.
 
-One ``Runner.run`` per decision with ``tool_choice="required"``,
-``parallel_tool_calls=False`` and ``tool_use_behavior="stop_on_first_tool"``
-(docs/agent-prompt.md §2): the run ends as soon as the first tool executes, so
-exactly one world action per decision regardless of model turn discipline.
+One ``Runner.run`` per decision with ``parallel_tool_calls=False`` and
+``tool_use_behavior="stop_on_first_tool"`` (docs/agent-prompt.md §2): the run
+ends as soon as the first tool executes, so exactly one world action per
+decision regardless of model turn discipline. ``tool_choice`` comes from
+settings: the default ``required`` forces a tool call (a missing one is a hard
+DecisionError); ``auto``/``none`` support reasoning models that reject the
+forced choice — a text-only reply then degrades into a wait action.
 max_turns=4 remains as a safety net for malformed tool calls. The first
-function call in ``result.new_items`` is extracted; with tool_choice=required
-the model must produce one, so a missing call is a hard DecisionError.
+function call in ``result.new_items`` is extracted.
 
 Requires OPENAI_API_KEY at construction; without it the runtime selects the
 fake provider instead (providers/__init__.py).
@@ -31,6 +33,18 @@ from app.agents.tools.commerce import buy_item, sell_item, work
 from app.agents.tools.conversation import talk
 from app.agents.tools.crops import harvest, plant
 from app.agents.tools.daily_life import sleep, use_item
+from app.agents.tools.employment import (
+    apply_job,
+    pause_recruitment,
+    request_leave,
+    resign_job,
+    resume_recruitment,
+    review_job_application,
+    review_leave_request,
+    start_shift,
+    terminate_employment,
+    withdraw_job_application,
+)
 from app.agents.tools.movement import move, wait
 from app.agents.tools.stocks import buy_stock, sell_stock
 from app.agents.tools.transfers import give_item, transfer_money
@@ -49,7 +63,13 @@ class OpenAIProvider:
                 "Set OPENAI_API_KEY or use llm_provider='fake'."
             )
         self._settings = settings
-        self._tools = [move, wait, talk, work, buy_item, sell_item, use_item, sleep, buy_stock, sell_stock, transfer_money, give_item, build, plant, harvest]
+        self._tools = [
+            move, wait, talk, work, buy_item, sell_item, use_item, sleep,
+            buy_stock, sell_stock, transfer_money, give_item, build, plant, harvest,
+            apply_job, withdraw_job_application, review_job_application,
+            start_shift, resign_job, request_leave, review_leave_request,
+            terminate_employment, pause_recruitment, resume_recruitment,
+        ]
         # Explicit SDK provider: routes through settings (base_url / key) and
         # uses chat completions so third-party OpenAI-compatible APIs work.
         self._sdk_provider = SdkOpenAIProvider(
@@ -80,7 +100,7 @@ class OpenAIProvider:
             # models that keep calling tools burn max_turns and raise.
             tool_use_behavior="stop_on_first_tool",
             model_settings=ModelSettings(
-                tool_choice="required",
+                tool_choice=self._settings.llm_tool_choice,
                 parallel_tool_calls=False,
             ),
         )
@@ -92,10 +112,42 @@ class OpenAIProvider:
         )
 
         tool_call = self._first_tool_call(result.new_items)
+        latency_ms = max(int((time.perf_counter() - started) * 1000), 1)
+        input_tokens = sum(
+            getattr(resp.usage, "input_tokens", 0) or 0 for resp in result.raw_responses
+        )
+        output_tokens = sum(
+            getattr(resp.usage, "output_tokens", 0) or 0 for resp in result.raw_responses
+        )
         if tool_call is None:
-            raise DecisionError(
-                f"no tool call in LLM run (trace_id={trace_id}); "
-                "expected tool_choice=required to force one"
+            # tool_choice="required": the model must produce a tool call, so a
+            # missing one is a hard failure (docs/agent-prompt.md §2).
+            if self._settings.llm_tool_choice == "required":
+                raise DecisionError(
+                    f"no tool call in LLM run (trace_id={trace_id}); "
+                    "expected tool_choice=required to force one"
+                )
+            # tool_choice="auto"/"none": reasoning models may answer in text.
+            # Degrade into a short wait (tool_output=None: the decision
+            # service executes it) so the world keeps ticking without burning
+            # the LLM failure backoff on a legitimate text-only reply.
+            final_text = (
+                (result.final_output or "").strip()[:80]
+                if isinstance(result.final_output, str)
+                else ""
+            )
+            reason = final_text or "未调用工具，原地等待"
+            return DecisionResult(
+                tool_name="wait",
+                tool_arguments={"minutes": 15, "reason": reason},
+                model=self._settings.llm_model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                raw_summary=(
+                    f"[openai:{self._settings.llm_model}] wait (text-only reply, "
+                    f"tool_choice={self._settings.llm_tool_choice})"
+                ),
             )
         tool_name = str(tool_call.tool_name or "")
         try:
@@ -104,14 +156,6 @@ class OpenAIProvider:
             raise DecisionError(f"unparseable tool arguments for {tool_name}: {exc}") from exc
         if not isinstance(arguments, dict):
             arguments = {}
-
-        latency_ms = max(int((time.perf_counter() - started) * 1000), 1)
-        input_tokens = sum(
-            getattr(resp.usage, "input_tokens", 0) or 0 for resp in result.raw_responses
-        )
-        output_tokens = sum(
-            getattr(resp.usage, "output_tokens", 0) or 0 for resp in result.raw_responses
-        )
         # stop_on_first_tool: the SDK already executed the tool, so its output
         # is the run's final output. The decision service records this instead
         # of re-executing the tool (re-execution would double the action).

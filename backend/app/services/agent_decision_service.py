@@ -33,6 +33,7 @@ from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
+from app.services.company_employment_service import CompanyEmploymentError
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
 # Delay (game minutes) before the next decision after various outcomes.
@@ -238,6 +239,7 @@ class DecisionService:
             agent_id,
             self._session_factory,
             memory_service=self.engine.memory_service,
+            home_id=self.engine.home_location_id(agent_id),
         )
 
         # M8: observation cache (T8-5) + world daily budget (T8) gates run
@@ -712,6 +714,95 @@ class DecisionService:
                 reason=arguments.get("reason"),
                 trace_id=trace_id,
             )
+        # M13 company tools through the company rule gate (R23-R25).
+        if result.tool_name in ("apply_job", "withdraw_job_application", "review_job_application"):
+            company_service = getattr(self.engine, "company_employment_service", None)
+            if company_service is None:
+                return False, None, "企业服务未初始化"
+            try:
+                if result.tool_name == "apply_job":
+                    payload = company_service.apply(
+                        world_id,
+                        str(arguments.get("opening_id") or ""),
+                        agent_id,
+                        str(arguments.get("reason") or ""),
+                    )
+                elif result.tool_name == "withdraw_job_application":
+                    payload = company_service.withdraw(
+                        world_id,
+                        str(arguments.get("application_id") or ""),
+                        agent_id,
+                    )
+                else:
+                    payload = company_service.review(
+                        world_id,
+                        str(arguments.get("application_id") or ""),
+                        agent_id,
+                        str(arguments.get("decision") or ""),
+                        str(arguments.get("reason") or ""),
+                    )
+                return True, payload, None
+            except CompanyEmploymentError as exc:
+                return False, None, str(exc)
+        # M13 shift + leave tools through the company rule gate (R27-R28).
+        if result.tool_name in (
+            "start_shift", "resign_job", "request_leave", "review_leave_request",
+            "terminate_employment", "pause_recruitment", "resume_recruitment",
+        ):
+            company_service = getattr(self.engine, "company_employment_service", None)
+            if company_service is None:
+                return False, None, "企业服务未初始化"
+            try:
+                if result.tool_name == "start_shift":
+                    payload = company_service.start_shift(
+                        world_id,
+                        str(arguments.get("shift_id") or ""),
+                        agent_id,
+                    )
+                elif result.tool_name == "resign_job":
+                    payload = company_service.resign(
+                        world_id,
+                        str(arguments.get("employment_id") or ""),
+                        agent_id,
+                        str(arguments.get("reason") or ""),
+                    )
+                elif result.tool_name == "request_leave":
+                    payload = company_service.request_leave(
+                        world_id,
+                        str(arguments.get("shift_id") or ""),
+                        agent_id,
+                        str(arguments.get("reason") or ""),
+                    )
+                elif result.tool_name == "review_leave_request":
+                    payload = company_service.review_leave_request(
+                        world_id,
+                        str(arguments.get("request_id") or ""),
+                        agent_id,
+                        str(arguments.get("decision") or ""),
+                        str(arguments.get("reason") or ""),
+                    )
+                elif result.tool_name == "terminate_employment":
+                    payload = company_service.terminate(
+                        world_id,
+                        str(arguments.get("employment_id") or ""),
+                        agent_id,
+                        str(arguments.get("reason") or ""),
+                    )
+                elif result.tool_name == "pause_recruitment":
+                    payload = company_service.pause_recruitment(
+                        world_id,
+                        str(arguments.get("position_id") or ""),
+                        agent_id,
+                    )
+                else:
+                    payload = company_service.resume_recruitment(
+                        world_id,
+                        str(arguments.get("position_id") or ""),
+                        agent_id,
+                    )
+                return True, payload, None
+            except CompanyEmploymentError as exc:
+                return False, None, str(exc)
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(

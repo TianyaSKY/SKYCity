@@ -8,14 +8,21 @@
 import type {
   ActionResponse,
   AgentDetail,
+  AgentEmploymentResponse,
+  CompanyEmployee,
+  CompanyInfo,
+  CompanyPosition,
+  CompanyTransaction,
   ConversationSummary,
   DecisionRecord,
   GodActionResult,
   GodActionRequest,
+  JobOpening,
   LocationDetail,
   MemoryItem,
   RelationshipItem,
   StocksResponse,
+  WorkShiftInfo,
   WorldListItem,
   WorldSnapshotPayload,
 } from '../types/world';
@@ -94,6 +101,58 @@ export function getSnapshot(id: string): Promise<WorldSnapshotPayload> {
 /** M10: 全部股票行情 + 全量持仓。 */
 export function getStocks(worldId: string): Promise<StocksResponse> {
   return requestJson<StocksResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stocks`);
+}
+
+/** M13: 世界内全部企业列表。 */
+export function getCompanies(worldId: string): Promise<CompanyInfo[]> {
+  return requestJson<CompanyInfo[]>(`/api/worlds/${encodeURIComponent(worldId)}/companies`);
+}
+
+/** M13: 单个企业详情。 */
+export function getCompany(worldId: string, companyId: string): Promise<CompanyInfo> {
+  return requestJson<CompanyInfo>(
+    `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}`,
+  );
+}
+
+/** M13: 企业的岗位列表（含已招满/空缺）。 */
+export function getCompanyPositions(worldId: string, companyId: string): Promise<CompanyPosition[]> {
+  return requestJson<CompanyPosition[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/positions`,
+  );
+}
+
+/** M13: 企业在职员工列表。 */
+export function getCompanyEmployees(worldId: string, companyId: string): Promise<CompanyEmployee[]> {
+  return requestJson<CompanyEmployee[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/employees`,
+  );
+}
+
+/** M13: 企业资金流水（最近的，新在前）。 */
+export function getCompanyTransactions(worldId: string, companyId: string): Promise<CompanyTransaction[]> {
+  return requestJson<CompanyTransaction[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/transactions`,
+  );
+}
+
+/** M13: 世界内全部公开招聘职位。 */
+export function getJobOpenings(worldId: string): Promise<JobOpening[]> {
+  return requestJson<JobOpening[]>(`/api/worlds/${encodeURIComponent(worldId)}/job-openings`);
+}
+
+/** M13: 一位居民的正式雇佣信息 + 最近班次。 */
+export function getAgentEmployment(worldId: string, agentId: string): Promise<AgentEmploymentResponse> {
+  return requestJson<AgentEmploymentResponse>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/employment`,
+  );
+}
+
+/** M13: 一位居民的班次记录（最近的，新在前）。 */
+export function getAgentShifts(worldId: string, agentId: string): Promise<WorkShiftInfo[]> {
+  return requestJson<WorkShiftInfo[]>(
+    `/api/worlds/${encodeURIComponent(worldId)}/agents/${encodeURIComponent(agentId)}/shifts`,
+  );
 }
 
 /** Pause the world clock. */

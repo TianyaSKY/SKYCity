@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
 from app.database.models.crops import Crop
+from app.database.models.companies import Company, CompanyTransaction, EmploymentContract
 from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
@@ -48,6 +49,7 @@ COMMAND_TYPES = {
     # M15 (R23): god can rewrite crop growth or clear a farm cell.
     "set_crop_stage",
     "remove_crop",
+    "inject_company_money",
 }
 VALID_WEATHERS = {"clear", "cloudy", "rain", "snow"}
 VALID_SPEEDS = {1, 2, 5, 10}
@@ -316,6 +318,78 @@ class GodActionService:
             trace_id,
         )
         return result, [announce, money]
+
+    def _cmd_inject_company_money(
+        self, session, runtime, world, command_id, trace_id, world_time,
+        target_id, parameters, reason,
+    ):
+        """M13: 上帝注资企业账户；资金足够时立即补发欠薪（R29/R32）."""
+        amount = int(parameters.get("amount") or 0)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail=MSG_AMOUNT_REQUIRED)
+        company = session.get(
+            Company, {"world_id": world.world_id, "company_id": target_id}
+        )
+        if company is None:
+            raise HTTPException(status_code=404, detail="企业不存在")
+        company.money += amount
+        note = reason or "神谕注资"
+        session.add(
+            CompanyTransaction(
+                world_id=world.world_id,
+                company_id=company.company_id,
+                type="god_injection",
+                amount=amount,
+                balance_after=company.money,
+                reference_type="company",
+                reference_id=company.company_id,
+                reason=f"神谕注资：{note}",
+                world_time=world_time,
+                trace_id=trace_id,
+            )
+        )
+        changed = runtime.event_bus.publish(
+            session, world_time, "company_money_changed",
+            {
+                "company_id": company.company_id,
+                "amount": amount,
+                "balance": company.money,
+                "reason": f"神谕注资：{note}",
+            },
+            trace_id,
+        )
+        # Repay outstanding unpaid wages the company can now afford.
+        repaid_total = 0
+        company_service = getattr(self.engine, "company_employment_service", None)
+        if company_service is not None:
+            contracts = session.scalars(
+                select(EmploymentContract).where(
+                    EmploymentContract.world_id == world.world_id,
+                    EmploymentContract.company_id == company.company_id,
+                    EmploymentContract.status.in_(("active", "on_leave")),
+                    EmploymentContract.unpaid_wage > 0,
+                )
+            ).all()
+            for contract in contracts:
+                agent = session.get(
+                    Agent, {"world_id": world.world_id, "agent_id": contract.agent_id}
+                )
+                if agent is None:
+                    continue
+                repaid_total += company_service.payroll.repay_contract(
+                    session, world, contract, company, agent, trace_id
+                )
+        result = {
+            "company_id": company.company_id,
+            "amount": amount,
+            "balance": company.money,
+            "repaid_total": repaid_total,
+        }
+        announce = self._announce(
+            session, runtime, "inject_company_money", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        return result, [announce, changed]
 
     def _cmd_deduct_money(
         self, session, runtime, world, command_id, trace_id, world_time,

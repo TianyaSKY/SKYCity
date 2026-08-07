@@ -712,3 +712,157 @@ export interface DailyReflectionPayload {
   agent_id: string;
   summary: string;
 }
+
+/** One company (GET .../companies entry, M13). */
+export interface CompanyInfo {
+  company_id: string;
+  name: string;
+  company_type: string;
+  location_id: string;
+  manager_agent_id: string | null;
+  money: number;
+  status: string;
+  employee_count: number;
+  open_vacancies: number;
+  unpaid_wage_total: number;
+}
+
+/** One position of a company (GET .../companies/{id}/positions entry, M13). */
+export interface CompanyPosition {
+  position_id: string;
+  company_id: string;
+  job_id: string;
+  job_name: string;
+  title: string;
+  description: string;
+  capacity: number;
+  filled: number;
+  vacancies: number;
+  wage_per_shift: number;
+  shift_start_minute: number;
+  shift_end_minute: number;
+  working_days: number[];
+  status: string;
+}
+
+/** One active employment contract of a company (GET .../employees entry, M13). */
+export interface CompanyEmployee {
+  employment_id: string;
+  company_id: string;
+  position_id: string;
+  job_id: string;
+  agent_id: string;
+  agent_name: string;
+  status: string;
+  hired_at: number;
+  started_at: number;
+  ended_at: number | null;
+  wage_per_shift: number;
+  attendance_score: number;
+  performance_score: number;
+  completed_shifts: number;
+  late_shifts: number;
+  absent_shifts: number;
+  unpaid_wage: number;
+  termination_reason: string | null;
+}
+
+/** One ledger row of a company (GET .../transactions entry, M13). */
+export interface CompanyTransaction {
+  transaction_id: string;
+  company_id: string;
+  type: string;
+  amount: number;
+  balance_after: number;
+  related_agent_id: string | null;
+  related_item_id: string | null;
+  quantity: number | null;
+  reference_type: string | null;
+  reference_id: string | null;
+  reason: string;
+  world_time: number;
+  trace_id: string;
+}
+
+/** One open job posting (GET .../job-openings entry, M13). */
+export interface JobOpening {
+  opening_id: string;
+  company_id: string;
+  company_name: string;
+  position_id: string;
+  title: string;
+  description: string;
+  location_id: string;
+  vacancies: number;
+  wage_per_shift: number;
+  shift_start_minute: number;
+  shift_end_minute: number;
+}
+
+/** Employment info of one agent (GET .../agents/{id}/employment, M13). */
+export interface EmploymentInfo {
+  employment_id: string;
+  company_id: string;
+  position_id: string;
+  job_id: string;
+  agent_id: string;
+  status: string;
+  hired_at: number;
+  started_at: number;
+  ended_at: number | null;
+  wage_per_shift: number;
+  attendance_score: number;
+  performance_score: number;
+  completed_shifts: number;
+  late_shifts: number;
+  absent_shifts: number;
+  unpaid_wage: number;
+  termination_reason: string | null;
+}
+
+/** One work shift of an agent (GET .../agents/{id}/shifts entry, M13). */
+export interface WorkShiftInfo {
+  shift_id: string;
+  employment_id: string;
+  company_id: string;
+  position_id: string;
+  agent_id: string;
+  scheduled_start: number;
+  scheduled_end: number;
+  actual_start: number | null;
+  actual_end: number | null;
+  status: string;
+  late_minutes: number;
+  worked_minutes: number;
+  wage_due: number;
+  wage_paid: number;
+  payroll_status: string;
+  output_json: { item_id: string; quantity: number }[] | null;
+  absence_reason: string | null;
+}
+
+/** Response of GET .../agents/{id}/employment (M13): contract + recent shifts. */
+export interface AgentEmploymentResponse {
+  employment: EmploymentInfo | null;
+  shifts: WorkShiftInfo[];
+}
+
+/**
+ * Latest shift of an agent as tracked from WS events (display-only, M13).
+ * The backend serializes a formal shift as action_type "formal_work" which
+ * is not part of the snapshot action, so the frontend keeps this light cache
+ * to drive the map marker, next-shift hints and attendance stats.
+ */
+export interface AgentShiftInfo {
+  shift_id: string;
+  employment_id: string;
+  company_id: string;
+  position_id: string;
+  agent_id: string;
+  scheduled_start: number;
+  scheduled_end: number;
+  status: string;
+  late_minutes?: number;
+  worked_minutes?: number;
+  products?: { item_id: string; quantity: number }[];
+}

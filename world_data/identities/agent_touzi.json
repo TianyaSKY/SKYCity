@@ -14,5 +14,6 @@
     "agreeableness": 0.7,
     "emotional_stability": 0.8
   },
-  "initial_money": 500
+  "initial_money": 500,
+  "spawn": { "col": 33, "row": 20, "direction": "down" }
 }

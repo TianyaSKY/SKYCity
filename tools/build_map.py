@@ -12,6 +12,11 @@ Layers (bottom -> top): ground, ground_detail, buildings, decorations_low,
 foreground, collision, navigation, then object layers locations,
 interactables, spawn_points.
 
+Agent positions are NOT hardcoded here: spawn_points and house locations are
+derived from the character cards in world_data/identities/*.json (the single
+source of truth — identity + spawn + optional home). Adding an agent = adding
+one card and re-running this script.
+
 Run:  uv run --with pillow python tools/build_map.py
 """
 
@@ -66,6 +71,27 @@ def gid(tile_id: int) -> int:
 MARKER = 133  # gid of the marker tile in markers.tsj (firstgid=133)
 
 
+# ---- Character cards (single source of truth for agents) -------------------
+# world_data/identities/agent_*.json: identity fields + spawn (col/row/
+# direction) + optional home (location_id/name/col/row). The map's house
+# buildings and spawn_points layer are DERIVED from these cards, so the map
+# can never drift from the character roster.
+
+CHARACTER_DIR = ROOT / "world_data" / "identities"
+
+
+def load_characters() -> list[tuple[str, dict]]:
+    """Return (agent_id, card) pairs, sorted by agent_id (file name)."""
+    cards = []
+    for path in sorted(CHARACTER_DIR.glob("agent_*.json")):
+        with path.open("r", encoding="utf-8") as handle:
+            cards.append((path.stem, json.load(handle)))
+    return cards
+
+
+CARDS = load_characters()
+
+
 # ---- Layout -----------------------------------------------------------------
 # Row/col coordinates in tiles. Cells are (col, row).
 
@@ -91,16 +117,16 @@ FENCE_BOTTOM_ROW = 32                         # cols 43..51
 # are gates (walkable) instead of fence posts, or the farm is unreachable.
 FENCE_GATE_CELLS = {(46, 25), (47, 25), (46, 32), (47, 32)}
 
-BUILDINGS: dict[str, tuple[int, int]] = {
+# Public buildings (shop / farm / town hall) and house buildings derived from
+# the character cards below (merged in the module block after the helpers).
+BUILDINGS: dict[str, tuple[int, int, int]] = {
     # location_id -> (col, row, tile)
     "village_shop": (23, 12, HOUSE_SHOP),
     "village_farm": (47, 24, BARN),
     "town_hall": (28, 8, HOUSE_TOPS[0]),
     "town_hall_2": (29, 8, HOUSE_TOPS[1]),
-    "linxia_home": (18, 26, HOUSE_FRONTS[0]),
-    "zhangming_home": (40, 10, HOUSE_FRONTS[1]),
-    "chenyu_home": (12, 18, HOUSE_FRONTS[2]),
-    "wangfang_home": (48, 34, HOUSE_FRONTS[3]),
+    # 小镇旅店: on the main road at the plaza's east edge; door at (37, 21).
+    "village_hotel": (37, 20, HOUSE_SHOP),
 }
 
 LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
@@ -108,10 +134,7 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "village_farm": (47, 24),
     "village_plaza": (32, 20),
     "town_hall": (29, 8),
-    "linxia_home": (18, 26),
-    "zhangming_home": (40, 10),
-    "chenyu_home": (12, 18),
-    "wangfang_home": (48, 34),
+    "village_hotel": (37, 20),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -131,31 +154,64 @@ LOCATIONS: dict[str, dict] = {
         "name": "小镇政务厅", "location_type": "office", "capacity": 10,
         "open_hour": 9, "close_hour": 17,
     },
-    "linxia_home": {
-        "name": "林夏的家", "location_type": "house", "capacity": 4,
-        "open_hour": 0, "close_hour": 24,
-    },
-    "zhangming_home": {
-        "name": "张明的家", "location_type": "house", "capacity": 4,
-        "open_hour": 0, "close_hour": 24,
-    },
-    "chenyu_home": {
-        "name": "陈宇的家", "location_type": "house", "capacity": 4,
-        "open_hour": 0, "close_hour": 24,
-    },
-    "wangfang_home": {
-        "name": "王芳的家", "location_type": "house", "capacity": 4,
+    "village_hotel": {
+        "name": "小镇旅店", "location_type": "hotel", "capacity": 10,
         "open_hour": 0, "close_hour": 24,
     },
 }
 
-SPAWN_POINTS: dict[str, dict] = {
-    "spawn_linxia": {"agent_id": "agent_linxia", "col": 18, "row": 27, "direction": "down"},
-    "spawn_zhangming": {"agent_id": "agent_zhangming", "col": 40, "row": 11, "direction": "down"},
-    "spawn_chenyu": {"agent_id": "agent_chenyu", "col": 12, "row": 19, "direction": "down"},
-    "spawn_wangfang": {"agent_id": "agent_wangfang", "col": 48, "row": 35, "direction": "down"},
-    "spawn_laozhang": {"agent_id": "agent_laozhang", "col": 30, "row": 9, "direction": "down"},
+# House sprite per home location (art choice, not agent data). New homes not
+# listed here fall back to cycling HOUSE_FRONTS.
+HOME_TILES: dict[str, int] = {
+    "linxia_home": HOUSE_FRONTS[0],
+    "zhangming_home": HOUSE_FRONTS[1],
+    "chenyu_home": HOUSE_FRONTS[2],
+    "wangfang_home": HOUSE_FRONTS[3],
 }
+
+
+def _home_entries() -> tuple[dict, dict, dict]:
+    """Derive house buildings / anchors / locations from character cards."""
+    buildings: dict[str, tuple[int, int, int]] = {}
+    anchors: dict[str, tuple[int, int]] = {}
+    locations: dict[str, dict] = {}
+    for _agent_id, card in CARDS:
+        home = card.get("home")
+        if not home:
+            continue
+        loc_id = str(home["location_id"])
+        col, row = int(home["col"]), int(home["row"])
+        tile = HOME_TILES.get(loc_id, HOUSE_FRONTS[len(HOME_TILES) % len(HOUSE_FRONTS)])
+        buildings[loc_id] = (col, row, tile)
+        anchors[loc_id] = (col, row)
+        locations[loc_id] = {
+            "name": str(home["name"]), "location_type": "house", "capacity": 4,
+            "open_hour": 0, "close_hour": 24,
+        }
+    return buildings, anchors, locations
+
+
+_HOME_BUILDINGS, _HOME_ANCHORS, _HOME_LOCATIONS = _home_entries()
+BUILDINGS = {**BUILDINGS, **_HOME_BUILDINGS}
+LOCATION_ANCHORS = {**LOCATION_ANCHORS, **_HOME_ANCHORS}
+LOCATIONS = {**LOCATIONS, **_HOME_LOCATIONS}
+
+
+def _spawn_points() -> dict[str, dict]:
+    """Derive the spawn_points layer from the character cards."""
+    spawns: dict[str, dict] = {}
+    for agent_id, card in CARDS:
+        spawn = card["spawn"]
+        spawns[f"spawn_{agent_id.removeprefix('agent_')}"] = {
+            "agent_id": agent_id,
+            "col": int(spawn["col"]),
+            "row": int(spawn["row"]),
+            "direction": str(spawn.get("direction") or "down"),
+        }
+    return spawns
+
+
+SPAWN_POINTS = _spawn_points()
 
 INTERACTABLES: dict[str, dict] = {
     "shop_counter": {"object_type": "store_counter", "location_id": "village_shop",
@@ -554,9 +610,18 @@ def main() -> None:
     loc_layer = next(l for l in tmj["layers"] if l["name"] == "locations")
     loc_ids = {o["name"] for o in loc_layer["objects"]}
     assert {"village_shop", "village_farm", "village_plaza",
-            "town_hall", "linxia_home"} <= loc_ids
+            "town_hall", "village_hotel", "linxia_home"} <= loc_ids
+    card_homes = {c["home"]["location_id"] for _, c in CARDS if c.get("home")}
+    assert card_homes <= loc_ids, f"missing home locations: {card_homes - loc_ids}"
     spawn_layer = next(l for l in tmj["layers"] if l["name"] == "spawn_points")
-    assert len(spawn_layer["objects"]) == 5
+    assert len(spawn_layer["objects"]) == len(CARDS), (
+        "spawn_points layer must have one entry per character card"
+    )
+    # every card id must match its file name (loader enforces this too)
+    for agent_id, card in CARDS:
+        assert card.get("id") == agent_id, (
+            f"角色卡 id 与文件名不一致: {card.get('id')!r} != {agent_id!r}"
+        )
     int_layer = next(l for l in tmj["layers"] if l["name"] == "interactables")
     assert len(int_layer["objects"]) == 5
     collision = next(l for l in tmj["layers"] if l["name"] == "collision")

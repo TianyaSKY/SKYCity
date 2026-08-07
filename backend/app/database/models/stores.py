@@ -23,6 +23,8 @@ class Store(Base):
     )
     store_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     location_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # M13: owning company (nullable for pre-company worlds / casual shops).
+    company_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Store(world_id={self.world_id!r}, store_id={self.store_id!r})"

@@ -17,7 +17,7 @@ from app.agents.providers.fake_provider import DEFAULT_SCRIPTS, FakeDecisionProv
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
 from app.database.models.inventories import Inventory
-from app.database.models.jobs import Employment
+from app.database.models.jobs import WorkHistory
 from app.database.models.llm_runs import LLMRun
 from app.database.models.stores import StoreProduct
 from app.database.models.transactions import Transaction
@@ -341,7 +341,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
     session = SessionLocal()
     try:
         employment = session.get(
-            Employment,
+            WorkHistory,
             {"world_id": world_id, "agent_id": "agent_linxia", "job_id": "job_farm_field"},
         )
         assert employment is not None
@@ -863,7 +863,7 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     session = SessionLocal()
     try:
         employment = session.get(
-            Employment,
+            WorkHistory,
             {"world_id": world_id, "agent_id": "agent_linxia", "job_id": "job_farm_field"},
         )
         assert employment is not None

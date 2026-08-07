@@ -15,6 +15,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.companies import (
+    Company,
+    EmploymentContract,
+    JobApplication,
+    JobOpening,
+    LeaveRequest,
+    Position,
+    WorkShift,
+)
 from app.database.models.conversations import ConversationMessage
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
@@ -26,7 +35,7 @@ from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.worlds import World
 from app.services.seed_loader import load_blueprints, load_crops
-from app.world_engine.engine import is_location_open
+from app.world_engine.engine import HOTEL_NIGHTLY_FEE, is_location_open
 
 MAX_OBSERVATION_CHARS = 2000
 
@@ -97,12 +106,16 @@ def build_observation(
     agent_id: str,
     session_factory: sessionmaker[Session],
     memory_service: Any = None,
+    home_id: str | None = None,
 ) -> str:
     """Compose the observation text for one agent decision.
 
     ``memory_service`` (M6) enables the real 【相关记忆】 section: up to 4
     retrieved memories weighted by entity/keyword/importance/recency. When
     None (no memory system wired) the legacy stub is emitted instead.
+
+    ``home_id`` (R14 sleep steering): the agent's home location id from its
+    character card, or None for homeless agents (sleeping requires the hotel).
     """
     session = session_factory()
     try:
@@ -157,10 +170,22 @@ def build_observation(
             f"【世界现状】第{world_time // 1440 + 1}天 {_time_word(world_time)} "
             f"{_format_clock(world_time)} 天气: {weather}"
         )
+        if home_id is not None and home_id in location_by_id:
+            home_name = location_by_id[home_id].name
+        elif home_id is not None:
+            home_name = home_id  # card home missing from the map: treat as hotel
+            home_id = None
+        else:
+            home_name = None
+        home_text = (
+            f" 家: {home_name}"
+            if home_id is not None
+            else f" 无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）"
+        )
         lines.append(
-            f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
+f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here}（格 {agent.col},{agent.row}）"
-            f" 当前行动: {_action_text(agent, world_time)}"
+            f" 当前行动: {_action_text(agent, world_time)}{home_text}"
         )
 
         # M5: the agent's backpack, ordered by item id.
@@ -239,7 +264,11 @@ def build_observation(
         lines.append("【可做的事】")
         lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
         lines.append("- wait(minutes, reason): 原地等待 1~240 分钟")
-        lines.append("- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 20 点精力（比 wait 快）")
+        lines.append(
+            "- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 40 点精力、20 点心情"
+            "（比 wait 快）；有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)"
+            f"（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
+        )
         if same_location:
             lines.append(
                 "- talk(target_agent_id, message, intent): 与【可见人物】中的人对话，"
@@ -370,6 +399,229 @@ def build_observation(
             )
         lines.append("- sell_stock(stock_id, reason, shares=1): 卖出持股变现（不能超卖）")
         lines.append("- 股价每小时随商店/农场经营变动，每日按业绩分红（分红到账看 money_changed）")
+
+        # M13: public job board (R23) + own pending applications (R24). The
+        # board is village news, visible everywhere (first version).
+        openings = session.execute(
+            select(JobOpening, Position, Company)
+            .join(
+                Position,
+                (Position.world_id == JobOpening.world_id)
+                & (Position.position_id == JobOpening.position_id),
+            )
+            .join(
+                Company,
+                (Company.world_id == JobOpening.world_id)
+                & (Company.company_id == JobOpening.company_id),
+            )
+            .where(JobOpening.world_id == world_id, JobOpening.status == "open")
+            .order_by(Company.company_id, Position.position_id)
+        ).all()
+        if openings:
+            lines.append("【公开招聘】")
+            for opening, position, company in openings[:6]:
+                lines.append(
+                    f"- {company.name}：{position.title}，{position.wage_per_shift}金币/班，"
+                    f"{_format_clock(position.shift_start_minute)}–{_format_clock(position.shift_end_minute)}，"
+                    f"剩余{opening.vacancies}个名额 —— "
+                    f"apply_job({opening.opening_id}, reason)"
+                )
+            lines.append(
+                "- apply_job(opening_id, reason): 申请公开招聘中的职位"
+                "（opening_id 用上面括号里的完整 id；录用与否由经理决定）"
+            )
+        my_applications = session.scalars(
+            select(JobApplication).where(
+                JobApplication.world_id == world_id,
+                JobApplication.agent_id == agent.agent_id,
+                JobApplication.status == "submitted",
+            )
+        ).all()
+        if my_applications:
+            lines.append("【我的申请】")
+            for row in my_applications:
+                lines.append(
+                    f"- {row.company_id}：等待审核 —— "
+                    f"withdraw_job_application({row.application_id}, reason)"
+                )
+            lines.append(
+                "- withdraw_job_application(application_id, reason): 撤回我的求职申请"
+            )
+        # M13: manager desk (R25): own companies, pending reviews.
+        managed = session.scalars(
+            select(Company).where(
+                Company.world_id == world_id,
+                Company.manager_agent_id == agent.agent_id,
+            )
+        ).all()
+        if managed:
+            lines.append("【企业经营】")
+            managed_ids = [company.company_id for company in managed]
+            pending_leaves = list(session.scalars(
+                select(LeaveRequest).where(
+                    LeaveRequest.world_id == world_id,
+                    LeaveRequest.company_id.in_(managed_ids),
+                    LeaveRequest.status == "pending",
+                )
+            ).all())
+            for company in managed:
+                employee_count = int(session.scalar(
+                    select(func.count()).select_from(EmploymentContract).where(
+                        EmploymentContract.world_id == world_id,
+                        EmploymentContract.company_id == company.company_id,
+                        EmploymentContract.status.in_(("active", "on_leave")),
+                    )
+                ) or 0)
+                pending = list(session.scalars(
+                    select(JobApplication).where(
+                        JobApplication.world_id == world_id,
+                        JobApplication.company_id == company.company_id,
+                        JobApplication.status == "submitted",
+                    )
+                ).all())
+                title_by_position = {
+                    position.position_id: position.title
+                    for position in session.scalars(
+                        select(Position).where(
+                            Position.world_id == world_id,
+                            Position.company_id == company.company_id,
+                        )
+                    ).all()
+                }
+                lines.append(
+                    f"- {company.name}（{company.company_id}）：余额{company.money}金币，"
+                    f"员工{employee_count}人，欠薪{company.unpaid_wage_total}金币，"
+                    f"待审核申请{len(pending)}条，待审批请假"
+                    f"{sum(1 for r in pending_leaves if r.company_id == company.company_id)}条"
+                )
+                if pending:
+                    lines.append("  【待审核求职申请】")
+                    for row in pending[:3]:
+                        applicant = session.get(
+                            Agent,
+                            {"world_id": world_id, "agent_id": row.agent_id},
+                        )
+                        applicant_name = applicant.name if applicant is not None else row.agent_id
+                        lines.append(
+                            f"  - {applicant_name}（{row.agent_id}）申请"
+                            f"{title_by_position.get(row.position_id, row.position_id)}："
+                            f"{row.applicant_reason} —— "
+                            f"review_job_application({row.application_id}, accept|reject, reason)"
+                        )
+                    lines.append(
+                        "- review_job_application(application_id, accept|reject, reason): "
+                        "审核求职申请（仅企业经理）"
+                    )
+            if pending_leaves:
+                lines.append("  【待审批请假】")
+                for request in pending_leaves[:3]:
+                    applicant = session.get(
+                        Agent, {"world_id": world_id, "agent_id": request.agent_id}
+                    )
+                    applicant_name = applicant.name if applicant is not None else request.agent_id
+                    lines.append(
+                        f"  - {applicant_name}（{request.agent_id}）：{request.reason} —— "
+                        f"review_leave_request({request.request_id}, approve|reject, reason)"
+                    )
+                lines.append(
+                    "- review_leave_request(request_id, approve|reject, reason): "
+                    "审批请假（仅企业经理；准假不判缺勤也不发工资）"
+                )
+            position_rows = session.scalars(
+                select(Position).where(
+                    Position.world_id == world_id,
+                    Position.company_id.in_(managed_ids),
+                )
+            ).all()
+            for position in position_rows:
+                lines.append(
+                    f"- {'pause' if position.status == 'active' else 'resume'}_recruitment("
+                    f"{position.position_id}, reason): "
+                    f"{'暂停' if position.status == 'active' else '恢复'}{position.title}招聘"
+                )
+            employee_contracts = session.scalars(
+                select(EmploymentContract).where(
+                    EmploymentContract.world_id == world_id,
+                    EmploymentContract.company_id.in_(managed_ids),
+                    EmploymentContract.status.in_(("active", "on_leave")),
+                )
+            ).all()
+            for contract_row in employee_contracts[:3]:
+                employee = session.get(
+                    Agent,
+                    {"world_id": world_id, "agent_id": contract_row.agent_id},
+                )
+                employee_name = employee.name if employee is not None else contract_row.agent_id
+                lines.append(
+                    f"- terminate_employment({contract_row.employment_id}, reason): "
+                    f"解雇 {employee_name}（{contract_row.agent_id}）"
+                )
+            lines.append(
+                "- pause_recruitment/resume_recruitment/terminate_employment 仅企业经理可用；"
+                "解雇不消除欠薪"
+            )
+
+        # M13: employee card (R27/R31): own contract + today's shift.
+        contract = session.scalar(
+            select(EmploymentContract).where(
+                EmploymentContract.world_id == world_id,
+                EmploymentContract.agent_id == agent.agent_id,
+                EmploymentContract.status.in_(("active", "on_leave")),
+            )
+        )
+        if contract is not None:
+            company = session.get(
+                Company, {"world_id": world_id, "company_id": contract.company_id}
+            )
+            position = session.get(
+                Position, {"world_id": world_id, "position_id": contract.position_id}
+            )
+            company_name = company.name if company is not None else contract.company_id
+            position_title = position.title if position is not None else contract.position_id
+            lines.append("【正式职业】")
+            lines.append(
+                f"- {company_name}：{position_title}，每班{contract.wage_per_shift}金币，"
+                f"出勤评分{contract.attendance_score:.0f}，"
+                f"未发工资{contract.unpaid_wage}金币"
+            )
+            if contract.unpaid_wage > 0:
+                lines.append(f"  企业尚欠你{contract.unpaid_wage}金币工资。")
+            upcoming_shift = session.scalar(
+                select(WorkShift).where(
+                    WorkShift.world_id == world_id,
+                    WorkShift.employment_id == contract.employment_id,
+                    WorkShift.scheduled_start >= world_time - 120,
+                    WorkShift.status.in_(("scheduled", "in_progress", "late")),
+                )
+                .order_by(WorkShift.scheduled_start)
+                .limit(1)
+            )
+            if upcoming_shift is not None:
+                minutes_until = max(upcoming_shift.scheduled_start - world_time, 0)
+                status_text = (
+                    "尚未签到"
+                    if upcoming_shift.status == "scheduled"
+                    else "已签到（工作中）"
+                )
+                lines.append("【今天班次】")
+                lines.append(
+                    f"- {_format_clock(upcoming_shift.scheduled_start)}–"
+                    f"{_format_clock(upcoming_shift.scheduled_end)}，状态：{status_text}，"
+                    f"距开始{minutes_until}分钟，地点{company_name}（{company.location_id}）"
+                )
+                if upcoming_shift.status == "scheduled":
+                    lines.append(
+                        f"- start_shift({upcoming_shift.shift_id}, reason): 到达工作地点后签到"
+                        "开始班次（可提前30分钟，迟到上限120分钟）"
+                    )
+                    lines.append(
+                        f"- request_leave({upcoming_shift.shift_id}, reason): 无法到岗时请假"
+                        "（经理审批，准假不判缺勤）"
+                    )
+            lines.append(
+                f"- resign_job({contract.employment_id}, reason): 辞去当前正式工作"
+                "（未来班次取消、岗位重开、欠薪保留）"
+            )
 
         lines.append("【上次工具结果】")
         if last_run is None:

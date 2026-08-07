@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     openai_base_url: str | None = None
     # M6: stronger model used for the no-tool daily reflection prompt.
     llm_reflect_model: str = "gpt-4o-mini"
+    # Thinking models (DeepSeek v4, qwen3.8-max, ...) reject a forced tool
+    # choice. "required" keeps the one-action-per-decision contract (default);
+    # "auto"/"none" let the model reply in text, which the provider degrades
+    # into a wait action so the world keeps ticking.
+    llm_tool_choice: str = "required"  # "required" | "auto" | "none"
     # Third-party OpenAI-compatible endpoints usually only implement
     # /chat/completions; the SDK's default Responses API would 404. Keep
     # chat completions unless the endpoint explicitly supports /responses.
@@ -54,6 +59,16 @@ class Settings(BaseSettings):
         """Parse a comma-separated origin list from env vars (e.g. CORS_ORIGINS)."""
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("llm_tool_choice")
+    @classmethod
+    def _validate_llm_tool_choice(cls, value: str) -> str:
+        """Only SDK-supported tool_choice values are meaningful here."""
+        if value not in {"required", "auto", "none"}:
+            raise ValueError(
+                f"llm_tool_choice must be required|auto|none, got {value!r}"
+            )
         return value
 
 

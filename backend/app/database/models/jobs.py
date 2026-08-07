@@ -30,8 +30,14 @@ class Job(Base):
         return f"Job(world_id={self.world_id!r}, job_id={self.job_id!r})"
 
 
-class Employment(Base):
-    """Cumulative work history for one (agent, job) pair (R10)."""
+class WorkHistory(Base):
+    """Cumulative casual-work history for one (agent, job) pair (R10).
+
+    Renamed from ``Employment`` (M13, R22): this is NOT a formal labour
+    contract — formal jobs live in ``employment_contracts``. The table name
+    ``employments`` is kept for backward compatibility with existing DBs and
+    save files.
+    """
 
     __tablename__ = "employments"
     __table_args__ = (
@@ -54,4 +60,4 @@ class Employment(Base):
     total_earned: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return f"Employment(world_id={self.world_id!r}, agent={self.agent_id!r}, job={self.job_id!r})"
+        return f"WorkHistory(world_id={self.world_id!r}, agent={self.agent_id!r}, job={self.job_id!r})"

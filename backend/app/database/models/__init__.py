@@ -5,12 +5,23 @@ autogenerate and create_all see the full schema.
 """
 
 from app.database.models.agents import Agent
+from app.database.models.companies import (
+    Company,
+    CompanyInventory,
+    CompanyTransaction,
+    EmploymentContract,
+    JobApplication,
+    JobOpening,
+    LeaveRequest,
+    Position,
+    WorkShift,
+)
 from app.database.models.conversations import Conversation, ConversationMessage
 from app.database.models.crops import Crop
 from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
-from app.database.models.jobs import Employment, Job
+from app.database.models.jobs import Job, WorkHistory
 from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.memories import Memory
@@ -28,16 +39,23 @@ from app.database.session import Base
 __all__ = [
     "Agent",
     "Base",
+    "Company",
+    "CompanyInventory",
+    "CompanyTransaction",
     "Conversation",
     "ConversationMessage",
     "Crop",
-    "Employment",
+    "EmploymentContract",
     "GodAction",
     "Inventory",
     "Item",
     "Job",
+    "JobApplication",
+    "JobOpening",
     "LLMRun",
+    "LeaveRequest",
     "Memory",
+    "Position",
     "Relationship",
     "Save",
     "ScheduledAction",
@@ -47,6 +65,8 @@ __all__ = [
     "StockHolding",
     "TileStructure",
     "Transaction",
+    "WorkHistory",
+    "WorkShift",
     "World",
     "WorldEvent",
     "WorldLocation",

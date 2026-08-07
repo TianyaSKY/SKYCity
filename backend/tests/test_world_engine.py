@@ -15,18 +15,23 @@ from sqlalchemy import select
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
 from app.database.models.locations import WorldLocation
+from app.database.models.scheduled_actions import ScheduledAction
+from app.database.models.transactions import Transaction
 from app.database.session import SessionLocal
 from app.services.action_execution_service import (
     MSG_BUSY,
+    MSG_HOTEL_UNAFFORDABLE,
     MSG_NO_DESTINATION,
     MSG_NO_PATH,
     MSG_PAUSED,
+    MSG_SLEEP_NEED_HOME,
+    MSG_SLEEP_NEED_HOTEL,
     ActionExecutionService,
     find_path,
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.clock import WorldClock
-from app.world_engine.engine import WorldEngine
+from app.world_engine.engine import HOTEL_NIGHTLY_FEE, WorldEngine
 
 SHOP_ANCHOR = (23, 12)
 LINXIA_SPAWN = (18, 27)
@@ -52,14 +57,20 @@ def engine(world_config: ParsedWorldConfig) -> WorldEngine:
 def advance_minutes(engine: WorldEngine, world_id: str, minutes: int) -> None:
     """Advance a world's clock by ``minutes`` game minutes deterministically.
 
-    Each loop iteration deposits 0.9 minutes directly then lets the engine's
-    own 0.1s tick cross the remaining boundary, so the scheduler fires exactly
-    once per minute.
+    Each loop iteration resets the clock's fractional accumulator, deposits
+    0.9 minutes directly, then lets the engine's own 0.1s tick cross exactly
+    one boundary. Resetting the accumulator is required because TestClient
+    tests run the engine's live background tick loop, which deposits 0.1s into
+    the same accumulator concurrently — without the reset, a boundary can be
+    crossed by the direct 0.9 deposit and never processed by the scheduler
+    (the engine's own 0.1 tick then finds nothing left to cross), which made
+    move/work completions flaky on the app engine.
     """
     runtime = engine.get_runtime(world_id)
     assert runtime is not None
     target = runtime.clock.world_time + minutes
     while runtime.clock.world_time < target:
+        runtime.clock._accumulator = 0.0
         runtime.clock.tick(0.9)
         engine._tick_runtime(runtime)
 
@@ -68,6 +79,35 @@ def agent_row(engine: WorldEngine, world_id: str, agent_id: str):
     session = SessionLocal()
     try:
         return session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+    finally:
+        session.close()
+
+
+def place_agent(
+    engine: WorldEngine, world_id: str, agent_id: str, location_id: str, col: int, row: int
+) -> None:
+    """Move an agent onto a location anchor (test shortcut)."""
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+        assert agent is not None
+        agent.location_id = location_id
+        agent.col = col
+        agent.row = row
+        session.commit()
+    finally:
+        session.close()
+
+
+def set_agent(engine: WorldEngine, world_id: str, agent_id: str, **fields) -> None:
+    """Patch live agent state fields (test shortcut)."""
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+        assert agent is not None
+        for key, value in fields.items():
+            setattr(agent, key, value)
+        session.commit()
     finally:
         session.close()
 
@@ -153,9 +193,10 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     assert by_id["agent_linxia"].money == 50
     assert by_id["agent_linxia"].action_type is None
 
-    assert len(locations) == 8
+    assert len(locations) == 9
     loc_ids = {l.location_id for l in locations}
     assert "village_shop" in loc_ids and "village_plaza" in loc_ids
+    assert "village_hotel" in loc_ids
 
 
 # --------------------------------------------------------------------------- #
@@ -458,7 +499,7 @@ def test_wait_is_interruptible_by_move(engine: WorldEngine) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Sleep lifecycle (R1 interruptible, R14 +20/h)
+# Sleep lifecycle (R1 interruptible, R14 +40/h, sleep-place rule)
 # --------------------------------------------------------------------------- #
 
 
@@ -479,7 +520,7 @@ def test_sleep_completes(engine: WorldEngine) -> None:
 
 
 def test_sleep_recovers_energy_faster_than_wait(engine: WorldEngine) -> None:
-    """R14: sleep +20/h (net +19 after the -1 base), wait only +5/h."""
+    """R14: sleep +40/h (net +39 after the -1 base), wait only +5/h."""
     runtime = engine.create_world()
     session = SessionLocal()
     try:
@@ -497,7 +538,7 @@ def test_sleep_recovers_energy_faster_than_wait(engine: WorldEngine) -> None:
     assert ok is True, reason
     advance_minutes(engine, runtime.world_id, 121)  # crosses >= 2 hour boundaries
     row = agent_row(engine, runtime.world_id, "agent_linxia")
-    assert row.energy >= 30 + 2 * 19, f"sleep recovered too little: {row.energy}"
+    assert row.energy == 100, f"sleep should cap energy at 100: {row.energy}"
 
 
 def test_sleep_is_interruptible_by_move(engine: WorldEngine) -> None:
@@ -527,6 +568,159 @@ def test_sleep_rejected_while_moving(engine: WorldEngine) -> None:
     )
     assert ok is False
     assert reason == MSG_BUSY
+
+
+def test_sleep_rejected_away_from_home(engine: WorldEngine) -> None:
+    """R14 sleep-place: an agent with a home may only sleep at that home."""
+    runtime = engine.create_world()
+    place_agent(engine, runtime.world_id, "agent_linxia", "village_shop", 23, 12)
+
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_linxia", minutes=120, reason="困了"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_SLEEP_NEED_HOME
+    row = agent_row(engine, runtime.world_id, "agent_linxia")
+    assert row.action_type is None  # a rejected sleep must not start an action
+
+
+def test_homeless_sleep_requires_hotel(engine: WorldEngine) -> None:
+    """R14 sleep-place: homeless agents may only sleep at the hotel."""
+    runtime = engine.create_world()
+    # 钱多多 (agent_touzi) has no home and spawns at the plaza.
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_touzi", minutes=120, reason="困了"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_SLEEP_NEED_HOTEL
+
+    # At the hotel the same sleep is accepted (fee charged, see below).
+    place_agent(engine, runtime.world_id, "agent_touzi", "village_hotel", 37, 20)
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_touzi", minutes=120, reason="开房睡觉"
+    )
+    assert ok is True and reason is None
+    assert envelope.type == "agent_sleep_started"
+    assert envelope.payload["place"] == "village_hotel"
+    assert envelope.payload["fee"] == HOTEL_NIGHTLY_FEE
+
+
+def test_hotel_sleep_charges_nightly_fee(engine: WorldEngine) -> None:
+    """Hotel sleep deducts HOTEL_NIGHTLY_FEE on start (R7: no credit)."""
+    runtime = engine.create_world()
+    place_agent(engine, runtime.world_id, "agent_touzi", "village_hotel", 37, 20)
+    set_agent(engine, runtime.world_id, "agent_touzi", money=50)
+
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_touzi", minutes=240, reason="住一晚"
+    )
+    assert ok is True and reason is None
+
+    row = agent_row(engine, runtime.world_id, "agent_touzi")
+    assert row.money == 50 - HOTEL_NIGHTLY_FEE
+    assert row.action_type == "sleep"
+
+    session = SessionLocal()
+    try:
+        txs = session.query(Transaction).filter_by(
+            world_id=runtime.world_id, agent_id="agent_touzi", type="hotel_fee"
+        ).all()
+        assert len(txs) == 1
+        assert txs[0].amount == -HOTEL_NIGHTLY_FEE
+    finally:
+        session.close()
+
+    money_events = [
+        e
+        for e in engine.events_after(runtime.world_id, 0)
+        if e.type == "money_changed" and e.payload.get("agent_id") == "agent_touzi"
+    ]
+    assert money_events
+    assert money_events[-1].payload["amount"] == -HOTEL_NIGHTLY_FEE
+    assert money_events[-1].payload["reason"] == "旅店住宿费"
+
+
+def test_hotel_sleep_rejected_without_money(engine: WorldEngine) -> None:
+    """R7: a homeless agent without the fee cannot sleep at the hotel."""
+    runtime = engine.create_world()
+    place_agent(engine, runtime.world_id, "agent_touzi", "village_hotel", 37, 20)
+    set_agent(engine, runtime.world_id, "agent_touzi", money=5)
+
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_touzi", minutes=120, reason="开房"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_HOTEL_UNAFFORDABLE
+    row = agent_row(engine, runtime.world_id, "agent_touzi")
+    assert row.action_type is None and row.money == 5  # nothing charged
+
+
+def test_rejected_sleep_keeps_existing_wait(engine: WorldEngine) -> None:
+    """A rejected sleep must not destroy an in-flight wait (R1)."""
+    runtime = engine.create_world()
+    place_agent(engine, runtime.world_id, "agent_linxia", "village_shop", 23, 12)
+    ok, _, _ = engine.action_service.execute_wait(
+        runtime.world_id, "agent_linxia", minutes=60, reason="等人"
+    )
+    assert ok is True
+
+    ok, envelope, reason = engine.action_service.execute_sleep(
+        runtime.world_id, "agent_linxia", minutes=120, reason="困了"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_SLEEP_NEED_HOME
+    row = agent_row(engine, runtime.world_id, "agent_linxia")
+    assert row.action_type == "wait"  # the wait survives the rejected sleep
+
+
+def test_observation_shows_sleep_place_guidance(engine: WorldEngine) -> None:
+    """The observation tells the LLM where to sleep (home vs hotel)."""
+    from app.agents.observation_service import build_observation
+
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    home_obs = build_observation(
+        world_id, "agent_linxia", SessionLocal, home_id="linxia_home"
+    )
+    assert "家: 林夏的家" in home_obs
+    assert "小镇旅店" in home_obs  # sleep tool line names the hotel
+    homeless_obs = build_observation(world_id, "agent_touzi", SessionLocal, home_id=None)
+    assert "无家（睡觉需去小镇旅店，每晚15金币）" in homeless_obs
+    assert "必须去小镇旅店(village_hotel)" in homeless_obs
+
+
+def test_night_low_energy_boosts_sleep_decision(engine: WorldEngine) -> None:
+    """R14 night steering: idle agent with energy <= 40 gets a decision boost
+    during night hours (22:00-07:00) so it goes home / to the hotel."""
+    runtime = engine.create_world("夜世界", autonomous=True)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        # Drop the autonomous initial decision so linxia stays idle.
+        engine.get_runtime(world_id).scheduler.cancel_for_agent(session, "agent_linxia")
+        session.commit()
+    finally:
+        session.close()
+    set_agent(engine, world_id, "agent_linxia", energy=30)
+
+    advance_minutes(engine, world_id, 840)  # 08:00 -> 22:00 (night starts)
+
+    session = SessionLocal()
+    try:
+        decides = list(
+            session.scalars(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == "agent_linxia",
+                    ScheduledAction.action_type == "agent_decide",
+                )
+            ).all()
+        )
+    finally:
+        session.close()
+    assert decides, "night + low energy must schedule an agent_decide"
+    assert decides[0].due_at == 1321
+    assert decides[0].payload == {"origin": "needs_boost"}
 
 
 # --------------------------------------------------------------------------- #

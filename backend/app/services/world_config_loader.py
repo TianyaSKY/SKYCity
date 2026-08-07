@@ -4,12 +4,17 @@ Parses and validates the Tiled town map (tiny_world.tmj) plus the asset
 manifest (asset-manifest.json), resolving external tilesets and images by
 relative path, and produces a :class:`ParsedWorldConfig` consumed by the
 backend world engine and /health.
+
+Agent spawn points are NOT read from the map: each agent's spawn (and optional
+home) lives in its character card (world_data/identities/*.json), the single
+source of truth. The map's spawn_points object layer is decorative and is
+regenerated from those cards by tools/build_map.py.
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -29,6 +34,7 @@ _EXPECTED_LOCATION_IDS = {
     "village_farm",
     "village_plaza",
     "town_hall",
+    "village_hotel",
     "linxia_home",
     "zhangming_home",
     "chenyu_home",
@@ -110,6 +116,9 @@ class SpawnPointDef:
     direction: str
     col: int
     row: int
+    # Home location declared on the character card; None when the agent has
+    # no home (it spawns standing at the spawn cell instead).
+    home_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +240,60 @@ def _check_bounds(
         raise WorldConfigError(f"{what} at ({col},{row}) is outside the {width}x{height} map")
 
 
+def _load_character_cards(world_data_dir: Path) -> list[tuple[str, dict[str, Any]]]:
+    """Load every character card from world_data/identities/*.json.
+
+    A character card is the single source of truth for an agent: identity
+    fields, its spawn point and (optionally) its home. Returns ``(agent_id,
+    card)`` pairs sorted by agent_id (the file name wins; the card's ``id``
+    field, when present, must match it).
+    """
+    cards_dir = world_data_dir / "identities"
+    if not cards_dir.is_dir():
+        raise WorldConfigError(f"identities directory not found: {cards_dir}")
+    cards: list[tuple[str, dict[str, Any]]] = []
+    for path in sorted(cards_dir.glob("agent_*.json")):
+        agent_id = path.stem
+        raw = _load_json(path)
+        if not isinstance(raw, dict):
+            raise WorldConfigError(f"角色卡 {agent_id} 必须是 JSON 对象")
+        card_id = raw.get("id")
+        if card_id is not None and str(card_id) != agent_id:
+            raise WorldConfigError(
+                f"角色卡 id 与文件名不一致: {card_id!r} != {agent_id!r}"
+            )
+        cards.append((agent_id, raw))
+    return cards
+
+
+def _card_spawn_def(
+    agent_id: str, card: dict[str, Any], width: int, height: int
+) -> SpawnPointDef:
+    """Build an agent's spawn definition from its character card."""
+    spawn = card.get("spawn")
+    if not isinstance(spawn, dict):
+        raise WorldConfigError(f"角色卡 {agent_id} 缺少 spawn 出生点定义")
+    try:
+        col = int(spawn["col"])
+        row = int(spawn["row"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorldConfigError(f"角色卡 {agent_id} 的 spawn.col/row 无效") from exc
+    _check_bounds(col, row, width, height, f"spawn point {agent_id}")
+    home_id: str | None = None
+    if card.get("home") is not None:
+        home_id = str(card["home"].get("location_id") or "")
+        if not home_id:
+            raise WorldConfigError(f"角色卡 {agent_id} 的 home 缺少 location_id")
+    return SpawnPointDef(
+        spawn_id=f"spawn_{agent_id.removeprefix('agent_')}",
+        agent_id=agent_id,
+        direction=str(spawn.get("direction") or "down"),
+        col=col,
+        row=row,
+        home_id=home_id,
+    )
+
+
 def _parse_map(map_path: Path, map_version: str) -> ParsedWorldConfig:
     raw = _load_json(map_path)
     width = int(raw["width"])
@@ -242,7 +305,6 @@ def _parse_map(map_path: Path, map_version: str) -> ParsedWorldConfig:
     tile_layers: dict[str, list[list[int]]] = {}
     locations: list[LocationDef] = []
     interactables: list[InteractableDef] = []
-    spawn_points: list[SpawnPointDef] = []
     navigation_cells: set[tuple[int, int]] = set()
     collision_cells: set[tuple[int, int]] = set()
 
@@ -310,22 +372,6 @@ def _parse_map(map_path: Path, map_version: str) -> ParsedWorldConfig:
                         )
                     )
 
-                elif object_type == "spawn_point":
-                    props = _properties(obj)
-                    spawn_id = str(props.get("spawn_id") or obj.get("name") or "")
-                    if not spawn_id:
-                        raise WorldConfigError("Spawn point object is missing spawn_id")
-                    _check_bounds(col, row, width, height, f"spawn point {spawn_id}")
-                    spawn_points.append(
-                        SpawnPointDef(
-                            spawn_id=spawn_id,
-                            agent_id=str(props.get("agent_id") or ""),
-                            direction=str(props.get("direction") or "down"),
-                            col=col,
-                            row=row,
-                        )
-                    )
-
                 else:
                     logger.warning(
                         "Ignoring object '{}' with unknown type '{}' in layer '{}'",
@@ -349,7 +395,6 @@ def _parse_map(map_path: Path, map_version: str) -> ParsedWorldConfig:
         tile_layers=tile_layers,
         locations=locations,
         interactables=interactables,
-        spawn_points=spawn_points,
         walkable_cells=walkable_cells,
         collision_cells=collision_cells,
     )
@@ -382,6 +427,15 @@ def _load_world_cached(world_data_dir: Path, map_name: str) -> ParsedWorldConfig
             f"Map file not found: {map_path} (MAP_NAME={map_name!r})"
         )
     world = _parse_map(map_path, manifest.map_version)
+
+    # Spawn points come from the character cards (single source of truth);
+    # the map's spawn_points layer is decorative and ignored.
+    card_spawns = [
+        _card_spawn_def(agent_id, card, world.width, world.height)
+        for agent_id, card in _load_character_cards(world_data_dir)
+    ]
+    if card_spawns:
+        world = replace(world, spawn_points=card_spawns)
 
     found = {loc.location_id for loc in world.locations}
     missing = _EXPECTED_LOCATION_IDS - found

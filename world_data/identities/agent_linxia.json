@@ -13,5 +13,7 @@
     "extraversion": 0.48,
     "agreeableness": 0.78,
     "emotional_stability": 0.61
-  }
+  },
+  "spawn": { "col": 18, "row": 27, "direction": "down" },
+  "home": { "location_id": "linxia_home", "name": "林夏的家", "col": 18, "row": 26 }
 }

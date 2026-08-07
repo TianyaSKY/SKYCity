@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import AgentCareerCard from './AgentCareerCard.vue';
 import {
   CONVERSATION_END_REASONS,
   INTENT_LABELS,
@@ -28,10 +29,11 @@ import type {
  */
 
 const store = useWorldStore();
-const activeTab = ref<'overview' | 'conversations' | 'memories' | 'relationships' | 'god'>('conversations');
+const activeTab = ref<'overview' | 'career' | 'conversations' | 'memories' | 'relationships' | 'god'>('conversations');
 
 const TAB_LIST = [
   { id: 'overview', label: '总览' },
+  { id: 'career', label: '职业' },
   { id: 'conversations', label: '对话' },
   { id: 'memories', label: '记忆' },
   { id: 'relationships', label: '关系' },
@@ -363,6 +365,11 @@ function teleportLocations(): WorldLocation[] {
           <span class="dec-model">{{ d.model }}</span>
         </div>
       </div>
+    </div>
+
+    <!-- 职业 tab: formal employment card (M13) -->
+    <div v-if="activeTab === 'career'" class="agent-body">
+      <AgentCareerCard :agent-id="store.selectedAgentId ?? ''" />
     </div>
 
     <!-- 对话 tab: same content as the former ConversationPanel -->

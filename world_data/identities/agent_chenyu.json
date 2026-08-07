@@ -13,5 +13,7 @@
     "extraversion": 0.80,
     "agreeableness": 0.85,
     "emotional_stability": 0.58
-  }
+  },
+  "spawn": { "col": 12, "row": 19, "direction": "down" },
+  "home": { "location_id": "chenyu_home", "name": "陈宇的家", "col": 12, "row": 18 }
 }

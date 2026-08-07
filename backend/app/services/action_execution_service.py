@@ -19,10 +19,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database.models.agents import Agent
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
+from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 from app.schemas.actions import ActionRequest
 from app.world_engine.engine import (
+    HOTEL_LOCATION_ID,
+    HOTEL_NIGHTLY_FEE,
     WorldEngine,
     WorldRuntime,
     count_location_occupants,
@@ -42,6 +45,12 @@ MSG_NO_PATH = "无可行路径"
 MSG_START_BLOCKED = "所在位置被建筑挡住，无法出发"
 MSG_AGENT_MISSING = "智能体不存在"
 MSG_WORLD_MISSING = "世界不存在"
+
+# Sleep place rule (R14): agents with a home sleep at home; homeless agents
+# sleep at the hotel, paying HOTEL_NIGHTLY_FEE (R7: no credit).
+MSG_SLEEP_NEED_HOME = "有家必须回家睡觉（当前不在家）"
+MSG_SLEEP_NEED_HOTEL = "没有家的智能体需要去小镇旅店睡觉"
+MSG_HOTEL_UNAFFORDABLE = f"余额不足，付不起旅店房费（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
 
 # R15: capacity re-check interval (minutes) while waiting for a free slot.
 CAPACITY_RECHECK_MINUTES = 30
@@ -386,8 +395,11 @@ class ActionExecutionService:
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Validate + start a sleep (R1: interruptible like wait).
 
-        Sleep recovers energy much faster than wait (R14: +20/h vs +5/h);
-        the engine tick keys recovery off action_type == "sleep".
+        Sleep place rule (R14): an agent with a home must sleep at that home;
+        a homeless agent must sleep at the hotel (village_hotel), which
+        charges HOTEL_NIGHTLY_FEE per night on start (R7: no credit).
+        Sleep recovers energy/mood much faster than wait (R14: +40/+20 per
+        hour); the engine tick keys recovery off action_type == "sleep".
         """
         session = self._session_factory()
         try:
@@ -402,9 +414,23 @@ class ActionExecutionService:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
+            if agent.action_type == "move":
+                return False, None, MSG_BUSY
+            # Sleep place validation happens BEFORE the wait/sleep replacement
+            # below so a rejected sleep never destroys an in-flight wait.
+            home_id = self.engine.home_location_id(agent_id)
+            if home_id is not None:
+                if agent.location_id != home_id:
+                    return False, None, MSG_SLEEP_NEED_HOME
+                fee = 0
+            else:
+                if agent.location_id != HOTEL_LOCATION_ID:
+                    return False, None, MSG_SLEEP_NEED_HOTEL
+                fee = HOTEL_NIGHTLY_FEE
+                if agent.money < fee:
+                    return False, None, MSG_HOTEL_UNAFFORDABLE  # R7
             if agent.action_type is not None:
-                if agent.action_type == "move":
-                    return False, None, MSG_BUSY
+                # R1: wait/sleep is interruptible -> cancel pending + replace.
                 runtime.scheduler.cancel_for_agent(session, agent_id)
                 self._clear_action(agent)
             sleep_minutes = minutes if minutes is not None else DEFAULT_WAIT_MINUTES
@@ -412,7 +438,35 @@ class ActionExecutionService:
             agent.action_type = "sleep"
             agent.action_started_at = world.world_time
             agent.action_ends_at = ends_at
-            agent.action_data = {"reason": reason}
+            agent.action_data = {"reason": reason, "place": agent.location_id}
+            if fee > 0:
+                agent.money -= fee
+                session.add(
+                    Transaction(
+                        world_id=world_id,
+                        agent_id=agent_id,
+                        type="hotel_fee",
+                        amount=-fee,
+                        balance_after=agent.money,
+                        item_id=None,
+                        quantity=None,
+                        reason="旅店住宿费",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "money_changed",
+                    {
+                        "agent_id": agent_id,
+                        "amount": -fee,
+                        "balance": agent.money,
+                        "reason": "旅店住宿费",
+                    },
+                    trace_id,
+                )
             runtime.scheduler.schedule(
                 session, agent_id, "sleep_completed", ends_at, {"reason": reason}
             )
@@ -425,6 +479,8 @@ class ActionExecutionService:
                     "minutes": sleep_minutes,
                     "ends_at": ends_at,
                     "reason": reason,
+                    "place": agent.location_id,
+                    "fee": fee,
                 },
                 trace_id,
             )

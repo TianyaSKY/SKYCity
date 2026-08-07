@@ -1,15 +1,49 @@
 """Acceptance tests for the world config loader and /health endpoint."""
 
+import json
+import shutil
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.config.settings import get_settings
-from app.services.world_config_loader import ParsedWorldConfig, load_world_config
+from app.services import world_config_loader as loader
+from app.services.world_config_loader import (
+    ParsedWorldConfig,
+    WorldConfigError,
+    load_world_config,
+)
 
 
 @pytest.fixture(scope="module")
 def world() -> ParsedWorldConfig:
     return load_world_config(get_settings())
+
+
+@pytest.fixture()
+def fake_world_data(tmp_path: Path) -> Path:
+    """A copy of the real map + manifest with an empty identities/ dir, so
+    character-card loading can be exercised against a writable tree."""
+    src = Path(get_settings().world_data_dir)
+    shutil.copyfile(src / "asset-manifest.json", tmp_path / "asset-manifest.json")
+    (tmp_path / "maps").mkdir()
+    for rel in ("tiny_world.tmj", "tiny_farm.tsj", "markers.tsj"):
+        shutil.copyfile(src / "maps" / rel, tmp_path / "maps" / rel)
+    (tmp_path / "identities").mkdir()
+    return tmp_path
+
+
+def _write_card(data_dir: Path, agent_id: str, **fields) -> None:
+    card = {
+        "id": agent_id,
+        "name": "测试员",
+        "spawn": {"col": 33, "row": 20, "direction": "down"},
+    }
+    card.update(fields)
+    (data_dir / "identities" / f"{agent_id}.json").write_text(
+        json.dumps(card, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def test_map_dimensions(world: ParsedWorldConfig) -> None:
@@ -40,6 +74,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "village_farm",
         "village_plaza",
         "town_hall",
+        "village_hotel",
         "linxia_home",
         "zhangming_home",
         "chenyu_home",
@@ -54,8 +89,44 @@ def test_locations(world: ParsedWorldConfig) -> None:
 
 def test_spawn_points(world: ParsedWorldConfig) -> None:
     assert len(world.spawn_points) == 6
+    by_id = {spawn.agent_id: spawn for spawn in world.spawn_points}
     for spawn in world.spawn_points:
         assert spawn.spawn_id and spawn.agent_id and spawn.direction
+    # spawn + home come from the character cards (single source of truth)
+    assert by_id["agent_touzi"].col == 33 and by_id["agent_touzi"].row == 20
+    assert by_id["agent_linxia"].col == 18 and by_id["agent_linxia"].row == 27
+    assert by_id["agent_linxia"].home_id == "linxia_home"
+    assert by_id["agent_touzi"].home_id is None
+    assert by_id["agent_laozhang"].home_id is None
+
+
+def test_spawns_come_from_cards_not_map(fake_world_data: Path) -> None:
+    """The map's spawn_points layer is decorative: the character cards decide
+    who spawns and where (the copied real map carries 6 spawn objects)."""
+    _write_card(fake_world_data, "agent_newbie", name="新手")
+    world = loader._load_world_cached(fake_world_data, "tiny_world")
+    assert [s.agent_id for s in world.spawn_points] == ["agent_newbie"]
+    assert world.spawn_points[0].col == 33
+    assert world.spawn_points[0].row == 20
+
+
+def test_card_without_spawn_rejected(fake_world_data: Path) -> None:
+    _write_card(fake_world_data, "agent_nospawn", spawn=None)
+    with pytest.raises(WorldConfigError, match="spawn"):
+        loader._load_world_cached(fake_world_data, "tiny_world")
+
+
+def test_card_id_mismatch_rejected(fake_world_data: Path) -> None:
+    card = {
+        "id": "agent_other",
+        "name": "错位",
+        "spawn": {"col": 33, "row": 20, "direction": "down"},
+    }
+    (fake_world_data / "identities" / "agent_newbie.json").write_text(
+        json.dumps(card, ensure_ascii=False), encoding="utf-8"
+    )
+    with pytest.raises(WorldConfigError, match="id 与文件名不一致"):
+        loader._load_world_cached(fake_world_data, "tiny_world")
 
 
 def test_interactables(world: ParsedWorldConfig) -> None:

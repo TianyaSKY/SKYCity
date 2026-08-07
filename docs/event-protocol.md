@@ -51,6 +51,8 @@
 | `agent_move_completed` | `{agent_id, at: [c,r]}` | 移动完成 |
 | `agent_wait_started` | `{agent_id, minutes, reason}` | 等待开始 |
 | `agent_wait_completed` | `{agent_id}` | 等待结束 |
+| `agent_sleep_started` | `{agent_id, minutes, ends_at, reason, place, fee}` | 睡觉开始（R14：有家在家、无家在旅店；`fee`=旅店房费，家睡为 0） |
+| `agent_sleep_completed` | `{agent_id, at: [c,r]}` | 睡觉结束 |
 | `world_event_created` | `{agent_id?, text, importance}` | 世界内叙事事件 |
 | `conversation_message` | `{from_agent_id, to_agent_id, message, intent}` | 对话消息 |
 | `conversation_started` | `{a, b}` | 会话开始 |
@@ -108,6 +110,43 @@ M14 追加：`build_started` / `structure_built` / `structure_removed`；
 
 M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 `world_snapshot` 载荷扩展 crops 列表。
+M13（企业/正式工作，R21–R35）追加：
+
+| type | 载荷要点 | 触发方 | 状态 |
+|---|---|---|---|
+| `company_created` | `{company_id, name, company_type, initial_money}` | 企业播种/创建 | 待实现 |
+| `company_status_changed` | `{company_id, old_status, new_status, reason?}` | 暂停/恢复/停业 | 已实现 |
+| `company_money_changed` | `{company_id, amount, balance, reason}` | 企业资金变动（amount 带符号） | 已实现 |
+| `company_inventory_changed` | `{company_id, items: [{item_id, quantity}]}` | 企业库存变化（完整列表） | 待实现 |
+| `job_opening_created` | `{opening_id, company_id, position_id, vacancies}` | 发布招聘 | 已实现 |
+| `job_opening_closed` | `{opening_id, company_id, position_id, reason?}` | 关闭招聘（含招聘暂停） | 已实现 |
+| `job_application_submitted` | `{application_id, opening_id, company_id, position_id, agent_id, reason}` | 居民申请 | 已实现 |
+| `job_application_withdrawn` | `{application_id, agent_id}` | 撤回申请 | 已实现 |
+| `job_application_accepted` | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason, employment_id}` | 录用（随 `employment_started`） | 待实现 |
+| `job_application_rejected` | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason}` | 拒绝申请 | 已实现 |
+| `employment_started` | `{application_id, company_id, position_id, agent_id, manager_agent_id, employment_id}` | 建立合同 | 已实现 |
+| `employment_resigned` | `{employment_id, company_id, agent_id, reason}` | 员工辞职 | 已实现 |
+| `employment_terminated` | `{employment_id, company_id, agent_id, manager_agent_id, reason}` | 经理解雇 | 已实现 |
+| `employment_suspended` | `{employment_id, company_id, agent_id, reason?}` | 合同挂起 | 待实现 |
+| `shift_scheduled` | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end}` | 班次生成 | 已实现 |
+| `shift_upcoming` | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end, minutes_until_start}` | 班前 60 分钟提醒 | 已实现 |
+| `shift_started` | `{shift_id, employment_id, company_id, agent_id, late_minutes, ends_at}` | 签到开始 | 已实现 |
+| `shift_late` | `{shift_id, agent_id, late_minutes}` | 迟到（随 `shift_started`） | 待实现 |
+| `shift_completed` | `{shift_id, employment_id, company_id, agent_id, worked_minutes, products: [{item_id, quantity}]}` | 班次完成 | 已实现 |
+| `shift_absent` | `{shift_id, employment_id, company_id, agent_id}` | 缺勤判定 | 已实现 |
+| `shift_leave_requested` | `{shift_id, employment_id, company_id, agent_id, reason}` | 请假申请 | 已实现 |
+| `shift_leave_approved` | `{shift_id, agent_id, manager_agent_id, reason}` | 准假（班次转 `leave`） | 已实现 |
+| `shift_leave_rejected` | `{shift_id, agent_id, manager_agent_id, reason}` | 拒绝请假 | 已实现 |
+| `shift_cancelled` | `{shift_id, employment_id, company_id, agent_id, reason?}` | 班次取消（辞职/企业暂停） | 待实现 |
+| `wage_paid` | `{shift_id, employment_id, company_id, agent_id, wage_due, wage_paid, company_balance}` | 足额支付 | 已实现 |
+| `wage_unpaid` | `{shift_id, employment_id, company_id, agent_id, wage_due, wage_paid: 0, company_balance}` | 欠薪 | 已实现 |
+| `wage_repaid` | `{shift_id?, employment_id, company_id, agent_id, amount}` | 补发欠薪 | 已实现 |
+| `company_sale_completed` | `{company_id, store_id, item_id, quantity, unit_price, total}` | 商店售出入企业账户 | 已实现 |
+| `company_production_completed` | `{company_id, shift_id, products: [{item_id, quantity}]}` | 正式工作产物入库 | 待实现 |
+
+企业事件 payload 必须包含明确关联 ID（company_id / employment_id / shift_id /
+agent_id / amount），并保留信封字段 `world_id` / `world_time` / `sequence` /
+`trace_id`（同一事务内事件共享 trace_id）。
 
 ## 4. 事件持久化
 

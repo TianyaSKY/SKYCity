@@ -57,7 +57,7 @@ def test_snapshot_shape(client: TestClient) -> None:
         assert set(agent) >= {
             "agent_id", "name", "col", "row", "location_id", "satiety", "energy", "money", "action",
         }
-    assert len(payload["locations"]) == 8
+    assert len(payload["locations"]) == 9
     assert payload["latest_sequence"] >= 0
 
 

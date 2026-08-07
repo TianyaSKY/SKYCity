@@ -22,9 +22,10 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.companies import Company, CompanyTransaction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
-from app.database.models.jobs import Employment, Job
+from app.database.models.jobs import Job, WorkHistory
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
@@ -202,11 +203,11 @@ class EconomyService:
             produced.append({"item_id": item_id, "quantity": quantity})
 
         employment = session.get(
-            Employment,
+            WorkHistory,
             {"world_id": action.world_id, "agent_id": action.agent_id, "job_id": job_id},
         )
         if employment is None:
-            employment = Employment(
+            employment = WorkHistory(
                 world_id=action.world_id,
                 agent_id=action.agent_id,
                 job_id=job_id,
@@ -335,6 +336,60 @@ class EconomyService:
             item_name = item.name if item is not None else item_id
             agent.money -= total
             self._add_inventory(session, world_id, agent_id, item_id, quantity)
+            # M13 R33: sale proceeds go to the owning company (same txn).
+            company = (
+                session.get(
+                    Company,
+                    {"world_id": world_id, "company_id": store.company_id},
+                )
+                if store.company_id
+                else None
+            )
+            if company is not None:
+                company.money += total
+                session.add(
+                    CompanyTransaction(
+                        world_id=world_id,
+                        company_id=company.company_id,
+                        type="sale_income",
+                        amount=total,
+                        balance_after=company.money,
+                        related_agent_id=agent_id,
+                        related_item_id=item_id,
+                        quantity=quantity,
+                        reference_type="store",
+                        reference_id=store.store_id,
+                        reason=f"商店售出 {item_name}×{quantity}",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "company_sale_completed",
+                    {
+                        "company_id": company.company_id,
+                        "store_id": store.store_id,
+                        "item_id": item_id,
+                        "quantity": quantity,
+                        "unit_price": product.sell_price,
+                        "total": total,
+                    },
+                    trace_id,
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "company_money_changed",
+                    {
+                        "company_id": company.company_id,
+                        "amount": total,
+                        "balance": company.money,
+                        "reason": f"商店售出 {item_name}×{quantity}",
+                    },
+                    trace_id,
+                )
             session.add(
                 Transaction(
                     world_id=world_id,
@@ -439,6 +494,25 @@ class EconomyService:
             if inventory is None or inventory.quantity < quantity:
                 return False, None, MSG_NOT_IN_INVENTORY
 
+            item = session.get(Item, {"world_id": world_id, "item_id": item_id})
+            item_name = item.name if item is not None else item_id
+            total = product.buy_price * quantity
+            # M13 R33: the store pays from its owning company's account; no
+            # company money -> the trade is rejected (no credit, R7). The
+            # check must run BEFORE the stock update: retry_on_lock commits
+            # regardless of fn's return value, so a late rejection would
+            # otherwise leave the stock incremented without payment.
+            company = (
+                session.get(
+                    Company,
+                    {"world_id": world_id, "company_id": store.company_id},
+                )
+                if store.company_id
+                else None
+            )
+            if company is not None and company.money < total:
+                return False, None, "企业资金不足"
+
             result = session.execute(
                 update(StoreProduct)
                 .where(
@@ -452,13 +526,41 @@ class EconomyService:
             if result.rowcount == 0:
                 return False, None, MSG_STORE_FULL
 
-            item = session.get(Item, {"world_id": world_id, "item_id": item_id})
-            item_name = item.name if item is not None else item_id
-            total = product.buy_price * quantity
             agent.money += total
             inventory.quantity -= quantity
             if inventory.quantity <= 0:
                 session.delete(inventory)
+            if company is not None:
+                company.money -= total
+                session.add(
+                    CompanyTransaction(
+                        world_id=world_id,
+                        company_id=company.company_id,
+                        type="material_purchase",
+                        amount=-total,
+                        balance_after=company.money,
+                        related_agent_id=agent_id,
+                        related_item_id=item_id,
+                        quantity=quantity,
+                        reference_type="store",
+                        reference_id=store.store_id,
+                        reason=f"商店收购 {item_name}×{quantity}",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "company_money_changed",
+                    {
+                        "company_id": company.company_id,
+                        "amount": -total,
+                        "balance": company.money,
+                        "reason": f"商店收购 {item_name}×{quantity}",
+                    },
+                    trace_id,
+                )
             session.add(
                 Transaction(
                     world_id=world_id,

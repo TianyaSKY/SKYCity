@@ -27,7 +27,7 @@
 | `navigation` | tile | 标记瓦片（gid 133）标记**可行走**格 | 调试模式显示 |
 | `locations` | object | 地点对象（见 §3） | 调试模式显示 |
 | `interactables` | object | 可交互对象（见 §4） | 调试模式显示 |
-| `spawn_points` | object | 智能体出生点（见 §5） | 调试模式显示 |
+| `spawn_points` | object | 智能体出生点（由角色卡生成，引擎不读取，见 §5） | 调试模式显示 |
 
 ### 可行走判定
 
@@ -39,7 +39,7 @@ cell_walkable(col, row) =
 
 两条不变式（生成脚本自校验）：
 - `navigation ∩ collision = ∅`（不重叠）；
-- 所有 `locations` / `interactables` / `spawn_points` 锚点格均为可行走格。
+- 所有 `locations` / `interactables` 锚点格均为可行走格。
 
 ## 3. `locations` 对象层
 
@@ -49,7 +49,7 @@ cell_walkable(col, row) =
 |---|---|---|
 | `location_id` | string | 稳定 ID，全局唯一（如 `village_shop`） |
 | `name` | string | 中文显示名（如 `村庄杂货店`） |
-| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` |
+| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` |
 | `capacity` | int | 同时容纳的最大智能体数 |
 | `open_hour` | int | 开门小时（世界时 0..24，`0` 表示 24 小时开放） |
 | `close_hour` | int | 关门小时（`24` 表示整日开放） |
@@ -62,10 +62,14 @@ cell_walkable(col, row) =
 | `village_shop` | store | 8-20 | 8 |
 | `village_farm` | farm | 6-18 | 12 |
 | `town_hall` | office | 9-17 | 10 |
+| `village_hotel` | hotel | 0-24 | 10 |
 | `linxia_home` | house | 0-24 | 4 |
 | `zhangming_home` | house | 0-24 | 4 |
 | `chenyu_home` | house | 0-24 | 4 |
 | `wangfang_home` | house | 0-24 | 4 |
+
+> `hotel`（小镇旅店）与 `house`/`plaza` 一样全天开放（R8）；无家智能体的
+> 睡觉地点（R14），入住收取每晚 15 金币房费。
 
 ## 4. `interactables` 对象层
 
@@ -81,7 +85,7 @@ cell_walkable(col, row) =
 
 ## 5. `spawn_points` 对象层
 
-点对象（`point=true`），`type="spawn_point"`。属性：`spawn_id`、`agent_id`（绑定身份卡 ID）、`direction`（出生朝向）。
+点对象（`point=true`），`type="spawn_point"`，**仅作可视化参考**：引擎不读取该层。每个智能体的出生点由角色卡（`world_data/identities/agent_xxx.json` 的 `spawn` 字段）决定，本层由 `tools/build_map.py` 从角色卡自动生成。属性：`spawn_id`、`agent_id`、`direction`（出生朝向）。
 
 | spawn_id | agent_id | 位置 |
 |---|---|---|
@@ -90,6 +94,9 @@ cell_walkable(col, row) =
 | spawn_chenyu | agent_chenyu | (12, 19) |
 | spawn_wangfang | agent_wangfang | (48, 35) |
 | spawn_laozhang | agent_laozhang | (30, 9) |
+| spawn_touzi | agent_touzi | (33, 20) |
+
+角色卡 `home` 字段（location_id/name/col/row）同样由生成脚本派生为 `buildings` 瓦片与 `locations` 对象——新增智能体时无需手工编辑地图。
 
 ## 6. 瓦片语义速查（gid = tile_id + 1）
 

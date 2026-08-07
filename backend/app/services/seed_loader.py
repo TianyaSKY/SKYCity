@@ -152,6 +152,7 @@ def load_stores(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
             {
                 "store_id": str(data.get("store_id") or path.stem),
                 "location_id": str(data.get("location_id") or path.stem),
+                "company_id": data.get("company_id") or None,
                 "products": [
                     {
                         "item_id": str(product["item_id"]),

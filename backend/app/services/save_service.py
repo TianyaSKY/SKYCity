@@ -29,11 +29,22 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.companies import (
+    Company,
+    CompanyInventory,
+    CompanyTransaction,
+    EmploymentContract,
+    JobApplication,
+    JobOpening,
+    LeaveRequest,
+    Position,
+    WorkShift,
+)
 from app.database.models.conversations import Conversation, ConversationMessage
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
-from app.database.models.jobs import Employment, Job
+from app.database.models.jobs import Job, WorkHistory
 from app.database.models.llm_runs import LLMRun
 from app.database.models.world_events import WorldEvent
 from app.database.models.locations import WorldLocation
@@ -49,7 +60,7 @@ from app.database.models.worlds import World
 from app.world_engine.clock import WorldClock
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 MSG_WORLD_MISSING = "世界不存在"
 MSG_SAVE_MISSING = "存档不存在"
@@ -183,12 +194,23 @@ class SaveService:
                 {
                     "store_id": store.store_id,
                     "location_id": store.location_id,
+                    "company_id": store.company_id,
                     "products": products_by_store.get(store.store_id, []),
                 }
                 for store in stores
             ],
             "jobs": rows(Job),
-            "employments": rows(Employment),
+            "employments": rows(WorkHistory),
+            # M13 (schema v2): company and formal-employment state.
+            "companies": rows(Company),
+            "positions": rows(Position),
+            "job_openings": rows(JobOpening),
+            "job_applications": rows(JobApplication),
+            "employment_contracts": rows(EmploymentContract),
+            "work_shifts": rows(WorkShift),
+            "leave_requests": rows(LeaveRequest),
+            "company_inventories": rows(CompanyInventory),
+            "company_transactions": rows(CompanyTransaction),
             "inventories": rows(Inventory),
             "stocks": rows(Stock),
             "stock_holdings": rows(StockHolding),
@@ -216,6 +238,35 @@ class SaveService:
             for column in inspect(row).mapper.column_attrs
         }
 
+    def normalize_save_payload(self, payload: dict) -> dict:
+        """Accept schema v1 (pre-company) and v2 payloads; reject the rest."""
+        version = payload.get("schema_version")
+        if version == SCHEMA_VERSION:
+            return payload
+        if version == 1:
+            return self._migrate_v1_to_v2(payload)
+        raise HTTPException(
+            status_code=400,
+            detail=f"{MSG_SCHEMA_UNSUPPORTED}: {version}",
+        )
+
+    @staticmethod
+    def _migrate_v1_to_v2(payload: dict) -> dict:
+        """V1 -> V2: old casual-work history is kept; company state is rebuilt
+        from seed data after restore (ensure_seeded), so the migrated payload
+        only gains empty company sections and the version marker."""
+        migrated = dict(payload)
+        migrated["schema_version"] = 2
+        for key in (
+            "companies", "positions", "job_openings", "job_applications",
+            "employment_contracts", "work_shifts", "leave_requests",
+            "company_inventories", "company_transactions",
+        ):
+            migrated.setdefault(key, [])
+        for store in migrated.get("stores", []):
+            store.setdefault("company_id", None)
+        return migrated
+
     # ------------------------------------------------------------------ #
     # Restore
     # ------------------------------------------------------------------ #
@@ -231,12 +282,7 @@ class SaveService:
             save = session.get(Save, save_id)
             if save is None:
                 raise HTTPException(status_code=404, detail=MSG_SAVE_MISSING)
-            payload = save.payload_json or {}
-            if payload.get("schema_version") != SCHEMA_VERSION:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{MSG_SCHEMA_UNSUPPORTED}: {payload.get('schema_version')}",
-                )
+            payload = self.normalize_save_payload(save.payload_json or {})
             world_data = payload.get("world") or {}
             world_time = int(world_data.get("world_time") or 480)
             speed = int(world_data.get("speed") or 1)
@@ -294,6 +340,15 @@ class SaveService:
             session.commit()
         finally:
             session.close()
+        # M13: formal-shift callbacks must be live on the restored world (not
+        # part of _ensure_runtime's defaults). Seeding is idempotent and must
+        # run AFTER the restore commit (its own session/transaction): V1
+        # migrations and company-less saves get the seed companies + store
+        # bindings; V2 saves are untouched.
+        company_service = getattr(self.engine, "company_employment_service", None)
+        if company_service is not None:
+            company_service.register_runtime(runtime)
+            company_service.ensure_seeded(world_id)
         return runtime
 
     def _reinsert(
@@ -333,6 +388,7 @@ class SaveService:
                     world_id=world_id,
                     store_id=store["store_id"],
                     location_id=store["location_id"],
+                    company_id=store.get("company_id"),
                 )
             )
             for product in store.get("products", []):
@@ -340,10 +396,56 @@ class SaveService:
                 data["store_id"] = store["store_id"]
                 session.add(StoreProduct(world_id=world_id, **data))
 
+        # M13 (schema v2): company rows are re-pointed verbatim where the PK
+        # is per-world; global-PK rows get fresh ids and the mapping is kept
+        # so scheduled-action payloads can be re-pointed below.
+        remaps: dict[str, dict[str, str]] = {
+            "EmploymentContract": {},
+            "WorkShift": {},
+            "JobOpening": {},
+        }
+        for row in payload.get("companies", []):
+            session.add(Company(world_id=world_id, **self._row_data(row)))
+        for row in payload.get("positions", []):
+            session.add(Position(world_id=world_id, **self._row_data(row)))
+        for row in payload.get("job_openings", []):
+            data = self._fresh_pk(JobOpening, self._row_data(row))
+            remaps["JobOpening"][row["opening_id"]] = data["opening_id"]
+            session.add(JobOpening(world_id=world_id, **data))
+        for row in payload.get("job_applications", []):
+            data = self._fresh_pk(JobApplication, self._row_data(row))
+            data["opening_id"] = remaps["JobOpening"].get(
+                data["opening_id"], data["opening_id"]
+            )
+            session.add(JobApplication(world_id=world_id, **data))
+        for row in payload.get("employment_contracts", []):
+            data = self._fresh_pk(EmploymentContract, self._row_data(row))
+            remaps["EmploymentContract"][row["employment_id"]] = data["employment_id"]
+            session.add(EmploymentContract(world_id=world_id, **data))
+        for row in payload.get("work_shifts", []):
+            data = self._fresh_pk(WorkShift, self._row_data(row))
+            remaps["WorkShift"][row["shift_id"]] = data["shift_id"]
+            # Shifts belong to the regenerated contract, not the original.
+            data["employment_id"] = remaps["EmploymentContract"].get(
+                data["employment_id"], data["employment_id"]
+            )
+            session.add(WorkShift(world_id=world_id, **data))
+        for row in payload.get("leave_requests", []):
+            data = self._fresh_pk(LeaveRequest, self._row_data(row))
+            data["employment_id"] = remaps["EmploymentContract"].get(
+                data["employment_id"], data["employment_id"]
+            )
+            session.add(LeaveRequest(world_id=world_id, **data))
+        for row in payload.get("company_inventories", []):
+            session.add(CompanyInventory(world_id=world_id, **self._row_data(row)))
+        for row in payload.get("company_transactions", []):
+            data = self._fresh_pk(CompanyTransaction, self._row_data(row))
+            session.add(CompanyTransaction(world_id=world_id, **data))
+
         for row in payload.get("jobs", []):
             session.add(Job(world_id=world_id, **self._row_data(row)))
         for row in payload.get("employments", []):
-            session.add(Employment(world_id=world_id, **self._row_data(row)))
+            session.add(WorkHistory(world_id=world_id, **self._row_data(row)))
         # M10: composite per-world PKs, re-pointed verbatim (no _fresh_pk).
         for row in payload.get("stocks", []):
             session.add(Stock(world_id=world_id, **self._row_data(row)))
@@ -388,8 +490,23 @@ class SaveService:
             session.add(LLMRun(world_id=world_id, **data))
         # Pending scheduled actions restore with fresh action_ids (global PK);
         # due_at stays absolute because world_time was saved with the payload.
+        # M13: shift/contract references inside the payload are re-pointed to
+        # the regenerated ids so absence/upcoming/completion checks still hit.
         for row in payload.get("scheduled_actions", []):
             data = self._fresh_pk(ScheduledAction, self._row_data(row))
+            action_payload = data.get("payload")
+            if isinstance(action_payload, dict):
+                shift_id = action_payload.get("shift_id")
+                if shift_id:
+                    action_payload["shift_id"] = remaps["WorkShift"].get(
+                        shift_id, shift_id
+                    )
+                employment_id = action_payload.get("employment_id")
+                if employment_id:
+                    action_payload["employment_id"] = remaps["EmploymentContract"].get(
+                        employment_id, employment_id
+                    )
+                data["payload"] = action_payload
             session.add(ScheduledAction(world_id=world_id, **data))
         # Full event history re-pointed under the new world (PK is
         # world_id+event_id, so the originals are untouched): the restored
@@ -415,6 +532,18 @@ class SaveService:
             data["conversation_id"] = f"conv_{uuid.uuid4().hex[:16]}"
         elif model is ConversationMessage:
             data["message_id"] = f"msg_{uuid.uuid4().hex[:16]}"
+        elif model is JobOpening:
+            data["opening_id"] = f"opening_{uuid.uuid4().hex[:16]}"
+        elif model is JobApplication:
+            data["application_id"] = f"application_{uuid.uuid4().hex[:16]}"
+        elif model is EmploymentContract:
+            data["employment_id"] = f"employment_{uuid.uuid4().hex[:16]}"
+        elif model is WorkShift:
+            data["shift_id"] = f"shift_{uuid.uuid4().hex[:16]}"
+        elif model is LeaveRequest:
+            data["request_id"] = f"leave_{uuid.uuid4().hex[:16]}"
+        elif model is CompanyTransaction:
+            data["transaction_id"] = f"ctx_{uuid.uuid4().hex[:16]}"
         return data
 
     @staticmethod

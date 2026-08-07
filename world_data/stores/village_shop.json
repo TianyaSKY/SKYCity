@@ -2,6 +2,7 @@
   "version": "1.0.0",
   "store_id": "village_shop",
   "location_id": "village_shop",
+  "company_id": "company_village_shop",
   "currency": "coin",
   "products": [
     {"item_id": "bread", "sell_price": 12, "buy_price": 6, "stock_cap": 20, "restock_daily": 10},
