@@ -49,6 +49,7 @@ MSG_EXHAUSTED = "精力耗尽，无法工作"
 MSG_PRODUCT_MISSING = "商店没有该商品"
 MSG_NOT_AT_STORE = "不在商店"
 MSG_STORE_CLOSED = "商店未开门"
+MSG_STORE_UNBOUND = "商店未绑定企业，无法交易"
 MSG_NO_MONEY = "余额不足"
 MSG_NO_STOCK = "库存不足"
 MSG_NOT_IN_INVENTORY = "背包中没有该物品"
@@ -324,6 +325,10 @@ class EconomyService:
                 return False, None, MSG_NOT_AT_STORE
             if not self._store_open(session, world_id, store, world.world_time):
                 return False, None, MSG_STORE_CLOSED  # R8
+            if not store.company_id:
+                # A4: unbound stores would destroy money (agent pays, nobody
+                # receives) — reject before any balance/stock mutation.
+                return False, None, MSG_STORE_UNBOUND
 
             total = product.sell_price * quantity
             if agent.money < total:
@@ -497,6 +502,10 @@ class EconomyService:
                 return False, None, MSG_STORE_CLOSED  # R8
             if product.buy_price <= 0:
                 return False, None, MSG_NOT_BUYABLE
+            if not store.company_id:
+                # A4: unbound stores would mint money (agent paid, nobody
+                # pays) — reject before the stock mutation.
+                return False, None, MSG_STORE_UNBOUND
             inventory = session.get(
                 Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
             )

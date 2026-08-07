@@ -246,7 +246,6 @@ class CompanyEmploymentService:
             bread.restock_daily = 0
 
     def list_companies(self, world_id: str) -> list[dict[str, Any]]:
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             companies = session.scalars(
@@ -257,7 +256,6 @@ class CompanyEmploymentService:
             session.close()
 
     def list_openings(self, world_id: str) -> list[dict[str, Any]]:
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             rows = session.execute(
@@ -289,7 +287,6 @@ class CompanyEmploymentService:
             session.close()
 
     def get_company(self, world_id: str, company_id: str) -> dict[str, Any]:
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             company = session.get(Company, {"world_id": world_id, "company_id": company_id})
@@ -300,7 +297,6 @@ class CompanyEmploymentService:
             session.close()
 
     def list_positions(self, world_id: str, company_id: str) -> list[dict[str, Any]]:
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             if session.get(Company, {"world_id": world_id, "company_id": company_id}) is None:
@@ -310,6 +306,15 @@ class CompanyEmploymentService:
                 .where(Position.world_id == world_id, Position.company_id == company_id)
                 .order_by(Position.position_id)
             ).all()
+            openings_by_position = {
+                opening.position_id: opening
+                for opening in session.scalars(
+                    select(JobOpening).where(
+                        JobOpening.world_id == world_id,
+                        JobOpening.company_id == company_id,
+                    )
+                )
+            }
             result: list[dict[str, Any]] = []
             for position in positions:
                 filled = int(session.scalar(
@@ -320,6 +325,7 @@ class CompanyEmploymentService:
                     )
                 ) or 0)
                 job = session.get(Job, {"world_id": world_id, "job_id": position.job_id})
+                opening = openings_by_position.get(position.position_id)
                 result.append({
                     "position_id": position.position_id,
                     "company_id": position.company_id,
@@ -329,7 +335,14 @@ class CompanyEmploymentService:
                     "description": position.description,
                     "capacity": position.capacity,
                     "filled": filled,
-                    "vacancies": max(position.capacity - filled, 0),
+                    # B5: JobOpening.vacancies is the authoritative count;
+                    # capacity shortfall is only the fallback when no opening
+                    # row exists for the position.
+                    "vacancies": (
+                        opening.vacancies
+                        if opening is not None
+                        else max(position.capacity - filled, 0)
+                    ),
                     "wage_per_shift": position.wage_per_shift,
                     "shift_start_minute": position.shift_start_minute,
                     "shift_end_minute": position.shift_end_minute,
@@ -384,7 +397,6 @@ class CompanyEmploymentService:
             self, world_id: str, company_id: str
     ) -> list[dict[str, Any]]:
         """One company's warehouse: totals, reservations and availability."""
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             if session.get(Company, {"world_id": world_id, "company_id": company_id}) is None:
@@ -669,7 +681,6 @@ class CompanyEmploymentService:
             session.close()
 
     def apply(self, world_id: str, opening_id: str, agent_id: str, reason: str) -> dict[str, Any]:
-        self.ensure_seeded(world_id)
         session = self._session_factory()
         try:
             world = self._world(session, world_id)
@@ -703,7 +714,12 @@ class CompanyEmploymentService:
             return self._application_dict(application)
         except IntegrityError as exc:
             session.rollback()
-            raise CompanyEmploymentError("已经申请过该职位") from exc
+            # SQLite reports the failing constraint by columns, not index
+            # name: uq_job_application_active_opening_agent is the only
+            # unique constraint on job_applications.
+            if "job_applications.opening_id" in str(exc.orig) and "job_applications.agent_id" in str(exc.orig):
+                raise CompanyEmploymentError("已经申请过该职位") from exc
+            raise  # 其他约束失败如实上抛（500），不伪装成重复申请
         finally:
             session.close()
 
@@ -741,8 +757,8 @@ class CompanyEmploymentService:
     ) -> dict[str, Any]:
         if decision not in {"accept", "reject"}:
             raise CompanyEmploymentError("decision 必须是 accept 或 reject")
-        session = self._session_factory()
-        try:
+
+        def _inner(session: Session) -> dict[str, Any]:
             world = self._world(session, world_id)
             application = session.get(JobApplication, application_id)
             if application is None or application.world_id != world_id:
@@ -798,7 +814,10 @@ class CompanyEmploymentService:
                 session.flush()
                 self._create_next_shift(session, world, employment, position)
                 event_type = "employment_started"
-            self._publish(session, world, event_type, {
+                employee_count, open_vacancies = self._company_counts(
+                    session, world_id, company.company_id
+                )
+            payload: dict[str, Any] = {
                 "application_id": application.application_id,
                 "company_id": application.company_id,
                 "position_id": application.position_id,
@@ -806,14 +825,17 @@ class CompanyEmploymentService:
                 "manager_agent_id": manager_agent_id,
                 "reason": reason,
                 "employment_id": employment.employment_id if employment else None,
-            })
-            session.commit()
+            }
+            if employment is not None:
+                payload["employee_count"] = employee_count
+                payload["open_vacancies"] = open_vacancies
+            self._publish(session, world, event_type, payload)
             return {
                 "application": self._application_dict(application),
                 "employment_id": employment.employment_id if employment else None,
             }
-        finally:
-            session.close()
+
+        return self._uow.run(_inner)
 
     def list_agent_employment(self, world_id: str, agent_id: str) -> dict[str, Any]:
         session = self._session_factory()
@@ -921,13 +943,6 @@ class CompanyEmploymentService:
                 end_at,
                 {"shift_id": shift.shift_id, "trace_id": completion_trace},
             )
-            runtime.scheduler.schedule(
-                session,
-                agent_id,
-                "formal_shift_absence_check",
-                shift.scheduled_start + 120,
-                {"shift_id": shift.shift_id},
-            )
             self._publish(session, world, "shift_started", {
                 "shift_id": shift.shift_id,
                 "employment_id": shift.employment_id,
@@ -968,6 +983,13 @@ class CompanyEmploymentService:
                     )
             ):
                 shift.status = "cancelled"
+                self._publish(session, world, "shift_cancelled", {
+                    "shift_id": shift.shift_id,
+                    "employment_id": shift.employment_id,
+                    "company_id": shift.company_id,
+                    "agent_id": shift.agent_id,
+                    "reason": "员工辞职",
+                })
             for request in session.scalars(
                     select(LeaveRequest).where(
                         LeaveRequest.world_id == world_id,
@@ -976,6 +998,9 @@ class CompanyEmploymentService:
                     )
             ):
                 request.status = "cancelled"
+            company = session.get(
+                Company, {"world_id": world_id, "company_id": contract.company_id}
+            )
             position = session.get(Position, {"world_id": world_id, "position_id": contract.position_id})
             opening = session.scalar(
                 select(JobOpening).where(
@@ -989,18 +1014,28 @@ class CompanyEmploymentService:
                     position_id=position.position_id,
                     company_id=position.company_id,
                     vacancies=1,
-                    status="open",
+                    status="paused" if company is not None and company.status != "active" else "open",
                     opened_at=world.world_time,
                 )
                 session.add(opening)
             elif opening is not None:
                 opening.vacancies += 1
-                opening.status = "open"
+                if company is not None and company.status == "active" and opening.status != "open":
+                    opening.status = "open"
+                    self._publish(session, world, "job_opening_created", {
+                        "opening_id": opening.opening_id, "company_id": company.company_id,
+                        "position_id": contract.position_id, "vacancies": opening.vacancies,
+                    })
+            employee_count, open_vacancies = self._company_counts(
+                session, world_id, contract.company_id
+            )
             self._publish(session, world, "employment_resigned", {
                 "employment_id": employment_id,
                 "company_id": contract.company_id,
                 "agent_id": agent_id,
                 "reason": reason,
+                "employee_count": employee_count,
+                "open_vacancies": open_vacancies,
             })
             session.commit()
             return self._contract_dict(contract)
@@ -1039,6 +1074,13 @@ class CompanyEmploymentService:
                     )
             ):
                 shift.status = "cancelled"
+                self._publish(session, world, "shift_cancelled", {
+                    "shift_id": shift.shift_id,
+                    "employment_id": shift.employment_id,
+                    "company_id": shift.company_id,
+                    "agent_id": shift.agent_id,
+                    "reason": "经理解雇",
+                })
             for request in session.scalars(
                     select(LeaveRequest).where(
                         LeaveRequest.world_id == world_id,
@@ -1062,19 +1104,29 @@ class CompanyEmploymentService:
                     position_id=position.position_id,
                     company_id=position.company_id,
                     vacancies=1,
-                    status="open",
+                    status="paused" if company.status != "active" else "open",
                     opened_at=world.world_time,
                 )
                 session.add(opening)
             elif opening is not None:
                 opening.vacancies += 1
-                opening.status = "open"
+                if company.status == "active" and opening.status != "open":
+                    opening.status = "open"
+                    self._publish(session, world, "job_opening_created", {
+                        "opening_id": opening.opening_id, "company_id": company.company_id,
+                        "position_id": contract.position_id, "vacancies": opening.vacancies,
+                    })
+            employee_count, open_vacancies = self._company_counts(
+                session, world_id, contract.company_id
+            )
             self._publish(session, world, "employment_terminated", {
                 "employment_id": employment_id,
                 "company_id": contract.company_id,
                 "agent_id": contract.agent_id,
                 "manager_agent_id": manager_agent_id,
                 "reason": reason,
+                "employee_count": employee_count,
+                "open_vacancies": open_vacancies,
             })
             session.commit()
             return self._contract_dict(contract)
@@ -1181,6 +1233,13 @@ class CompanyEmploymentService:
                     )
             ):
                 shift.status = "cancelled"
+                self._publish(session, world, "shift_cancelled", {
+                    "shift_id": shift.shift_id,
+                    "employment_id": shift.employment_id,
+                    "company_id": shift.company_id,
+                    "agent_id": shift.agent_id,
+                    "reason": "企业停业",
+                })
             self._publish(session, world, "company_status_changed", {
                 "company_id": company_id,
                 "old_status": "active",
@@ -1211,8 +1270,12 @@ class CompanyEmploymentService:
                         JobOpening.company_id == company_id,
                     )
             ):
-                if opening.vacancies > 0:
+                if opening.vacancies > 0 and opening.status != "open":
                     opening.status = "open"
+                    self._publish(session, world, "job_opening_created", {
+                        "opening_id": opening.opening_id, "company_id": company.company_id,
+                        "position_id": opening.position_id, "vacancies": opening.vacancies,
+                    })
             # Regenerate the next shift for every active contract whose
             # future shifts were cancelled during the suspension.
             for contract in session.scalars(
@@ -1428,11 +1491,44 @@ class CompanyEmploymentService:
         world = session.get(World, action.world_id)
         if shift is None or world is None or agent is None or shift.status not in {"in_progress", "late"}:
             return
+        if shift.agent_id != action.agent_id:
+            return  # payload/agent mismatch — never settle someone else's shift
         contract = session.get(EmploymentContract, shift.employment_id)
         company = session.get(Company, {"world_id": action.world_id, "company_id": shift.company_id})
+        if contract is None or company is None:
+            return
+        if agent.action_type != "formal_work" or (agent.action_data or {}).get("shift_id") != shift.shift_id:
+            # 行动被中断/清除（如上帝传送）——取消班次、释放预留，绝不白付工资。
+            shift.status = "cancelled"
+            shift.absence_reason = "行动被中断，班次取消"
+            recipe = next(
+                (
+                    seed
+                    for seed in load_jobs(self._world_data_dir)
+                    if seed["job_id"] == contract.job_id
+                ),
+                None,
+            )
+            for input_spec in (recipe or {}).get("inputs") or []:
+                input_item = str(input_spec.get("item_id") or "")
+                input_qty = int(input_spec.get("quantity") or 0)
+                if not input_item or input_qty <= 0:
+                    continue
+                row = session.get(CompanyInventory, {
+                    "world_id": action.world_id, "company_id": company.company_id,
+                    "item_id": input_item,
+                })
+                if row is not None and row.reserved_quantity > 0:
+                    row.reserved_quantity -= min(row.reserved_quantity, input_qty)
+            self._publish(session, world, "shift_cancelled", {
+                "shift_id": shift.shift_id, "employment_id": shift.employment_id,
+                "company_id": shift.company_id, "agent_id": shift.agent_id,
+                "reason": "行动被中断，班次取消",
+            })
+            return  # 不清 agent 字段、不结算、不续排
         position = session.get(Position, {"world_id": action.world_id, "position_id": shift.position_id})
-        job = session.get(Job, {"world_id": action.world_id, "job_id": contract.job_id}) if contract else None
-        if contract is None or company is None or position is None or job is None:
+        job = session.get(Job, {"world_id": action.world_id, "job_id": contract.job_id})
+        if position is None or job is None:
             return
         shift.actual_end = world.world_time
         shift.worked_minutes = max(world.world_time - (shift.actual_start or world.world_time), 0)
@@ -1528,12 +1624,13 @@ class CompanyEmploymentService:
             "company_id": company.company_id, "agent_id": agent.agent_id,
             "worked_minutes": shift.worked_minutes, "products": produced,
         }, trace_id)
-        self._publish(session, world, payroll_event, {
-            "shift_id": shift.shift_id, "employment_id": contract.employment_id,
-            "company_id": company.company_id, "agent_id": agent.agent_id,
-            "wage_due": shift.wage_due, "wage_paid": shift.wage_paid,
-            "company_balance": company.money,
-        }, trace_id)
+        if shift.wage_due > 0:
+            self._publish(session, world, payroll_event, {
+                "shift_id": shift.shift_id, "employment_id": contract.employment_id,
+                "company_id": company.company_id, "agent_id": agent.agent_id,
+                "wage_due": shift.wage_due, "wage_paid": shift.wage_paid,
+                "company_balance": company.money,
+            }, trace_id)
         # M16 R37: warehouse sync + the production ledger event (same txn).
         self._publish(session, world, "company_inventory_changed", {
             "company_id": company.company_id,
@@ -1607,6 +1704,24 @@ class CompanyEmploymentService:
             })
             return shift
         raise CompanyEmploymentError("无法生成下一班次")
+
+    def _company_counts(self, session: Session, world_id: str, company_id: str) -> tuple[int, int]:
+        """Authoritative (employee_count, open_vacancies) for event payloads.
+
+        D1: hiring events carry these counts so the frontend can assign
+        instead of drifting ±1 on every event.
+        """
+        employee_count = int(session.scalar(select(func.count()).select_from(EmploymentContract).where(
+            EmploymentContract.world_id == world_id,
+            EmploymentContract.company_id == company_id,
+            EmploymentContract.status.in_(ACTIVE_EMPLOYMENT),
+        )) or 0)
+        open_vacancies = int(session.scalar(select(func.sum(JobOpening.vacancies)).where(
+            JobOpening.world_id == world_id,
+            JobOpening.company_id == company_id,
+            JobOpening.status == "open",
+        )) or 0)
+        return employee_count, open_vacancies
 
     def _company_dict(self, session: Session, company: Company) -> dict[str, Any]:
         employee_count = int(session.scalar(select(func.count()).select_from(EmploymentContract).where(

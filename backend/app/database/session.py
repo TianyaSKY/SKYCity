@@ -2,7 +2,8 @@
 
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from loguru import logger
+from sqlalchemy import create_engine, text as _text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import get_settings
@@ -40,6 +41,20 @@ def initialize_database() -> None:
     from app.database import models  # noqa: F401 - registers all ORM models
 
     Base.metadata.create_all(engine)
+    # A2: existing databases pre-date the partial unique index; create_all
+    # never alters old tables, so backfill it here (best-effort — dirty
+    # legacy data would fail the DDL and is skipped, the UoW check remains
+    # the primary defence).
+    with engine.connect() as conn:
+        try:
+            conn.execute(_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_employment_contract_active_agent "
+                "ON employment_contracts (world_id, agent_id) "
+                "WHERE status IN ('active', 'on_leave')"
+            ))
+            conn.commit()
+        except Exception:  # noqa: BLE001 - 存量脏数据时跳过，UoW 仍是主防线
+            logger.exception("active-contract unique index creation failed")
 
 
 def get_db() -> Generator[Session, None, None]:

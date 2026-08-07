@@ -372,12 +372,14 @@ class SaveService:
                 )
             )
 
+        restored_agents: list[Agent] = []
         for row in payload.get("agents", []):
             data = self._row_data(row)
             # An in-flight LLM decision cannot be resumed; clear the guard so
             # the restored world's decision loop is never wedged.
             data["is_deciding"] = False
-            session.add(Agent(world_id=world_id, **data))
+            restored_agents.append(Agent(world_id=world_id, **data))
+            session.add(restored_agents[-1])
 
         for row in payload.get("items", []):
             session.add(Item(world_id=world_id, **self._row_data(row)))
@@ -430,6 +432,20 @@ class SaveService:
                 data["employment_id"], data["employment_id"]
             )
             session.add(WorkShift(world_id=world_id, **data))
+        # A1 guard invariant: a restored in-progress formal shift must match
+        # agent.action_data.shift_id (shift completion refuses to settle
+        # otherwise). WorkShift PKs were regenerated above — remap the
+        # agent's action_data the same way scheduled-action payloads are.
+        for agent in restored_agents:
+            action_data = agent.action_data or {}
+            old_shift_id = action_data.get("shift_id")
+            if (
+                agent.action_type == "formal_work"
+                and isinstance(old_shift_id, str)
+                and old_shift_id in remaps["WorkShift"]
+            ):
+                action_data["shift_id"] = remaps["WorkShift"][old_shift_id]
+                agent.action_data = action_data
         for row in payload.get("leave_requests", []):
             data = self._fresh_pk(LeaveRequest, self._row_data(row))
             data["employment_id"] = remaps["EmploymentContract"].get(

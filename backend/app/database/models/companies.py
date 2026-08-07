@@ -112,6 +112,15 @@ class JobApplication(Base):
 class EmploymentContract(Base):
     __tablename__ = "employment_contracts"
     __table_args__ = (
+        # A2: one ACTIVE contract per agent — DB-level backstop for the
+        # service check (partial index, same predicate as ACTIVE_EMPLOYMENT).
+        Index(
+            "uq_employment_contract_active_agent",
+            "world_id",
+            "agent_id",
+            unique=True,
+            sqlite_where=text("status IN ('active', 'on_leave')"),
+        ),
         Index("ix_employment_contracts_world_agent_status", "world_id", "agent_id", "status"),
     )
 

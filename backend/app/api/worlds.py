@@ -38,6 +38,10 @@ async def create_world(request: Request, body: CreateWorldRequest | None = None)
         body.name if body else None,
         autonomous=body.autonomous if body else False,
     )
+    # B3: seeding moved out of the read paths — new worlds are seeded here,
+    # resumed runtimes at startup (main.lifespan) and on restore
+    # (save_service), so reads stay side-effect free.
+    request.app.state.company_employment_service.ensure_seeded(runtime.world_id)
     return CreateWorldResponse(
         world_id=runtime.world_id,
         world_time=runtime.clock.world_time,
