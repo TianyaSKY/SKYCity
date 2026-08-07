@@ -4,8 +4,9 @@ T6-3 (observed-only recording): the MemoryRecorder hooks every published
 envelope and writes a memory only for agents that were party to the event —
 conversation messages both directions, conversation ends, work completed,
 item transactions, large money changes, world events targeting the agent,
-god actions (M7), and LLM tool failures (llm_run success=0). Other agents'
-secrets are never recorded.
+god actions (M7), LLM tool failures (llm_run success=0), and the
+employment lifecycle (applications, hires, shifts, resignations, pay;
+M13/M16). Other agents' secrets are never recorded.
 
 T6-4 (weighted retrieval): score = 0.35*entity_hit + 0.25*keyword_hit
 + 0.2*importance + 0.15*recency (normalised by world_time) + 0.05*(0 if the
@@ -29,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.companies import Company, EmploymentContract, Position
 from app.database.models.conversations import Conversation
 from app.database.models.memories import Memory
 from app.database.models.scheduled_actions import ScheduledAction
@@ -520,6 +522,20 @@ class MemoryRecorder:
             self._on_crop_planted(session, envelope, payload)
         elif event_type == "crop_harvested":
             self._on_crop_harvested(session, envelope, payload)
+        elif event_type in ("job_application_submitted", "job_application_withdrawn", "job_application_rejected"):
+            self._on_job_application(session, envelope, payload, event_type)
+        elif event_type == "employment_started":
+            self._on_employment_started(session, envelope, payload)
+        elif event_type in ("employment_resigned", "employment_terminated"):
+            self._on_employment_end(session, envelope, payload, event_type)
+        elif event_type == "shift_completed":
+            self._on_shift_completed(session, envelope, payload)
+        elif event_type == "shift_absent":
+            self._on_shift_absent(session, envelope, payload)
+        elif event_type in ("shift_leave_approved", "shift_leave_rejected"):
+            self._on_shift_leave(session, envelope, payload, event_type)
+        elif event_type in ("wage_paid", "wage_unpaid", "wage_repaid"):
+            self._on_wage_event(session, envelope, payload, event_type)
 
     def record_llm_failure(
             self, session: Session, world_id: str, agent_id: str, reason: str
@@ -815,6 +831,156 @@ class MemoryRecorder:
             entities=[agent_id],
             keywords=[item_id, "收获"],
         )
+
+    # ------------------------------------------------------------------ #
+    # Employment lifecycle (M13/M16)
+    # ------------------------------------------------------------------ #
+
+    def _on_job_application(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict, event_type: str
+    ) -> None:
+        """The applicant remembers applying, withdrawing, or being rejected."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        position = self._position_title(session, envelope.world_id, payload.get("position_id") or "")
+        if event_type == "job_application_submitted":
+            text, importance = f"我向 {company} 应聘了{position}职位", 0.5
+        elif event_type == "job_application_withdrawn":
+            text, importance = f"我撤回了对 {company} 的{position}职位应聘", 0.4
+        else:
+            text, importance = f"我应聘 {company} 的{position}职位被拒绝了", 0.6
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic", text=text, importance=importance,
+            entities=[payload.get("company_id")], keywords=["应聘"],
+        )
+
+    def _on_employment_started(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """Hired: a milestone the applicant remembers (R25)."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        position = self._position_title(session, envelope.world_id, payload.get("position_id") or "")
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我被 {company} 录用，担任{position}",
+            importance=0.7,
+            entities=[payload.get("company_id")], keywords=["工作", "入职"],
+        )
+
+    def _on_employment_end(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict, event_type: str
+    ) -> None:
+        """Resignation (agent's own choice) or termination (manager's)."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        reason = payload.get("reason") or ""
+        position = ""
+        employment_id = payload.get("employment_id")
+        if employment_id:
+            contract = session.get(EmploymentContract, employment_id)
+            if contract is not None:
+                position = self._position_title(session, envelope.world_id, contract.position_id)
+        if event_type == "employment_resigned":
+            text, importance = f"我辞去了 {company} 的{position}工作（{reason}）", 0.6
+        else:
+            text, importance = f"我被 {company} 解雇了（{reason}）", 0.7
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic", text=text, importance=importance,
+            entities=[payload.get("company_id")], keywords=["工作"],
+        )
+
+    def _on_shift_completed(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """A finished formal shift — the formal-work counterpart of work_completed."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        minutes = payload.get("worked_minutes") or 0
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我在 {company} 完成了一次班次（{minutes}分钟）",
+            importance=0.5,
+            entities=[payload.get("company_id")], keywords=["工作"],
+        )
+
+    def _on_shift_absent(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """A missed shift — a negative event worth remembering."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我缺勤了 {company} 的一次班次",
+            importance=0.5,
+            entities=[payload.get("company_id")], keywords=["工作"],
+        )
+
+    def _on_shift_leave(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict, event_type: str
+    ) -> None:
+        """Leave request outcome (approved / rejected)."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        reason = payload.get("reason") or ""
+        if event_type == "shift_leave_approved":
+            text, importance = "我的请假申请被批准了", 0.4
+        else:
+            text, importance = f"我的请假申请被拒绝了（{reason}）", 0.4
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic", text=text, importance=importance,
+            entities=[payload.get("company_id")], keywords=["请假"],
+        )
+
+    def _on_wage_event(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict, event_type: str
+    ) -> None:
+        """Shift pay: paid (normal), unpaid (negative), or a repaid backlog."""
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        company = self._company_name(session, envelope.world_id, payload.get("company_id") or "")
+        if event_type == "wage_paid":
+            text, importance = f"收到 {company} 的班次工资", 0.4
+        elif event_type == "wage_unpaid":
+            text, importance = f"{company} 没有支付我的班次工资", 0.5
+        else:
+            text, importance = f"{company} 补发了我的欠薪", 0.5
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic", text=text, importance=importance,
+            entities=[payload.get("company_id")], keywords=["金钱"],
+        )
+
+    def _company_name(self, session: Session, world_id: str, company_id: str) -> str:
+        if not company_id:
+            return company_id
+        company = session.get(Company, {"world_id": world_id, "company_id": company_id})
+        return company.name if company is not None else company_id
+
+    def _position_title(self, session: Session, world_id: str, position_id: str) -> str:
+        if not position_id:
+            return position_id
+        position = session.get(Position, {"world_id": world_id, "position_id": position_id})
+        return position.title if position is not None else position_id
 
     def _agent_name(self, session: Session, world_id: str, agent_id: str) -> str:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})

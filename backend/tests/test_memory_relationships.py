@@ -640,3 +640,96 @@ def test_memories_and_relationships_survive_restart(world_config: ParsedWorldCon
         session.close()
     eng._runtimes.clear()
     eng2._runtimes.clear()
+
+
+# --------------------------------------------------------------------------- #
+# Employment lifecycle memories (M13/M16)
+# --------------------------------------------------------------------------- #
+
+
+def _employment_service(eng: WorldEngine) -> "CompanyEmploymentService":
+    """Attach a seeded CompanyEmploymentService to an engine (M13)."""
+    from app.services.company_employment_service import CompanyEmploymentService
+
+    service = CompanyEmploymentService(
+        eng,
+        SessionLocal,
+        Path(get_settings().world_data_dir).resolve(),
+    )
+    eng.company_employment_service = service
+    return service
+
+
+def test_apply_reject_hire_shift_resign_records_memories(
+        world_config: ParsedWorldConfig,
+) -> None:
+    """Applying, being rejected, hired, working a shift and resigning all land
+    in the applicant's episodic memories (observed-only, applicant side)."""
+    eng = make_engine(world_config)
+    service = _employment_service(eng)
+    runtime = eng.create_world("雇佣记忆")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+
+    openings = service.list_openings(world_id)
+    farm_opening = next(row for row in openings if row["position_id"] == "position_farm_worker")
+
+    # 1. Submitted, then rejected.
+    application = service.apply(world_id, farm_opening["opening_id"], "agent_linxia", "希望获得稳定收入")
+    service.review(world_id, application["application_id"], "agent_zhangming", "reject", "名额已满")
+    linxia = memories_for(world_id, "agent_linxia")
+    texts = [m.text for m in linxia]
+    assert any("应聘" in t and "职位" in t for t in texts)
+    assert any("被拒绝" in t for t in texts)
+
+    # 2. Re-apply (rejection freed the slot) and get hired.
+    application2 = service.apply(world_id, farm_opening["opening_id"], "agent_linxia", "再试一次")
+    reviewed = service.review(world_id, application2["application_id"], "agent_zhangming", "accept", "同意录用")
+    assert reviewed["employment_id"]
+    texts = [m.text for m in memories_for(world_id, "agent_linxia")]
+    assert any("录用" in t for t in texts)
+
+    # 3. Work one full shift (company pays -> wage_paid memory).
+    employment_view = service.list_agent_employment(world_id, "agent_linxia")
+    shift = employment_view["shifts"][0]
+    advance_minutes(eng, world_id, shift["scheduled_start"] - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.location_id = "village_farm"
+        session.commit()
+    finally:
+        session.close()
+    started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+    advance_minutes(eng, world_id, started["scheduled_end"] - runtime.clock.world_time)
+    texts = [m.text for m in memories_for(world_id, "agent_linxia")]
+    assert any("完成了一次班次" in t for t in texts)
+
+    # 4. Resign.
+    service.resign(world_id, reviewed["employment_id"], "agent_linxia", "想去别处发展")
+    texts = [m.text for m in memories_for(world_id, "agent_linxia")]
+    assert any("辞去" in t for t in texts)
+
+    eng._runtimes.clear()
+
+
+def test_withdrawn_application_records_memory(world_config: ParsedWorldConfig) -> None:
+    eng = make_engine(world_config)
+    service = _employment_service(eng)
+    runtime = eng.create_world("撤回记忆")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+
+    openings = service.list_openings(world_id)
+    farm_opening = next(row for row in openings if row["position_id"] == "position_farm_worker")
+    application = service.apply(world_id, farm_opening["opening_id"], "agent_chenyu", "试试")
+    service.withdraw(world_id, application["application_id"], "agent_chenyu")
+
+    texts = [m.text for m in memories_for(world_id, "agent_chenyu")]
+    assert any("撤回" in t and "应聘" in t for t in texts)
+    assert all("拒绝" not in t for t in texts)
+
+    eng._runtimes.clear()
