@@ -18,6 +18,47 @@
       "description": "浇水、播种或收获，晨露农场的日常农活"
     },
     {
+      "job_id": "job_farm_production",
+      "name": "农场生产",
+      "location_id": "village_farm",
+      "interactable_id": "farm_field",
+      "duration_minutes": 240,
+      "wage": 60,
+      "energy_cost_per_hour": 4,
+      "products": [
+        {
+          "item_id": "wheat",
+          "quantity": 10
+        }
+      ],
+      "inputs": [],
+      "formal_only": true,
+      "description": "正式班次：在晨露农场按班生产小麦，产物进入农场企业库存"
+    },
+    {
+      "job_id": "job_bakery_bake",
+      "name": "烘焙面包",
+      "location_id": "village_bakery",
+      "interactable_id": "bakery_oven",
+      "duration_minutes": 240,
+      "wage": 60,
+      "energy_cost_per_hour": 4,
+      "products": [
+        {
+          "item_id": "bread",
+          "quantity": 20
+        }
+      ],
+      "inputs": [
+        {
+          "item_id": "wheat",
+          "quantity": 10
+        }
+      ],
+      "formal_only": true,
+      "description": "正式班次：消耗小麦烘烤面包，产物进入面包坊企业库存"
+    },
+    {
       "job_id": "job_shop_attendant",
       "name": "商店值班",
       "location_id": "village_shop",

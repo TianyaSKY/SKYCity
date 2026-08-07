@@ -116,6 +116,13 @@ async def lifespan(app: FastAPI):
     await engine.start()
     engine.load_existing()
     company_employment_service.register_existing_runtimes()
+    # M16: seed/backfill company static data (bakery, formal recipes, bread
+    # shelf rule) for every resumed runtime — idempotent, startup-safe.
+    for world_id in engine.runtime_ids():
+        try:
+            company_employment_service.ensure_seeded(world_id)
+        except Exception:  # noqa: BLE001 - seeding must never block startup
+            logger.exception("ensure_seeded failed for world {}", world_id)
     logger.info("{} ready (map v{})", settings.app_name, world.map_version)
     yield
     await engine.stop()

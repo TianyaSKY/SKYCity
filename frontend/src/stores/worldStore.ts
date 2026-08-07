@@ -17,6 +17,7 @@ import {
     getAgentDetail,
     getAgentEmployment,
     getCompanies,
+    getCompanyInventory,
     getConversations,
     getDecisions,
     getJobOpenings,
@@ -43,6 +44,7 @@ import type {
     AgentSnapshot,
     Cell,
     CompanyInfo,
+    CompanyInventoryItem,
     ConversationMessage,
     ConversationSummary,
     CropSnapshot,
@@ -768,6 +770,38 @@ function eventText(
                 return items ? `企业 ${company} 库存变化（${items}）` : `企业 ${company} 库存变化`;
             }
         case
+            'company_production_completed'
+        :
+            {
+                const company = companyName(companies, p.company_id);
+                const consumed = itemsText(p.consumed);
+                const products = itemsText(p.products);
+                const suffix = consumed ? `（消耗 ${consumed}）` : '';
+                return products
+                    ? `企业 ${company} 完成生产：${products}${suffix}`
+                    : `企业 ${company} 完成生产`;
+            }
+        case
+            'company_purchase_completed'
+        :
+            {
+                const buyer = companyName(companies, p.company_id);
+                const seller = companyName(companies, p.seller_company_id);
+                const item = itemLabel(p.item_id);
+                const qty = typeof p.quantity === 'number' ? p.quantity : 0;
+                const total = typeof p.total === 'number' ? p.total : '?';
+                return `企业 ${buyer} 从 ${seller} 采购 ${item}×${qty}（${total} 金币）`;
+            }
+        case
+            'company_store_stocked'
+        :
+            {
+                const company = companyName(companies, p.company_id);
+                const item = itemLabel(p.item_id);
+                const qty = typeof p.quantity === 'number' ? p.quantity : 0;
+                return `企业 ${company} 上架 ${item}×${qty} 到货架`;
+            }
+        case
             'job_opening_created'
         :
             {
@@ -890,6 +924,8 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
             companies: [] as CompanyInfo[],
             /** M13: open job openings of the active world (REST-loaded after snapshot). */
             jobOpenings: [] as JobOpening[],
+            /** M16: warehouse rows per company (keyed by company_id). */
+            companyInventories: {} as Record<string, CompanyInventoryItem[]>,
             /** M13: employment + recent shifts cache per agent (REST-backed, display-only). */
             agentEmployment: {} as Record<string, AgentEmploymentResponse>,
             /** M13: latest shift per agent as tracked from WS events (display-only). */
@@ -1094,6 +1130,17 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                 } catch {
                     // Best-effort; the next snapshot retries the load.
                 }
+                // M16: warehouse rows per company (best-effort, parallel).
+                const inventories = await Promise.all(
+                    this.companies.map((c) =>
+                        getCompanyInventory(this.worldId!, c.company_id).catch(() => []),
+                    ),
+                );
+                const cache: Record<string, CompanyInventoryItem[]> = {};
+                this.companies.forEach((c, index) => {
+                    cache[c.company_id] = inventories[index] ?? [];
+                });
+                this.companyInventories = cache;
             },
 
             /** M13: (re)fetch one agent's employment + recent shifts into the cache. */
@@ -1372,9 +1419,18 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                         break;
                     }
                     case 'company_sale_completed':
-                    case 'company_inventory_changed':
                         // Stream text only; the ledger/money arrive via company_money_changed.
                         break;
+                    case 'company_inventory_changed': {
+                        // M16: the event carries the company's full warehouse list —
+                        // replace the cache for that company only.
+                        const items = Array.isArray(p.items) ? p.items : [];
+                        this.companyInventories = {
+                            ...this.companyInventories,
+                            [String(p.company_id)]: items as CompanyInventoryItem[],
+                        };
+                        break;
+                    }
                     case 'job_opening_created': {
                         const company = this.companies.find((c) => c.company_id === p.company_id);
                         if (company && typeof p.vacancies === 'number') company.open_vacancies += p.vacancies;

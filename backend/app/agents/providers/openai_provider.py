@@ -36,12 +36,14 @@ from app.agents.tools.daily_life import sleep, use_item
 from app.agents.tools.employment import (
     apply_job,
     pause_recruitment,
+    purchase_company_goods,
     request_leave,
     resign_job,
     resume_recruitment,
     review_job_application,
     review_leave_request,
     start_shift,
+    stock_store,
     terminate_employment,
     withdraw_job_application,
 )
@@ -68,6 +70,7 @@ class OpenAIProvider:
             apply_job, withdraw_job_application, review_job_application,
             start_shift, resign_job, request_leave, review_leave_request,
             terminate_employment, pause_recruitment, resume_recruitment,
+            purchase_company_goods, stock_store,
         ]
         # Explicit SDK provider: routes through settings (base_url / key) and
         # uses chat completions so third-party OpenAI-compatible APIs work.

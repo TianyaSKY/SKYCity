@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -16,9 +17,12 @@ from app.database.models.companies import (
     CompanyTransaction,
     EmploymentContract,
     JobOpening,
+    Position,
     WorkShift,
 )
 from app.database.models.inventories import Inventory
+from app.database.models.jobs import Job
+from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.transactions import Transaction
@@ -76,6 +80,7 @@ def test_seed_apply_review_shift_and_payroll(system) -> None:
     assert {row["company_id"] for row in companies} == {
         "company_morning_farm",
         "company_village_shop",
+        "company_village_bakery",
     }
 
     openings = service.list_openings(runtime.world_id)
@@ -153,7 +158,9 @@ def test_seed_contract_and_queries(system) -> None:
     world_id = runtime.world_id
 
     companies = {row["company_id"]: row for row in service.list_companies(world_id)}
-    assert set(companies) == {"company_morning_farm", "company_village_shop"}
+    assert set(companies) == {
+        "company_morning_farm", "company_village_shop", "company_village_bakery"
+    }
     assert companies["company_morning_farm"]["money"] == 800
     assert companies["company_morning_farm"]["status"] == "active"
     assert companies["company_morning_farm"]["employee_count"] == 0
@@ -162,7 +169,8 @@ def test_seed_contract_and_queries(system) -> None:
 
     farm_positions = service.list_positions(world_id, "company_morning_farm")
     worker = next(p for p in farm_positions if p["position_id"] == "position_farm_worker")
-    assert worker["job_name"] == "农场劳作"
+    # M16: 农场正式岗位绑定生产配方（农场生产）。
+    assert worker["job_name"] == "农场生产"
     assert worker["wage_per_shift"] == 60
     assert worker["shift_start_minute"] == 480 and worker["shift_end_minute"] == 720
     assert worker["capacity"] == 2 and worker["vacancies"] == 2
@@ -174,7 +182,7 @@ def test_seed_contract_and_queries(system) -> None:
     assert attendant["capacity"] == 1
 
     openings = service.list_openings(world_id)
-    assert len(openings) == 2
+    assert len(openings) == 3
     farm_opening = next(o for o in openings if o["company_id"] == "company_morning_farm")
     assert farm_opening["vacancies"] == 2
 
@@ -204,6 +212,7 @@ def test_company_query_endpoints(client: TestClient) -> None:
         assert {row["company_id"] for row in companies} == {
             "company_morning_farm",
             "company_village_shop",
+            "company_village_bakery",
         }
         detail = client.get(f"/api/worlds/{world_id}/companies/company_morning_farm").json()
         assert detail["money"] == 800 and detail["open_vacancies"] == 2
@@ -849,7 +858,8 @@ def test_formal_work_products_enter_company_inventory(system) -> None:
         inventory = session.get(
             CompanyInventory, {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"}
         )
-        assert inventory is not None and inventory.quantity == 1
+        # M16: the farm position now runs the production recipe (10 wheat/shift).
+        assert inventory is not None and inventory.quantity == 10
         agent_inv = session.get(
             Inventory, {"world_id": world_id, "agent_id": "agent_linxia", "item_id": "wheat"}
         )
@@ -1221,7 +1231,7 @@ def test_save_restore_v2_company_state(system) -> None:
             CompanyInventory,
             {"world_id": new_world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
         )
-        assert inventory is not None and inventory.quantity == 1
+        assert inventory is not None and inventory.quantity == 10
         max_seq_now = session.scalar(
             select(func.max(WorldEvent.sequence)).where(
                 WorldEvent.world_id == new_world_id
@@ -1285,10 +1295,11 @@ def test_restore_v1_save_migrates(system) -> None:
     assert {row["company_id"] for row in companies} == {
         "company_morning_farm",
         "company_village_shop",
+        "company_village_bakery",
     }
     assert companies[0]["money"] in {800, 1000}
     openings = service.list_openings(new_world_id)
-    assert len(openings) == 2
+    assert len(openings) == 3
     session = SessionLocal()
     try:
         store = session.scalar(
@@ -1323,7 +1334,7 @@ def test_first_version_acceptance_script(system) -> None:
     assert farm_worker["capacity"] == 2
     shop_attendant = service.list_positions(world_id, "company_village_shop")[0]
     assert shop_attendant["capacity"] == 1
-    assert len(service.list_openings(world_id)) == 2
+    assert len(service.list_openings(world_id)) == 3
 
     # 4-6. 居民申请 → 经理录用 → 正式职业 + 下一班次
     farm_opening = next(
@@ -1491,5 +1502,609 @@ def test_first_version_acceptance_script(system) -> None:
         ).all()
         assert any(s.status == "completed" for s in restored_shifts)
         assert any(s.status == "absent" for s in restored_shifts)
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------- #
+# M16: 农场→面包坊→商店 生产链（R36/R37/R38）
+# --------------------------------------------------------------------------- #
+
+def _hire(system, world_id: str, company_id: str, applicant: str, manager: str) -> str:
+    """Hire one worker at a company, return the employment id."""
+    engine, service = system
+    opening = next(
+        o for o in service.list_openings(world_id)
+        if o["company_id"] == company_id
+    )
+    application = service.apply(world_id, opening["opening_id"], applicant, "求职")
+    reviewed = service.review(
+        world_id, application["application_id"], manager, "accept", "录用"
+    )
+    return reviewed["employment_id"]
+
+
+def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
+    """M16 种子：3 家企业 3 个岗位；正式岗位绑定生产配方；面包坊经理为 agent_touzi."""
+    engine, service = system
+    runtime = engine.create_world("M16种子测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        companies = session.scalars(
+            select(Company).where(Company.world_id == world_id)
+        ).all()
+        assert {row.company_id for row in companies} == {
+            "company_morning_farm", "company_village_shop", "company_village_bakery",
+        }
+        bakery = next(
+            row for row in companies if row.company_id == "company_village_bakery"
+        )
+        assert bakery.manager_agent_id == "agent_touzi"
+        positions = session.scalars(
+            select(Position).where(Position.world_id == world_id)
+        ).all()
+        assert {row.position_id for row in positions} == {
+            "position_farm_worker", "position_shop_attendant", "position_baker",
+        }
+        farm = next(
+            row for row in positions if row.position_id == "position_farm_worker"
+        )
+        assert farm.job_id == "job_farm_production"
+        baker = next(row for row in positions if row.position_id == "position_baker")
+        assert baker.job_id == "job_bakery_bake"
+        job_ids = set(
+            session.scalars(select(Job.job_id).where(Job.world_id == world_id)).all()
+        )
+        assert {"job_farm_production", "job_bakery_bake"} <= job_ids
+        bakery_loc = session.get(
+            WorldLocation, {"world_id": world_id, "location_id": "village_bakery"}
+        )
+        assert bakery_loc is not None and bakery_loc.location_type == "workshop"
+    finally:
+        session.close()
+
+
+def test_m16_purchase_chain_ledger_and_events(system) -> None:
+    """M16 R36：农场一班产 10 wheat → 面包坊采购 → 双流水/双事件/trace 共享."""
+    engine, service = system
+    runtime = engine.create_world("M16采购测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    # 农场正式班次产 10 wheat（工资 60 → 农场 740）
+    employment_id = _hire_farm_worker(service, world_id)
+    shift = _next_shift(service, world_id, employment_id)
+    advance_minutes(engine, world_id, shift["scheduled_start"] - runtime.clock.world_time)
+    _place_at_farm(engine, world_id)
+    started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+    advance_minutes(engine, world_id, started["scheduled_end"] - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        farm = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
+        )
+        assert wheat is not None and wheat.quantity == 10
+        assert farm is not None and farm.money == 740
+    finally:
+        session.close()
+
+    result = service.purchase_company_goods(
+        world_id,
+        "company_village_bakery",
+        "company_morning_farm",
+        "agent_touzi",
+        "wheat",
+        quantity=10,
+        reason="备料",
+        trace_id="trc_m16_purchase",
+    )
+    assert result["total"] == 60 and result["buyer_balance"] == 240
+
+    session = SessionLocal()
+    try:
+        bakery = session.get(
+            Company, {"world_id": world_id, "company_id": "company_village_bakery"}
+        )
+        farm = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        assert bakery is not None and bakery.money == 300 - 60
+        assert farm is not None and farm.money == 740 + 60
+        buyer_tx = session.scalar(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.company_id == "company_village_bakery",
+                CompanyTransaction.type == "material_purchase",
+            )
+        )
+        assert buyer_tx is not None
+        assert buyer_tx.amount == -60 and buyer_tx.balance_after == 240
+        assert buyer_tx.reference_type == "company"
+        assert buyer_tx.reference_id == "company_morning_farm"
+        seller_tx = session.scalar(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.company_id == "company_morning_farm",
+                CompanyTransaction.type == "wholesale_sale",
+            )
+        )
+        assert seller_tx is not None
+        assert seller_tx.amount == 60 and seller_tx.balance_after == 800
+        assert seller_tx.reference_id == "company_village_bakery"
+        events = session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.trace_id == "trc_m16_purchase",
+            )
+        ).all()
+        money_events = [e for e in events if e.type == "company_money_changed"]
+        assert len(money_events) == 2
+        assert sorted(e.payload["amount"] for e in money_events) == [-60, 60]
+        purchases = [e for e in events if e.type == "company_purchase_completed"]
+        assert len(purchases) == 1
+        assert purchases[0].payload == {
+            "company_id": "company_village_bakery",
+            "seller_company_id": "company_morning_farm",
+            "item_id": "wheat",
+            "quantity": 10,
+            "unit_price": 6,
+            "total": 60,
+        }
+        inventory_events = [e for e in events if e.type == "company_inventory_changed"]
+        assert len(inventory_events) == 2
+    finally:
+        session.close()
+
+
+def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
+    """M16 R37：无原料签到被拒且无完成回调；有原料预留=10；完成后消耗并产出 20 bread."""
+    engine, service = system
+    runtime = engine.create_world("M16预留测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    view = service.list_agent_employment(world_id, "agent_chenyu")
+    shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
+    # 面包坊班次当天 13:00（780）；先到地点
+    advance_minutes(engine, world_id, shift["scheduled_start"] - 30 - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert agent is not None
+        agent.location_id = "village_bakery"
+        session.commit()
+    finally:
+        session.close()
+    # 无小麦 → 拒绝签到；班次保持 scheduled；无完成回调
+    with pytest.raises(ValueError, match="生产原料不足"):
+        service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    session = SessionLocal()
+    try:
+        row = session.get(WorkShift, shift["shift_id"])
+        assert row is not None and row.status == "scheduled"
+        completion = session.scalar(
+            select(ScheduledAction).where(
+                ScheduledAction.world_id == world_id,
+                ScheduledAction.action_type == "formal_shift_completed",
+                ScheduledAction.agent_id == "agent_chenyu",
+            )
+        )
+        assert completion is None
+    finally:
+        session.close()
+    # 备料 10 wheat → 签到成功，预留 10
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_village_bakery",
+                item_id="wheat", quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    started = service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    assert started["status"] in {"in_progress", "late"}
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 10 and wheat.reserved_quantity == 10
+    finally:
+        session.close()
+    # 完成班次：消耗 10 wheat、产出 20 bread、工资 60
+    advance_minutes(engine, world_id, started["scheduled_end"] - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 0 and wheat.reserved_quantity == 0
+        bread = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "bread"},
+        )
+        assert bread is not None and bread.quantity == 20
+        wage = session.scalar(
+            select(Transaction).where(
+                Transaction.world_id == world_id,
+                Transaction.agent_id == "agent_chenyu",
+                Transaction.type == "work_wage",
+            )
+        )
+        assert wage is not None and wage.amount == 60
+        production = session.scalar(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "company_production_completed",
+            )
+        )
+        assert production is not None
+        assert production.payload["company_id"] == "company_village_bakery"
+        assert production.payload["shift_id"] == shift["shift_id"]
+        assert production.payload["consumed"] == [{"item_id": "wheat", "quantity": 10}]
+        assert production.payload["products"] == [{"item_id": "bread", "quantity": 20}]
+    finally:
+        session.close()
+
+
+def test_m16_formal_only_jobs_reject_casual_work(system) -> None:
+    """M16：formal_only 的 job 拒绝 work()；旧临时岗 job_farm_field 行为不变."""
+    engine, service = system
+    runtime = engine.create_world("M16正式门测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.location_id = "village_farm"
+        session.commit()
+    finally:
+        session.close()
+    ok, _, reason = engine.economy_service.work_start(
+        world_id, "agent_linxia", "job_farm_production", reason="干农活"
+    )
+    assert ok is False and reason == "该工作仅限正式员工班次"
+    ok, _, reason = engine.economy_service.work_start(
+        world_id, "agent_linxia", "job_farm_field", reason="干农活"
+    )
+    assert ok is True and reason is None
+    advance_minutes(engine, world_id, 121)  # 120 分钟工作 + 结算
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None and agent.action_type is None
+        wheat = session.get(
+            Inventory, {"world_id": world_id, "agent_id": "agent_linxia", "item_id": "wheat"}
+        )
+        assert wheat is not None and wheat.quantity == 1  # 旧路径 wheat×1 入个人背包
+    finally:
+        session.close()
+
+
+def test_m16_stock_store_moves_warehouse_to_shelf(system) -> None:
+    """M16 R38：经理上架仓库→货架；权限/容量/库存校验."""
+    engine, service = system
+    runtime = engine.create_world("M16上架测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_village_shop",
+                item_id="bread", quantity=30,
+            )
+        )
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None
+        product.stock = 0
+        session.commit()
+    finally:
+        session.close()
+    # 非本企业经理被拒
+    with pytest.raises(ValueError, match="没有管理该企业上架的权限"):
+        service.stock_store(
+            world_id, "company_village_shop", "village_shop", "agent_touzi",
+            "bread", quantity=1,
+        )
+    result = service.stock_store(
+        world_id, "company_village_shop", "village_shop", "agent_wangfang",
+        "bread", quantity=20, reason="补货",
+    )
+    assert result["stock_after"] == 20
+    # 货架满 → 拒；仓库不足 → 拒
+    with pytest.raises(ValueError, match="货架放不下"):
+        service.stock_store(
+            world_id, "company_village_shop", "village_shop", "agent_wangfang",
+            "bread", quantity=1,
+        )
+    with pytest.raises(ValueError, match="企业仓库库存不足"):
+        service.stock_store(
+            world_id, "company_village_shop", "village_shop", "agent_wangfang",
+            "bread", quantity=20,
+        )
+    session = SessionLocal()
+    try:
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None and product.stock == 20
+        warehouse = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_shop", "item_id": "bread"},
+        )
+        assert warehouse is not None and warehouse.quantity == 10
+        stocked = session.scalar(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "company_store_stocked",
+            )
+        )
+        assert stocked is not None
+        assert stocked.payload["quantity"] == 20 and stocked.payload["stock_after"] == 20
+    finally:
+        session.close()
+
+
+def test_m16_retail_income_after_stocking(system) -> None:
+    """M16：上架后的 bread 由居民购买，收入进杂货店企业账户（R33 扩展）."""
+    engine, service = system
+    runtime = engine.create_world("M16零售测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_village_shop",
+                item_id="bread", quantity=20,
+            )
+        )
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None
+        product.stock = 0
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.location_id = "village_shop"
+        session.commit()
+    finally:
+        session.close()
+    service.stock_store(
+        world_id, "company_village_shop", "village_shop", "agent_wangfang",
+        "bread", quantity=20, reason="补货",
+    )
+    ok, _, reason = engine.economy_service.buy(
+        world_id, "agent_linxia", "bread", quantity=1, reason="买面包"
+    )
+    assert ok is True and reason is None
+    session = SessionLocal()
+    try:
+        shop = session.get(
+            Company, {"world_id": world_id, "company_id": "company_village_shop"}
+        )
+        assert shop is not None and shop.money == 1000 + 12
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None and product.stock == 19
+        warehouse = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_shop", "item_id": "bread"},
+        )
+        assert warehouse is not None and warehouse.quantity == 0
+    finally:
+        session.close()
+
+
+def test_m16_bread_does_not_auto_restock(system) -> None:
+    """M16：bread restock_daily=0 → 推进一天货架不回补、无 bread 补货事件."""
+    engine, service = system
+    runtime = engine.create_world("M16不补货测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None
+        assert product.restock_daily == 0
+        assert product.stock == 20  # 无 initial_stock → 播种即满
+        product.stock = 3
+        session.commit()
+    finally:
+        session.close()
+    advance_minutes(engine, world_id, 1440)  # 次日 08:00（补货点）
+    session = SessionLocal()
+    try:
+        product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert product is not None and product.stock == 3  # 不回补
+    finally:
+        session.close()
+    for event in engine.events_after(world_id, 0):
+        if event.type == "store_restocked":
+            assert all(
+                item["item_id"] != "bread" for item in event.payload.get("restocked", [])
+            )
+
+
+def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
+    """M16 R36 并发：最后 10 wheat 双采购，恰一成功且卖方库存不为负."""
+    engine, service = system
+    runtime = engine.create_world("M16并发采购测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_morning_farm",
+                item_id="wheat", quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    results: list[tuple[bool, str]] = []
+    barrier = threading.Barrier(2)
+
+    def attempt() -> None:
+        barrier.wait()  # 两线程同时发起采购
+        try:
+            service.purchase_company_goods(
+                world_id,
+                "company_village_bakery",
+                "company_morning_farm",
+                "agent_touzi",
+                "wheat",
+                quantity=10,
+                reason="抢货",
+            )
+            results.append((True, ""))
+        except ValueError as exc:
+            results.append((False, str(exc)))
+
+    threads = [threading.Thread(target=attempt) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(results) == 2
+    assert sum(1 for ok, _ in results if ok) == 1, f"expected one winner, got {results}"
+    assert sum(1 for ok, reason in results if not ok and reason == "卖方库存不足") == 1
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
+        )
+        assert wheat is not None and wheat.quantity == 0
+    finally:
+        session.close()
+
+
+def test_m16_save_restore_keeps_inventory_and_seed_idempotent(system) -> None:
+    """M16：存档保持库存/预留/余额/进行中班次；恢复后重复播种无新行."""
+    from app.services.save_service import SaveService
+
+    engine, service = system
+    runtime = engine.create_world("M16存档测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    save_service = SaveService(engine, SessionLocal)
+
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    view = service.list_agent_employment(world_id, "agent_chenyu")
+    shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
+    advance_minutes(engine, world_id, shift["scheduled_start"] - 30 - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert agent is not None
+        agent.location_id = "village_bakery"
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_village_bakery",
+                item_id="wheat", quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    started = service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    assert started["status"] in {"in_progress", "late"}
+
+    saved = save_service.save(world_id)
+    runtime2 = save_service.restore(saved.save_id)
+    new_world_id = runtime2.world_id
+    assert new_world_id != world_id
+
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": new_world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 10 and wheat.reserved_quantity == 10
+        bakery = session.get(
+            Company, {"world_id": new_world_id, "company_id": "company_village_bakery"}
+        )
+        assert bakery is not None and bakery.money == 300
+        shift_row = session.scalar(
+            select(WorkShift).where(
+                WorkShift.world_id == new_world_id,
+                WorkShift.status.in_(("in_progress", "late")),
+            )
+        )
+        assert shift_row is not None
+        counts = {
+            "companies": session.scalar(
+                select(func.count()).select_from(Company).where(Company.world_id == new_world_id)
+            ),
+            "positions": session.scalar(
+                select(func.count()).select_from(Position).where(Position.world_id == new_world_id)
+            ),
+            "jobs": session.scalar(
+                select(func.count()).select_from(Job).where(Job.world_id == new_world_id)
+            ),
+            "locations": session.scalar(
+                select(func.count()).select_from(WorldLocation).where(WorldLocation.world_id == new_world_id)
+            ),
+        }
+    finally:
+        session.close()
+    # 恢复后重复 ensure_seeded → 无新行（幂等），预留保持
+    service.ensure_seeded(new_world_id)
+    service.ensure_seeded(new_world_id)
+    session = SessionLocal()
+    try:
+        assert session.scalar(
+            select(func.count()).select_from(Company).where(Company.world_id == new_world_id)
+        ) == counts["companies"]
+        assert session.scalar(
+            select(func.count()).select_from(Position).where(Position.world_id == new_world_id)
+        ) == counts["positions"]
+        assert session.scalar(
+            select(func.count()).select_from(Job).where(Job.world_id == new_world_id)
+        ) == counts["jobs"]
+        assert session.scalar(
+            select(func.count()).select_from(WorldLocation).where(WorldLocation.world_id == new_world_id)
+        ) == counts["locations"]
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": new_world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 10 and wheat.reserved_quantity == 10
     finally:
         session.close()

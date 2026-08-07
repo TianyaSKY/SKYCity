@@ -26,6 +26,7 @@ function typeLabel(locationType: string): string {
         office: '政务厅',
         house: '住宅',
         hotel: '旅店',
+        workshop: '工坊',
     };
     return labels[locationType] ?? locationType;
 }

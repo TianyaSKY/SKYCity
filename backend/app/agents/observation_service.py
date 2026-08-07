@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.database.models.agents import Agent
 from app.database.models.companies import (
     Company,
+    CompanyInventory,
     EmploymentContract,
     JobApplication,
     JobOpening,
@@ -48,7 +49,7 @@ from app.config.gameplay import (
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
 )
-from app.services.seed_loader import load_blueprints, load_crops
+from app.services.seed_loader import load_blueprints, load_companies, load_crops, load_jobs
 from app.world_engine.engine import is_location_open
 
 _WEATHER_NAMES = {
@@ -328,7 +329,12 @@ def build_observation(
                     Job.world_id == world_id, Job.location_id == agent.location_id
                 )
             ).all()
+            formal_only = {
+                seed["job_id"] for seed in load_jobs() if seed.get("formal_only")
+            }
             for job in jobs:
+                if job.job_id in formal_only:
+                    continue  # M16: production recipes run as formal shifts only
                 lines.append(
                     f"- work({job.job_id}): {job.name}，{job.duration_minutes}分钟，工资{job.wage}金币"
                 )
@@ -501,6 +507,66 @@ def build_observation(
                     f"待审核申请{len(pending)}条，待审批请假"
                     f"{sum(1 for r in pending_leaves if r.company_id == company.company_id)}条"
                 )
+                # M16: warehouse + procurement + shelf visibility for the
+                # manager's own company (fixed server prices, full IDs).
+                inventory_rows = session.scalars(
+                    select(CompanyInventory)
+                    .where(
+                        CompanyInventory.world_id == world_id,
+                        CompanyInventory.company_id == company.company_id,
+                    )
+                    .order_by(CompanyInventory.item_id)
+                    .limit(8)
+                ).all()
+                if inventory_rows:
+                    lines.append("  【仓库库存】")
+                    for row in inventory_rows:
+                        lines.append(
+                            f"  - {item_names.get(row.item_id, row.item_id)}"
+                            f"（{row.item_id}）"
+                            f" 总量{row.quantity}/预留{row.reserved_quantity}/"
+                            f"可用{row.quantity - row.reserved_quantity}"
+                        )
+                company_seed = next(
+                    (s for s in load_companies() if s["company_id"] == company.company_id),
+                    None,
+                )
+                for rule in (company_seed or {}).get("procurement") or []:
+                    seller_id = str(rule.get("seller_company_id") or "")
+                    seller = session.get(
+                        Company, {"world_id": world_id, "company_id": seller_id}
+                    )
+                    seller_name = seller.name if seller is not None else seller_id
+                    rule_item = str(rule.get("item_id") or "")
+                    lines.append(
+                        f"  - 可采购：从 {seller_name}（{seller_id}）采购 "
+                        f"{item_names.get(rule_item, rule_item)}（{rule_item}），"
+                        f"{rule.get('unit_price')}金币/件 —— "
+                        f"purchase_company_goods({company.company_id}, {seller_id}, "
+                        f"{rule_item}, reason, quantity=N)"
+                    )
+                for store in session.scalars(
+                        select(Store).where(
+                            Store.world_id == world_id,
+                            Store.company_id == company.company_id,
+                        )
+                ).all():
+                    for product in session.scalars(
+                            select(StoreProduct)
+                            .where(
+                                StoreProduct.world_id == world_id,
+                                StoreProduct.store_id == store.store_id,
+                            )
+                            .order_by(StoreProduct.item_id)
+                    ).all():
+                        if product.stock >= product.stock_cap:
+                            continue
+                        lines.append(
+                            f"  - 可上架：{item_names.get(product.item_id, product.item_id)}"
+                            f"（{product.item_id}）货架{product.stock}/{product.stock_cap} —— "
+                            f"stock_store({company.company_id}, {store.store_id}, "
+                            f"{product.item_id}, reason, quantity=N)"
+                        )
                 if pending:
                     lines.append("  【待审核求职申请】")
                     for row in pending[:3]:
@@ -566,6 +632,14 @@ def build_observation(
             lines.append(
                 "- pause_recruitment/resume_recruitment/terminate_employment 仅企业经理可用；"
                 "解雇不消除欠薪"
+            )
+            lines.append(
+                "- purchase_company_goods(buyer_company_id, seller_company_id, item_id, "
+                "reason, quantity=1): 按固定价向其他企业采购（仅企业经理，价格由服务器决定）"
+            )
+            lines.append(
+                "- stock_store(company_id, store_id, item_id, reason, quantity=1): "
+                "把本企业仓库货物上架到自有商店货架（仅企业经理，需货架有空间）"
             )
 
         # M13: employee card (R27/R31): own contract + today's shift.

@@ -124,6 +124,8 @@ BUILDINGS: dict[str, tuple[int, int, int]] = {
     "town_hall_2": (29, 8, HOUSE_TOPS[1]),
     # 小镇旅店: on the main road at the plaza's east edge; door at (37, 21).
     "village_hotel": (37, 20, HOUSE_SHOP),
+    # 晨露面包坊: on the vertical road (same door pattern as village_shop).
+    "village_bakery": (30, 12, HOUSE_SHOP),
 }
 
 LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
@@ -132,6 +134,7 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "village_plaza": (32, 20),
     "town_hall": (29, 8),
     "village_hotel": (37, 20),
+    "village_bakery": (30, 12),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -154,6 +157,10 @@ LOCATIONS: dict[str, dict] = {
     "village_hotel": {
         "name": "小镇旅店", "location_type": "hotel", "capacity": 10,
         "open_hour": 0, "close_hour": 24,
+    },
+    "village_bakery": {
+        "name": "晨露面包坊", "location_type": "workshop", "capacity": 6,
+        "open_hour": 6, "close_hour": 18,
     },
 }
 
@@ -221,6 +228,8 @@ INTERACTABLES: dict[str, dict] = {
                  "col": 32, "row": 20},
     "town_hall_desk": {"object_type": "service_desk", "location_id": "town_hall",
                        "col": 28, "row": 9},
+    "bakery_oven": {"object_type": "workshop_station", "location_id": "village_bakery",
+                    "col": 30, "row": 13},
 }
 
 
@@ -620,7 +629,7 @@ def main() -> None:
             f"角色卡 id 与文件名不一致: {card.get('id')!r} != {agent_id!r}"
         )
     int_layer = next(l for l in tmj["layers"] if l["name"] == "interactables")
-    assert len(int_layer["objects"]) == 5
+    assert len(int_layer["objects"]) == 6
     collision = next(l for l in tmj["layers"] if l["name"] == "collision")
     nav = next(l for l in tmj["layers"] if l["name"] == "navigation")
     assert any(v > 0 for v in collision["data"]), "collision empty"

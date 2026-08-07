@@ -116,7 +116,7 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `company_created`              | `{company_id, name, company_type, initial_money}`                                                      | 企业播种/创建                   | 待实现 |
 | `company_status_changed`       | `{company_id, old_status, new_status, reason?}`                                                        | 暂停/恢复/停业                  | 已实现 |
 | `company_money_changed`        | `{company_id, amount, balance, reason}`                                                                | 企业资金变动（amount 带符号）   | 已实现 |
-| `company_inventory_changed`    | `{company_id, items: [{item_id, quantity}]}`                                                           | 企业库存变化（完整列表）        | 待实现 |
+| `company_inventory_changed`    | `{company_id, items: [{item_id, quantity, reserved_quantity}]}`                                        | 企业库存变化（完整列表）        | 已实现 |
 | `job_opening_created`          | `{opening_id, company_id, position_id, vacancies}`                                                     | 发布招聘                        | 已实现 |
 | `job_opening_closed`           | `{opening_id, company_id, position_id, reason?}`                                                       | 关闭招聘（含招聘暂停）          | 已实现 |
 | `job_application_submitted`    | `{application_id, opening_id, company_id, position_id, agent_id, reason}`                              | 居民申请                        | 已实现 |
@@ -141,7 +141,9 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `wage_unpaid`                  | `{shift_id, employment_id, company_id, agent_id, wage_due, wage_paid: 0, company_balance}`             | 欠薪                            | 已实现 |
 | `wage_repaid`                  | `{shift_id?, employment_id, company_id, agent_id, amount}`                                             | 补发欠薪                        | 已实现 |
 | `company_sale_completed`       | `{company_id, store_id, item_id, quantity, unit_price, total}`                                         | 商店售出入企业账户              | 已实现 |
-| `company_production_completed` | `{company_id, shift_id, products: [{item_id, quantity}]}`                                              | 正式工作产物入库                | 待实现 |
+| `company_production_completed` | `{company_id, shift_id, consumed: [{item_id, quantity}], products: [{item_id, quantity}]}`             | 正式工作产物入库（含原料消耗）  | 已实现 |
+| `company_purchase_completed`   | `{company_id, seller_company_id, item_id, quantity, unit_price, total}`                                | 跨企业固定价采购                | 已实现 |
+| `company_store_stocked`        | `{company_id, store_id, item_id, quantity, stock_after}`                                               | 企业仓库货物上架                | 已实现 |
 
 企业事件 payload 必须包含明确关联 ID（company_id / employment_id / shift_id / agent_id / amount），并保留信封字段
 `world_id` / `world_time` / `sequence` /

@@ -35,6 +35,7 @@ _EXPECTED_LOCATION_IDS = {
     "village_plaza",
     "town_hall",
     "village_hotel",
+    "village_bakery",
     "linxia_home",
     "zhangming_home",
     "chenyu_home",

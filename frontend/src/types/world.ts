@@ -784,6 +784,15 @@ export interface CompanyTransaction {
     trace_id: string;
 }
 
+/** One warehouse row of a company (GET .../inventory entry, M16). */
+export interface CompanyInventoryItem {
+    item_id: string;
+    item_name: string;
+    quantity: number;
+    reserved_quantity: number;
+    available_quantity: number;
+}
+
 /** One open job posting (GET .../job-openings entry, M13). */
 export interface JobOpening {
     opening_id: string;

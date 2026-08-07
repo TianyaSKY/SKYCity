@@ -27,6 +27,7 @@ vi.mock('../api/client', () => ({
     getCompanies: vi.fn(async () => []),
     getCompany: vi.fn(),
     getCompanyEmployees: vi.fn(async () => []),
+    getCompanyInventory: vi.fn(async () => []),
     getCompanyPositions: vi.fn(async () => []),
     getCompanyTransactions: vi.fn(async () => []),
     getConversations: vi.fn(),
@@ -1590,6 +1591,65 @@ describe('applyEvent M13 company & employment events', () => {
             items: [{item_id: 'wheat', quantity: 5}],
         }));
         expect(store.events[0].text).toBe('企业 晨露农场 库存变化（小麦×5）');
+    });
+
+    it('company_inventory_changed: 替换指定企业缓存且不影响其他企业 (M16)', () => {
+        store.companyInventories = {
+            company_morning_farm: [
+                {item_id: 'wheat', item_name: '小麦', quantity: 10, reserved_quantity: 0, available_quantity: 10},
+            ],
+            company_village_shop: [
+                {item_id: 'bread', item_name: '面包', quantity: 20, reserved_quantity: 0, available_quantity: 20},
+            ],
+        };
+        store.applyEvent(env(1, 'company_inventory_changed', {
+            company_id: 'company_morning_farm',
+            items: [
+                {item_id: 'wheat', quantity: 0, reserved_quantity: 0},
+                {item_id: 'bread', quantity: 20, reserved_quantity: 0},
+            ],
+        }));
+        expect(store.companyInventories['company_morning_farm']).toEqual([
+            {item_id: 'wheat', quantity: 0, reserved_quantity: 0},
+            {item_id: 'bread', quantity: 20, reserved_quantity: 0},
+        ]);
+        // 其他企业缓存不被触碰
+        expect(store.companyInventories['company_village_shop']).toEqual([
+            {item_id: 'bread', item_name: '面包', quantity: 20, reserved_quantity: 0, available_quantity: 20},
+        ]);
+    });
+
+    it('company_production_completed: 生产完成行（含消耗）', () => {
+        store.applyEvent(env(1, 'company_production_completed', {
+            company_id: 'company_village_bakery',
+            shift_id: 'shift_1',
+            consumed: [{item_id: 'wheat', quantity: 10}],
+            products: [{item_id: 'bread', quantity: 20}],
+        }));
+        expect(store.events[0].text).toBe('企业 company_village_bakery 完成生产：面包×20（消耗 小麦×10）');
+    });
+
+    it('company_purchase_completed: 采购行', () => {
+        store.applyEvent(env(1, 'company_purchase_completed', {
+            company_id: 'company_village_bakery',
+            seller_company_id: 'company_morning_farm',
+            item_id: 'wheat',
+            quantity: 10,
+            unit_price: 6,
+            total: 60,
+        }));
+        expect(store.events[0].text).toBe('企业 company_village_bakery 从 晨露农场 采购 小麦×10（60 金币）');
+    });
+
+    it('company_store_stocked: 上架行', () => {
+        store.applyEvent(env(1, 'company_store_stocked', {
+            company_id: 'company_village_shop',
+            store_id: 'village_shop',
+            item_id: 'bread',
+            quantity: 20,
+            stock_after: 20,
+        }));
+        expect(store.events[0].text).toBe('企业 company_village_shop 上架 面包×20 到货架');
     });
 
     it('job_opening_created: 发布职位行 + 空缺累计', () => {

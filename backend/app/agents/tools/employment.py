@@ -259,3 +259,65 @@ async def resume_recruitment(
         return _ok(payload)
     except CompanyEmploymentError as exc:
         return _err(str(exc))
+
+
+@function_tool
+async def purchase_company_goods(
+        ctx: RunContextWrapper[AgentToolContext],
+        buyer_company_id: str,
+        seller_company_id: str,
+        item_id: str,
+        reason: str,
+        quantity: int = 1,
+) -> str:
+    """按服务器固定价从其他企业采购原料（仅本企业经理可用）。
+    价格、可采购数量上限与货源由世界规则决定，不接受自定义价格；
+    buyer_company_id/seller_company_id/item_id 用【企业经营】采购行的完整 id。"""
+    service = _service(ctx)
+    if service is None:
+        return _err("企业服务未初始化")
+    quantity = max(1, min(int(quantity), 99))
+    try:
+        payload = service.purchase_company_goods(
+            world_id=ctx.context.world_id,
+            buyer_company_id=buyer_company_id,
+            seller_company_id=seller_company_id,
+            manager_agent_id=ctx.context.agent_id,
+            item_id=item_id,
+            quantity=quantity,
+            reason=reason,
+        )
+        return _ok(payload)
+    except CompanyEmploymentError as exc:
+        return _err(str(exc))
+
+
+@function_tool
+async def stock_store(
+        ctx: RunContextWrapper[AgentToolContext],
+        company_id: str,
+        store_id: str,
+        item_id: str,
+        reason: str,
+        quantity: int = 1,
+) -> str:
+    """把本企业仓库的货物上架到自有商店货架（仅企业经理可用）。
+    上架不产生资金流动，货架容量不足会被拒绝；store_id/item_id 用
+    【企业经营】上架行的完整 id。"""
+    service = _service(ctx)
+    if service is None:
+        return _err("企业服务未初始化")
+    quantity = max(1, min(int(quantity), 99))
+    try:
+        payload = service.stock_store(
+            world_id=ctx.context.world_id,
+            company_id=company_id,
+            store_id=store_id,
+            manager_agent_id=ctx.context.agent_id,
+            item_id=item_id,
+            quantity=quantity,
+            reason=reason,
+        )
+        return _ok(payload)
+    except CompanyEmploymentError as exc:
+        return _err(str(exc))

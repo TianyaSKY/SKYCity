@@ -279,8 +279,10 @@
 
 ## R30 正式工作产物
 
-- 正式班次完成的 `job.products_json` 产物全部进入 `CompanyInventory`，不进个人背包。
-- 企业库存数量只增不减（第一版）；库存变化随 `shift_completed` 事件发布。
+- 正式班次完成的产物全部进入 `CompanyInventory`，不进个人背包；产量按
+  `world_data/jobs/jobs.json` 的配方（`inputs`/`products`）结算，旧存档
+  无配方的 job 回退到 `job.products_json` 兼容路径。
+- 库存变化随 `company_inventory_changed` 事件发布（完整列表，含预留数量）。
 
 ## R31 辞职
 
@@ -313,3 +315,35 @@
 - 存档版本为 2：保存企业、岗位、招聘、申请、合同、班次、请假、企业库存、企业流水。
 - V1 存档迁移：保留旧工作历史，按种子重建企业，旧历史不转正式合同。
 - 恢复后：班次不重复生成（R26 幂等）、工资不重复支付（R29 幂等）、 事件 sequence 连续；班次/合同/调度器 payload 的全局主键引用重映射后仍命中。
+- M16 静态数据补种幂等：缺行的地点/岗位/商品规则按 world_data 补齐，已有行不动；
+  恢复后再次 `ensure_seeded` 不产生新行。
+
+## R36 配置化跨企业采购
+
+- 采购规则来自 `world_data/companies/companies.json` 的 `procurement` 列表：
+  `(item_id, seller_company_id, unit_price, max_quantity_per_order)`，价格由服务器固定，
+  不接受议价或自定义价格。
+- `purchase_company_goods` 仅买方企业经理可调用；同一事务内：卖方可用库存
+  （`quantity - reserved_quantity`）条件扣减、买方可用库存增加、买方扣款卖方入账、
+  双方 `material_purchase`/`wholesale_sale` 流水 + 事件。
+- 任一新校验失败整单回滚；并发采购最后可用库存时恰一单成功（同 R4 的
+  BEGIN IMMEDIATE + 条件 UPDATE 模式）。
+
+## R37 正式生产原料预留与消耗
+
+- 配方（`inputs`）来自 `world_data/jobs/jobs.json`；签到（`start_shift`）时在同一事务内
+  条件 UPDATE 预留 `CompanyInventory.reserved_quantity += qty`（guard：`quantity >= qty`）；
+  任一原料不足则拒绝签到，班次保持 `scheduled`、不排完成回调、预留全部回滚。
+- 预留只发生在签到、消耗只发生在班次完成：`handle_shift_completed` 按
+  `min(reserved, qty)` 消耗并同步扣减 `quantity` 与 `reserved_quantity`，绝不减负；
+  产出按配方进入企业库存并发布 `company_production_completed`。
+- 缺勤/请假/辞职/解雇/停业只作用于 `scheduled` 班次，因此不存在「已预留但永不完成」
+  的路径；`formal_only` 的 job 拒绝普通 `work()` 路径。
+
+## R38 企业仓库上架
+
+- `stock_store` 仅企业经理可调用，商店必须绑定本企业（R33 的
+  `Store.company_id`）；同一事务内仓库可用库存条件扣减、货架条件增加
+  （`stock + qty <= stock_cap`），无资金转移。
+- 任一条件失败整单回滚；发布 `company_store_stocked` 与仓库侧
+  `company_inventory_changed`。

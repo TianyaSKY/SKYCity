@@ -10,7 +10,7 @@
       "sell_price": 12,
       "buy_price": 6,
       "stock_cap": 20,
-      "restock_daily": 10
+      "restock_daily": 0
     },
     {
       "item_id": "apple",

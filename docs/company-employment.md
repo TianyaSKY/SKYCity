@@ -55,7 +55,7 @@ LLM 产生意图
 ### 暂不实现（后续版本）
 
 企业贷款、银行、税收、股权发行、企业收购、多层管理职位、复杂绩效奖金、 员工晋升、劳动仲裁、工会、跨企业自动采购、动态市场价格、创业流程、
-企业间合同、合同挂起（`employment_suspended`）、破产状态自动流转、 企业库存前端展示（后端库存事件）。
+企业间合同、合同挂起（`employment_suspended`）、破产状态自动流转。
 
 ## 3. 实体模型
 
@@ -123,7 +123,8 @@ LLM 产生意图
 
 - `(world_id, company_id, item_id)` 联合主键；`quantity` / `reserved_quantity`。
 - 正式工作产物入库（`handle_shift_completed`）；临时工作产物仍进个人背包。
-- 库存不允许负数（第一版只做加法）。
+- 库存不允许负数；`reserved_quantity` 是已签到班次锁定的原料（R37），消耗时与
+  `quantity` 同步扣减。
 
 ### 3.8 CompanyTransaction（`company_transactions`）
 
@@ -146,14 +147,20 @@ Transaction:        type=work_wage,     amount=+90
 
 ## 4. 第一版企业配置
 
-| 企业                 | 地点           | 岗位                             | 容量 | 班次        | 每班工资 | 初始资金 |
-|----------------------|----------------|----------------------------------|------|-------------|----------|----------|
-| 晨露农场（farm）     | `village_farm` | 农场工人（`job_farm_field`）     | 2    | 08:00–12:00 | 60       | 800      |
-| 村庄杂货店（retail） | `village_shop` | 商店店员（`job_shop_attendant`） | 1    | 09:00–17:00 | 90       | 1000     |
+| 企业                 | 地点             | 岗位                                   | 容量 | 班次        | 每班工资 | 初始资金 |
+|----------------------|------------------|----------------------------------------|------|-------------|----------|----------|
+| 晨露农场（farm）     | `village_farm`   | 农场工人（`job_farm_production`）      | 2    | 08:00–12:00 | 60       | 800      |
+| 村庄杂货店（retail） | `village_shop`   | 商店店员（`job_shop_attendant`）       | 1    | 09:00–17:00 | 90       | 1000     |
+| 晨露面包坊（workshop）| `village_bakery` | 面包师（`job_bakery_bake`）            | 1    | 13:00–17:00 | 60       | 300      |
 
-- 种子文件：`world_data/companies/companies.json`（企业 + 岗位 + 工作日）。
+- 种子文件：`world_data/companies/companies.json`（企业 + 岗位 + 工作日 + 采购规则）。
 - 播种幂等：`ensure_seeded` 只创建缺失的企业/岗位/招聘，可重复调用。
-- 不建立面包店（地图无面包店地点）；待闭环稳定后加入 农场→面包店→商店 链路。
+- **生产链（M16 已实现）**：晨露农场正式班次产出 10 小麦/班 → 面包坊按固定价 6 金币/件
+  从农场采购小麦，面包师班次消耗 10 小麦产出 20 面包/班 → 杂货店按固定价 6 金币/件
+  从面包坊采购面包并上架 → 居民以 12 金币/件零售购买，收入进杂货店企业账户。
+  配方与 `formal_only` 标记在 `world_data/jobs/jobs.json`，采购规则在
+  `world_data/companies/companies.json` 的 `procurement` 列表；面包不再自动补货
+  （`restock_daily = 0`）。
 
 ## 5. 流程规则
 
@@ -214,9 +221,12 @@ Transaction:        type=work_wage,     amount=+90
 
 1. 班次处于 `in_progress` / `late` 才结算（幂等：其余状态直接返回）。
 2. `worked_minutes = actual_end - actual_start`，计算 `wage_due`（比例向下取整）。
-3. 产物（`job.products_json`）逐项进入 `CompanyInventory`。
+3. 按配方结算（R37）：先消耗已预留原料（`min(reserved, qty)`），再按 `products` 产出进入
+   `CompanyInventory`；无配方的旧存档回退到 `job.products_json`（只产出、不消耗）。
 4. 工资结算（见 5.7）。
-5. 班次转 `completed`；合同 `completed_shifts += 1`； 清空居民行动状态；发布 `shift_completed` + 工资事件； 生成下一班次；调度居民下次决策。
+5. 班次转 `completed`；合同 `completed_shifts += 1`； 清空居民行动状态；发布
+   `shift_completed` + 工资事件 + `company_inventory_changed` + `company_production_completed`；
+   生成下一班次；调度居民下次决策。
 
 ### 5.7 工资结算（PayrollService 职责，v1 内嵌于班次完成）
 

@@ -55,3 +55,19 @@ class RecruitmentToggleRequest(BaseModel):
 class CompanyStatusRequest(BaseModel):
     manager_agent_id: str = Field(min_length=1, max_length=64)
     reason: str = Field(default="", max_length=512)
+
+
+class PurchaseCompanyGoodsRequest(BaseModel):
+    manager_agent_id: str = Field(min_length=1, max_length=64)
+    seller_company_id: str = Field(min_length=1, max_length=64)
+    item_id: str = Field(min_length=1, max_length=64)
+    quantity: int = Field(default=1, ge=1, le=99)
+    reason: str = Field(default="", max_length=512)
+
+
+class StockStoreRequest(BaseModel):
+    manager_agent_id: str = Field(min_length=1, max_length=64)
+    store_id: str = Field(min_length=1, max_length=64)
+    item_id: str = Field(min_length=1, max_length=64)
+    quantity: int = Field(default=1, ge=1, le=99)
+    reason: str = Field(default="", max_length=512)

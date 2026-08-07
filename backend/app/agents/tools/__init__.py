@@ -7,7 +7,9 @@ from app.agents.tools.crops import harvest, plant
 from app.agents.tools.daily_life import use_item
 from app.agents.tools.employment import (
     apply_job,
+    purchase_company_goods,
     review_job_application,
+    stock_store,
     withdraw_job_application,
 )
 from app.agents.tools.movement import move, wait
@@ -23,9 +25,11 @@ __all__ = [
     "harvest",
     "move",
     "plant",
+    "purchase_company_goods",
     "review_job_application",
     "sell_item",
     "sell_stock",
+    "stock_store",
     "talk",
     "transfer_money",
     "use_item",

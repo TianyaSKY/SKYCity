@@ -193,7 +193,7 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     assert by_id["agent_linxia"].money == 50
     assert by_id["agent_linxia"].action_type is None
 
-    assert len(locations) == 9
+    assert len(locations) == 10
     loc_ids = {l.location_id for l in locations}
     assert "village_shop" in loc_ids and "village_plaza" in loc_ids
     assert "village_hotel" in loc_ids

@@ -802,6 +802,39 @@ class DecisionService:
                 return True, payload, None
             except CompanyEmploymentError as exc:
                 return False, None, str(exc)
+        # M16 company procurement / shelf stocking through the company rule gate.
+        if result.tool_name in ("purchase_company_goods", "stock_store"):
+            company_service = getattr(self.engine, "company_employment_service", None)
+            if company_service is None:
+                return False, None, "企业服务未初始化"
+            quantity = arguments.get("quantity")
+            quantity = 1 if quantity is None else max(1, min(int(quantity), 99))
+            try:
+                if result.tool_name == "purchase_company_goods":
+                    payload = company_service.purchase_company_goods(
+                        world_id,
+                        str(arguments.get("buyer_company_id") or ""),
+                        str(arguments.get("seller_company_id") or ""),
+                        agent_id,
+                        str(arguments.get("item_id") or ""),
+                        quantity=quantity,
+                        reason=str(arguments.get("reason") or ""),
+                        trace_id=trace_id,
+                    )
+                else:
+                    payload = company_service.stock_store(
+                        world_id,
+                        str(arguments.get("company_id") or ""),
+                        str(arguments.get("store_id") or ""),
+                        agent_id,
+                        str(arguments.get("item_id") or ""),
+                        quantity=quantity,
+                        reason=str(arguments.get("reason") or ""),
+                        trace_id=trace_id,
+                    )
+                return True, payload, None
+            except CompanyEmploymentError as exc:
+                return False, None, str(exc)
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(

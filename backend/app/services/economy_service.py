@@ -32,6 +32,7 @@ from app.database.models.stores import Store, StoreProduct
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.database.unit_of_work import UnitOfWork
+from app.services.seed_loader import load_jobs
 from app.world_engine.engine import WorldEngine, is_location_open
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
@@ -40,6 +41,7 @@ MSG_PAUSED = "世界已暂停"
 MSG_AGENT_MISSING = "智能体不存在"
 MSG_BUSY = "当前行动未完成"
 MSG_JOB_MISSING = "工作不存在"
+MSG_FORMAL_ONLY = "该工作仅限正式员工班次"
 MSG_NOT_AT_JOB = "不在工作地点"
 MSG_LOCATION_CLOSED = "地点未开门"
 MSG_SATIETY_EMPTY = "饱食度耗尽，无法工作"
@@ -96,6 +98,13 @@ class EconomyService:
             job = session.get(Job, {"world_id": world_id, "job_id": job_id})
             if job is None:
                 return False, None, MSG_JOB_MISSING
+            # M16: formal-only jobs (production recipes) reject the casual
+            # work() path — they run exclusively as formal shifts.
+            if any(
+                seed["job_id"] == job_id and seed.get("formal_only")
+                for seed in load_jobs()
+            ):
+                return False, None, MSG_FORMAL_ONLY
             if agent.location_id != job.location_id:
                 return False, None, MSG_NOT_AT_JOB
             location = session.get(

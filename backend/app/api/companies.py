@@ -12,9 +12,11 @@ from app.schemas.companies import (
     JobApplicationRequest,
     JobApplicationReviewRequest,
     LeaveReviewRequest,
+    PurchaseCompanyGoodsRequest,
     RecruitmentToggleRequest,
     ShiftLeaveRequest,
     ShiftStartRequest,
+    StockStoreRequest,
 )
 from app.services.company_employment_service import (
     CompanyEmploymentError,
@@ -73,6 +75,60 @@ async def list_company_employees(request: Request, world_id: str, company_id: st
 async def list_company_transactions(request: Request, world_id: str, company_id: str) -> list[dict]:
     try:
         return _service(request).list_company_transactions(world_id, company_id)
+    except CompanyEmploymentError as exc:
+        raise _translate(exc) from exc
+
+
+@router.get("/{world_id}/companies/{company_id}/inventory")
+async def list_company_inventory(request: Request, world_id: str, company_id: str) -> list[dict]:
+    try:
+        return _service(request).list_company_inventory(world_id, company_id)
+    except CompanyEmploymentError as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/{world_id}/companies/{company_id}/purchase")
+async def purchase_company_goods(
+        request: Request,
+        world_id: str,
+        company_id: str,
+        body: PurchaseCompanyGoodsRequest,
+) -> dict:
+    try:
+        result = _service(request).purchase_company_goods(
+            world_id,
+            company_id,
+            body.seller_company_id,
+            body.manager_agent_id,
+            body.item_id,
+            quantity=body.quantity,
+            reason=body.reason,
+        )
+        await request.app.state.engine.flush_pending_now(world_id)
+        return result
+    except CompanyEmploymentError as exc:
+        raise _translate(exc) from exc
+
+
+@router.post("/{world_id}/companies/{company_id}/stock")
+async def stock_store(
+        request: Request,
+        world_id: str,
+        company_id: str,
+        body: StockStoreRequest,
+) -> dict:
+    try:
+        result = _service(request).stock_store(
+            world_id,
+            company_id,
+            body.store_id,
+            body.manager_agent_id,
+            body.item_id,
+            quantity=body.quantity,
+            reason=body.reason,
+        )
+        await request.app.state.engine.flush_pending_now(world_id)
+        return result
     except CompanyEmploymentError as exc:
         raise _translate(exc) from exc
 

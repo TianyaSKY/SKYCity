@@ -75,6 +75,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "village_plaza",
         "town_hall",
         "village_hotel",
+        "village_bakery",
         "linxia_home",
         "zhangming_home",
         "chenyu_home",
@@ -130,7 +131,7 @@ def test_card_id_mismatch_rejected(fake_world_data: Path) -> None:
 
 
 def test_interactables(world: ParsedWorldConfig) -> None:
-    assert len(world.interactables) == 5
+    assert len(world.interactables) == 6
     for obj in world.interactables:
         assert obj.object_id and obj.object_type
 

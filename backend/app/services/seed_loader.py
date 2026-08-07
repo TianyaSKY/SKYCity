@@ -134,10 +134,40 @@ def load_jobs(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
             "wage": int(entry.get("wage") or 0),
             "energy_cost_per_hour": int(entry.get("energy_cost_per_hour") or 0),
             "products": list(entry.get("products") or []),
+            # M16: formal-only jobs reject the casual work() path; inputs are
+            # the production recipe consumed by formal shifts.
+            "formal_only": bool(entry.get("formal_only") or False),
+            "inputs": list(entry.get("inputs") or []),
         }
         for entry in data.get("jobs", [])
     )
     return jobs
+
+
+@lru_cache(maxsize=4)
+def load_companies(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
+    """Company seeds: identity, positions and procurement rules (M16).
+
+    Each entry carries ``procurement``: the fixed-price cross-company
+    purchasing rules (item -> seller company) the manager may place.
+    """
+    base = world_data_dir or Path(get_settings().world_data_dir)
+    data = _load_json(base / "companies" / "companies.json")
+    companies = tuple(
+        {
+            "company_id": str(entry["company_id"]),
+            "name": str(entry.get("name") or entry["company_id"]),
+            "company_type": str(entry.get("company_type") or ""),
+            "location_id": str(entry.get("location_id") or ""),
+            "initial_money": int(entry.get("initial_money") or 0),
+            "owner_agent_id": entry.get("owner_agent_id") or None,
+            "manager_agent_id": entry.get("manager_agent_id") or None,
+            "positions": list(entry.get("positions") or []),
+            "procurement": list(entry.get("procurement") or []),
+        }
+        for entry in data.get("companies", [])
+    )
+    return companies
 
 
 @lru_cache(maxsize=4)

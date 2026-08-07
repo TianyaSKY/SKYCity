@@ -115,12 +115,16 @@ review_leave_request(request_id, decision, reason)         # approve | reject
 terminate_employment(employment_id, reason)                # 解雇
 pause_recruitment(position_id, reason)                     # 暂停招聘
 resume_recruitment(position_id, reason)                    # 恢复招聘
+purchase_company_goods(buyer_company_id, seller_company_id, item_id, reason, quantity=1)  # 跨企业采购
+stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物上架
 ```
 
 ### 8.3 约定
 
 - 工具只传意图参数（opening_id / shift_id / reason / decision）。 **禁止 LLM 传入**：工资金额、企业余额、合同状态、实际签到时间、
   工资是否支付成功、岗位剩余人数 —— 全部由服务端确定。
+- `purchase_company_goods` / `stock_store` **禁止 LLM 传入**：单价、余额、库存数量上限 —— 价格与可采购量由服务器固定规则决定；
+  `manager_agent_id` 由服务端注入。
 - `agent_id` / `manager_agent_id` 由服务端从 `AgentToolContext` 注入， 不作为工具参数（防止冒充他人，同 §3）。
 - 经理工具校验：只有 `company.manager_agent_id` 可操作本企业资源； 引擎做硬性校验，决策由真实 LLM 作出。
 - 工具失败返回可读原因（`{"success": false, "reason": "岗位已满"}`）， 不吞异常；失败不重试同一调用（同 §2 T3-9）。

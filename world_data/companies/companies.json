@@ -11,7 +11,7 @@
       "positions": [
         {
           "position_id": "position_farm_worker",
-          "job_id": "job_farm_field",
+          "job_id": "job_farm_production",
           "title": "农场工人",
           "description": "负责晨露农场的播种、浇水和收获",
           "capacity": 2,
@@ -37,6 +37,14 @@
       "location_id": "village_shop",
       "initial_money": 1000,
       "manager_agent_id": "agent_wangfang",
+      "procurement": [
+        {
+          "item_id": "bread",
+          "seller_company_id": "company_village_bakery",
+          "unit_price": 6,
+          "max_quantity_per_order": 99
+        }
+      ],
       "positions": [
         {
           "position_id": "position_shop_attendant",
@@ -46,6 +54,43 @@
           "capacity": 1,
           "wage_per_shift": 90,
           "shift_start_minute": 540,
+          "shift_end_minute": 1020,
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "company_id": "company_village_bakery",
+      "name": "晨露面包坊",
+      "company_type": "workshop",
+      "location_id": "village_bakery",
+      "initial_money": 300,
+      "manager_agent_id": "agent_touzi",
+      "procurement": [
+        {
+          "item_id": "wheat",
+          "seller_company_id": "company_morning_farm",
+          "unit_price": 6,
+          "max_quantity_per_order": 99
+        }
+      ],
+      "positions": [
+        {
+          "position_id": "position_baker",
+          "job_id": "job_bakery_bake",
+          "title": "面包师",
+          "description": "在晨露面包坊用小麦烘焙面包，供应村庄杂货店",
+          "capacity": 1,
+          "wage_per_shift": 60,
+          "shift_start_minute": 780,
           "shift_end_minute": 1020,
           "working_days": [
             0,

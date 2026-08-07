@@ -76,6 +76,7 @@ const TX_LABELS: Record<string, string> = {
     initial_capital: '初始资金',
     sale_income: '销售收入',
     material_purchase: '原料采购',
+    wholesale_sale: '批发销售',
     wage_payment: '工资支出',
     god_injection: '神谕注资',
 };
@@ -273,10 +274,34 @@ watch(
                     </div>
                 </div>
 
-                <!-- 库存: 后端暂无企业库存 API -->
+                <!-- 库存: 仓库总量/预留/可用（store 缓存，WS 事件实时替换） -->
                 <div v-if="activeTab === 'inventory'" class="cp-detail">
-                    <p class="cp-empty">暂未开放</p>
-                    <p class="cp-note">后端暂未提供企业库存查询接口，库存变动请关注事件流（企业 库存变化）。</p>
+                    <p v-if="!store.companyInventories[selectedCompany.company_id] || store.companyInventories[selectedCompany.company_id].length === 0"
+                       class="cp-empty">
+                        仓库暂无货物
+                    </p>
+                    <table v-else class="cp-table">
+                        <thead>
+                        <tr>
+                            <th>物品</th>
+                            <th class="num">总量</th>
+                            <th class="num">预留</th>
+                            <th class="num">可用</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr
+                            v-for="row in store.companyInventories[selectedCompany.company_id]"
+                            :key="row.item_id"
+                        >
+                            <td>{{ row.item_name }}</td>
+                            <td class="num">{{ row.quantity }}</td>
+                            <td :class="{ warn: row.reserved_quantity > 0 }" class="num">{{ row.reserved_quantity }}</td>
+                            <td class="num">{{ row.available_quantity }}</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                    <p class="cp-note">预留 = 已签到班次锁定的原料；可用 = 总量 − 预留。</p>
                 </div>
 
                 <!-- 流水: 类型/时间/金额/说明 -->

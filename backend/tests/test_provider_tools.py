@@ -40,6 +40,8 @@ ALL_TOOLS = {
     "terminate_employment",
     "pause_recruitment",
     "resume_recruitment",
+    "purchase_company_goods",
+    "stock_store",
 }
 
 

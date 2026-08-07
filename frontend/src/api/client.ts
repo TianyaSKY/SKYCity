@@ -11,6 +11,7 @@ import type {
     AgentEmploymentResponse,
     CompanyEmployee,
     CompanyInfo,
+    CompanyInventoryItem,
     CompanyPosition,
     CompanyTransaction,
     ConversationSummary,
@@ -133,6 +134,53 @@ export function getCompanyEmployees(worldId: string, companyId: string): Promise
 export function getCompanyTransactions(worldId: string, companyId: string): Promise<CompanyTransaction[]> {
     return requestJson<CompanyTransaction[]>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/transactions`,
+    );
+}
+
+/** M16: 企业仓库库存（总量/预留/可用）。 */
+export function getCompanyInventory(worldId: string, companyId: string): Promise<CompanyInventoryItem[]> {
+    return requestJson<CompanyInventoryItem[]>(
+        `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/inventory`,
+    );
+}
+
+export interface PurchaseCompanyGoodsRequest {
+    manager_agent_id: string;
+    seller_company_id: string;
+    item_id: string;
+    quantity?: number;
+    reason?: string;
+}
+
+export interface StockStoreRequest {
+    manager_agent_id: string;
+    store_id: string;
+    item_id: string;
+    quantity?: number;
+    reason?: string;
+}
+
+/** M16: 经理按固定价跨企业采购（manager_agent_id 在 body 中）。 */
+export function purchaseCompanyGoods(
+    worldId: string,
+    companyId: string,
+    body: PurchaseCompanyGoodsRequest,
+): Promise<Record<string, unknown>> {
+    return requestJson<Record<string, unknown>>(
+        `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/purchase`,
+        {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
+    );
+}
+
+/** M16: 经理把仓库货物上架到自有商店（manager_agent_id 在 body 中）。 */
+export function stockStore(
+    worldId: string,
+    companyId: string,
+    body: StockStoreRequest,
+): Promise<Record<string, unknown>> {
+    return requestJson<Record<string, unknown>>(
+        `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/stock`,
+        {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)},
     );
 }
 

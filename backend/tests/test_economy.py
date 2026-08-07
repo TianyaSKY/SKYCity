@@ -719,16 +719,18 @@ def test_restock_at_next_day_open_hour(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "village_shop", *SHOP_ANCHOR)
 
+    # M16: bread no longer auto-restocks (stocked by the bakery); apple keeps
+    # the R15 daily restock contract.
     ok, _, _ = engine.economy_service.buy(
-        world_id, "agent_linxia", "bread", quantity=1, reason="买一个"
+        world_id, "agent_linxia", "apple", quantity=1, reason="买一个"
     )
     assert ok is True
     session = SessionLocal()
     try:
         product = session.get(
-            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "apple"}
         )
-        assert product.stock == 19
+        assert product.stock == 14
     finally:
         session.close()
 
@@ -737,9 +739,13 @@ def test_restock_at_next_day_open_hour(engine: WorldEngine) -> None:
     session = SessionLocal()
     try:
         product = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "apple"}
+        )
+        assert product.stock == 15  # min(cap, 14 + restock_daily 8)
+        bread = session.get(
             StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
         )
-        assert product.stock == 20  # min(cap, 19 + restock_daily 10)
+        assert bread is not None and bread.stock == 20  # bread never restocks
     finally:
         session.close()
 
@@ -747,7 +753,7 @@ def test_restock_at_next_day_open_hour(engine: WorldEngine) -> None:
     assert restock
     assert restock[0].payload == {
         "store_id": "village_shop",
-        "restocked": [{"item_id": "bread", "quantity": 1}],
+        "restocked": [{"item_id": "apple", "quantity": 1}],
     }
 
 
