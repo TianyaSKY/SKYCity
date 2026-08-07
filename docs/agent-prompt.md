@@ -36,8 +36,8 @@
 ```text
 move(destination_id, reason)
 wait(minutes)
-sleep(minutes, reason)   # 60~480 分钟，每小时 +40 精力 / +20 心情；
-                         # 有家必须在家睡觉，无家必须去小镇旅店(village_hotel)睡（每晚 15 金币）
+sleep(minutes, reason)   # 60~480 分钟，每小时 +2 精力 / +3 心情（值见 backend/app/config/gameplay.py）；
+                         # 有家必须在家睡觉，无家必须去小镇旅店(village_hotel)睡（每晚 85 金币）
 talk(target_agent_id, message, intent)
 buy_item(item_id, quantity, reason)
 sell_item(item_id, quantity, reason)

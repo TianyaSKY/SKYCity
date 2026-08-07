@@ -8,11 +8,10 @@ minutes accumulate and each crossed integer minute is emitted once.
 
 from __future__ import annotations
 
+from app.config.gameplay import VALID_SPEEDS
 from app.database.models.worlds import DEFAULT_SPEED, DEFAULT_WORLD_TIME
 
 MINUTES_PER_DAY = 1440
-
-VALID_SPEEDS = (1, 2, 5, 10)
 
 
 class WorldClock:

@@ -23,12 +23,36 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
-from app.database.models.agents import (
-    Agent,
+from app.config.gameplay import (
+    ENERGY_DRAIN_PER_HOUR,
+    HOTEL_LOCATION_ID,
+    HOTEL_NIGHTLY_FEE,
+    INITIAL_ENERGY,
     INITIAL_LONELINESS,
+    INITIAL_MONEY,
     INITIAL_MOOD,
     INITIAL_SATIETY,
+    LONELINESS_BOOST_THRESHOLD,
+    LONELINESS_GAIN_PER_HOUR,
+    MOOD_BOOST_THRESHOLD,
+    MOOD_DRAIN_PER_HOUR,
+    NEEDS_MAX,
+    NIGHT_END_HOUR,
+    NIGHT_SLEEP_ENERGY_THRESHOLD,
+    NIGHT_START_HOUR,
+    PROMO_DISCOUNT_PERCENT,
+    PROMO_ROLL_DENOMINATOR,
+    PROMO_ROLL_HITS,
+    SATIETY_DRAIN_PER_HOUR,
+    SATIETY_EMPTY_EXTRA_ENERGY_DRAIN,
+    SLEEP_ENERGY_PER_HOUR,
+    SLEEP_MOOD_PER_HOUR,
+    TICK_INTERVAL,
+    UPKEEP_PER_DAY,
+    WAIT_ENERGY_PER_HOUR,
+    WAIT_MOOD_PER_HOUR,
 )
+from app.database.models.agents import Agent
 from app.database.models.companies import Company
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
@@ -61,31 +85,16 @@ from app.world_engine.clock import WorldClock
 from app.world_engine.event_bus import EventBus
 from app.world_engine.scheduler import Scheduler
 
-TICK_INTERVAL = 0.1  # real seconds per engine tick
-
-# M12 D6: daily cost of living, deducted at 00:00 (floor 0, never debt).
-UPKEEP_PER_DAY = 5
-
-# Sleep place rule: an agent with a home sleeps only at home; a homeless
-# agent sleeps at the hotel, paying a nightly fee (R7: no credit).
-HOTEL_LOCATION_ID = "village_hotel"
-HOTEL_NIGHTLY_FEE = 15  # priced well above the 5-coin daily upkeep
-
-# Night sleep steering: idle agents with low energy get a boosted decision
-# during night hours so they go home / to the hotel (world-rules R14).
-NIGHT_START_HOUR = 22
-NIGHT_END_HOUR = 7
-NIGHT_SLEEP_ENERGY_THRESHOLD = 40
-
-
 def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
-    """M12 D5: deterministic 20% chance of a promo day for one product.
+    """M12 D5: deterministic promo-day roll for one product (~20%).
 
     Hash-based (not random) so ``advance_minutes`` fast-forwards in tests
-    reproduce exactly the same promo set as a live run.
+    reproduce exactly the same promo set as a live run. The modulo formula
+    stays fixed (PROMO_ROLL_DENOMINATOR/HITS from the global config) so
+    existing deterministic outcomes are preserved.
     """
     digest = hashlib.md5(f"{world_id}:{store_id}:{item_id}:{day}".encode()).hexdigest()
-    return int(digest[:8], 16) % 10 < 2
+    return int(digest[:8], 16) % PROMO_ROLL_DENOMINATOR < PROMO_ROLL_HITS
 
 
 @dataclass
@@ -665,10 +674,10 @@ class WorldEngine:
             direction=spawn.direction,
             location_id=home_id if home_exists else None,
             satiety=INITIAL_SATIETY,
-            energy=100,
+            energy=INITIAL_ENERGY,
             mood=INITIAL_MOOD,
             loneliness=INITIAL_LONELINESS,
-            money=int(identity.get("initial_money") or 50),
+            money=int(identity.get("initial_money") or INITIAL_MONEY),
             action_type=None,
             action_started_at=None,
             action_ends_at=None,
@@ -1054,9 +1063,8 @@ class WorldEngine:
             world: World,
             world_time: int,
     ) -> None:
-        """R14 defaults: satiety -1/h, energy -1/h, wait +5/h, sleep +40/h,
-        satiety==0 -1/h. M12: mood -1/h, wait +2/h, sleep +20/h.
-        R21: loneliness +1/h, high loneliness boosts decisions."""
+        """R14/M12/R21 hourly needs: drains/gains and per-action recovery,
+        all from the global gameplay config (app.config.gameplay)."""
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
@@ -1064,18 +1072,18 @@ class WorldEngine:
         night = hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
         for agent in agents:
             before = (agent.satiety, agent.energy, agent.mood, agent.loneliness)
-            agent.satiety = max(0, agent.satiety - 1)
-            agent.energy = max(0, agent.energy - 1)
-            agent.mood = max(0, agent.mood - 1)
-            agent.loneliness = min(100, agent.loneliness + 1)
+            agent.satiety = max(0, agent.satiety - SATIETY_DRAIN_PER_HOUR)
+            agent.energy = max(0, agent.energy - ENERGY_DRAIN_PER_HOUR)
+            agent.mood = max(0, agent.mood - MOOD_DRAIN_PER_HOUR)
+            agent.loneliness = min(NEEDS_MAX, agent.loneliness + LONELINESS_GAIN_PER_HOUR)
             if agent.action_type == "wait":
-                agent.energy = min(100, agent.energy + 5)
-                agent.mood = min(100, agent.mood + 2)
+                agent.energy = min(NEEDS_MAX, agent.energy + WAIT_ENERGY_PER_HOUR)
+                agent.mood = min(NEEDS_MAX, agent.mood + WAIT_MOOD_PER_HOUR)
             elif agent.action_type == "sleep":
-                agent.energy = min(100, agent.energy + 40)
-                agent.mood = min(100, agent.mood + 20)
+                agent.energy = min(NEEDS_MAX, agent.energy + SLEEP_ENERGY_PER_HOUR)
+                agent.mood = min(NEEDS_MAX, agent.mood + SLEEP_MOOD_PER_HOUR)
             if agent.satiety <= 0:
-                agent.energy = max(0, agent.energy - 1)  # R11 extra drain
+                agent.energy = max(0, agent.energy - SATIETY_EMPTY_EXTRA_ENERGY_DRAIN)
             if (agent.satiety, agent.energy, agent.mood, agent.loneliness) != before:
                 runtime.event_bus.publish(
                     session,
@@ -1098,8 +1106,8 @@ class WorldEngine:
                     and (
                     agent.satiety <= 0
                     or agent.energy <= 0
-                    or agent.mood <= 20
-                    or agent.loneliness >= 80
+                    or agent.mood <= MOOD_BOOST_THRESHOLD
+                    or agent.loneliness >= LONELINESS_BOOST_THRESHOLD
                     or (night and agent.energy <= NIGHT_SLEEP_ENERGY_THRESHOLD)
             )
             ):
@@ -1146,7 +1154,7 @@ class WorldEngine:
                 day = world_time // 1440
                 promo = _promo_roll(world.world_id, store.store_id, product.item_id, day)
                 new_price = (
-                    max(1, round(product.base_sell_price * 0.8))
+                    max(1, round(product.base_sell_price * (100 - PROMO_DISCOUNT_PERCENT) / 100))
                     if promo
                     else product.base_sell_price
                 )

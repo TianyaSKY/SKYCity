@@ -21,22 +21,15 @@ from app.database.models.relationships import Relationship
 from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 
+from app.config.gameplay import (
+    CLAMP_DEBT,
+    CLAMP_MAIN,
+    DEFAULT_INTENT_DELTAS,
+    INTENT_DELTAS,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - type hints only (engine imports us)
     from app.world_engine.engine import WorldEngine
-
-# Per-intent speaker->listener deltas for a delivered talk message (T6-5).
-_INTENT_DELTAS: dict[str, dict[str, int]] = {
-    "greet": {"familiarity": 2, "affection": 1},
-    "chat": {"familiarity": 2, "affection": 1},
-    "offer": {"familiarity": 2, "affection": 1},
-    "ask_help": {"familiarity": 2, "affection": 2},
-    "leave": {"familiarity": 1, "affection": 0},
-}
-_DEFAULT_INTENT_DELTAS = {"familiarity": 1, "affection": 0}
-
-# Clamp ranges per axis.
-CLAMP_MAIN = (0, 100)
-CLAMP_DEBT = (0, 1000)
 
 RELATIONSHIP_AXES = ("familiarity", "trust", "affection", "resentment", "debt")
 
@@ -63,8 +56,8 @@ class RelationshipService:
             if not from_id or not to_id:
                 return
             # The speaker's feelings toward the listener, by intent.
-            sender_deltas = _INTENT_DELTAS.get(
-                payload.get("intent") or "", _DEFAULT_INTENT_DELTAS
+            sender_deltas = INTENT_DELTAS.get(
+                payload.get("intent") or "", DEFAULT_INTENT_DELTAS
             )
             self.apply_deltas(
                 session, world_id, from_id, to_id, sender_deltas,

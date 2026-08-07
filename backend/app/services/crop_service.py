@@ -22,6 +22,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import MAX_PLANT_DISTANCE
 from app.database.models.agents import Agent
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
@@ -30,9 +31,6 @@ from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.structures import TileStructure
 from app.database.models.worlds import World
 from app.world_engine.engine import WorldEngine
-
-# R23.1: same adjacency rule as talk/build (R9/R22.3).
-MAX_PLANT_DISTANCE = 3
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
 MSG_WORLD_MISSING = "世界不存在"

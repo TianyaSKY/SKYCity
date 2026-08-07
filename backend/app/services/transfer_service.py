@@ -21,6 +21,11 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import (
+    MAX_GIFT_QUANTITY,
+    MAX_TRANSFER_AMOUNT,
+    TALK_DISTANCE,
+)
 from app.database.models.agents import Agent
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
@@ -30,7 +35,6 @@ from app.database.unit_of_work import UnitOfWork
 from app.services.conversation_service import (
     MSG_NOT_NEAR,
     MSG_TARGET_MISSING,
-    TALK_DISTANCE,
     manhattan_distance,
 )
 from app.services.economy_service import (
@@ -45,11 +49,6 @@ from app.world_engine.engine import WorldEngine
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
 MSG_SELF_TRANSFER = "不能转给自己"
-
-# R19: defensive caps (schema le mirrors these); the real ceiling is the
-# sender's balance / holding quantity.
-MAX_TRANSFER_AMOUNT = 1_000_000
-MAX_GIFT_QUANTITY = 99
 
 
 class TransferService:

@@ -9,6 +9,23 @@ from __future__ import annotations
 
 import json
 
+from app.config.gameplay import (
+    HOTEL_NIGHTLY_FEE,
+    IDLE_DELAY,
+    MAX_BUILD_DISTANCE,
+    NIGHT_SLEEP_ENERGY_THRESHOLD,
+    NIGHT_START_HOUR,
+    SLEEP_ENERGY_PER_HOUR,
+    SLEEP_MAX_MINUTES,
+    SLEEP_MIN_MINUTES,
+    SLEEP_MOOD_PER_HOUR,
+    TALK_DISTANCE,
+    WAIT_ENERGY_PER_HOUR,
+    WAIT_MAX_MINUTES,
+    WAIT_MIN_MINUTES,
+    WAIT_MOOD_PER_HOUR,
+)
+
 # Identity card fields, in presentation order.
 _IDENTITY_FIELDS = (
     ("name", "姓名"),
@@ -21,7 +38,7 @@ _IDENTITY_FIELDS = (
     ("personality", "性格五因素"),
 )
 
-_BEHAVIORAL_RULES = """行为规则：
+_BEHAVIORAL_RULES = f"""行为规则：
 1. 你是这个世界里生活的一名小镇居民，按照你的身份、价值观与长期目标行事。
 2. 一次决策只执行一个行动；优先选择对达成长期目标有帮助的行动。
 3. 行动会被世界规则校验（地点存在、可达、开门、容量、是否空闲等）；
@@ -31,23 +48,24 @@ _BEHAVIORAL_RULES = """行为规则：
    精力低或深夜时回家（或去旅店）睡觉恢复精力；孤单会随时间增加，找别人聊天可以缓解孤单。
 6. 主动社交：看到【可见人物】时，优先考虑用 talk 打招呼、闲聊或询问；
    收到消息务必回复。不要在同一个地点长时间独处等待。
-7. 睡觉要主动：深夜（22:00 后）或精力低（≤40）时应当回家睡觉（有家的智能体），
-   没有家的智能体去小镇旅店(village_hotel)开房睡觉（每晚 15 金币，钱不够先去工作赚钱）。
+7. 睡觉要主动：深夜（{NIGHT_START_HOUR} 点后）或精力低（≤{NIGHT_SLEEP_ENERGY_THRESHOLD}）时应当回家睡觉（有家的智能体），
+   没有家的智能体去小镇旅店(village_hotel)开房睡觉（每晚 {HOTEL_NIGHTLY_FEE} 金币，钱不够先去工作赚钱）。
    不要在路边、商店或工作地点过夜；sleep 只能在家或旅店执行，否则会被拒绝。
-8. 等待要克制：wait 只在确无其他可做之事时使用，白天等待一般不超过 30 分钟；
-   深夜或精力低时用 sleep 睡觉（60~480 分钟），不要用 wait 假装睡觉。
+8. 等待要克制：wait 只在确无其他可做之事时使用，白天等待一般不超过 {IDLE_DELAY} 分钟；
+   深夜或精力低时用 sleep 睡觉（{SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟），不要用 wait 假装睡觉。
 9. 环境改造：持有木材/麻绳/花种等材料且目标达成需要时，可以在附近空地用 build
    建造栅栏、小木屋或花圃——建筑会真实改变小镇；栅栏和房屋挡路，注意别把路堵死。
 10. 农事：去商店买种子，到农田用 plant 播种；作物按时间生长（见【附近作物】），
    成熟后 harvest 收获并到商店卖钱——种地是稳定收入，也是小镇生活的一部分。
 """
 
-_TOOL_CONVENTIONS = """工具约定：
+_TOOL_CONVENTIONS = f"""工具约定：
 - move(destination_id, reason)：移动到指定地点。destination_id 必须是可见地点列表中的 id。
-- wait(minutes, reason)：原地等待 1~240 分钟。
-- sleep(minutes, reason)：睡觉 60~480 分钟，每小时恢复 40 点精力、20 点心情（比 wait 快 4 倍以上）；
-  有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)（每晚 15 金币）；深夜或精力低时使用，醒来后精力充沛。
-- talk(target_agent_id, message, intent)：与附近（距离 ≤ 3 格）且空闲的智能体对话；
+- wait(minutes, reason)：原地等待 {WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES} 分钟。
+- sleep(minutes, reason)：睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 {SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情
+  （精力是 wait 的 {SLEEP_ENERGY_PER_HOUR // WAIT_ENERGY_PER_HOUR} 倍、心情 {SLEEP_MOOD_PER_HOUR // WAIT_MOOD_PER_HOUR} 倍）；
+  有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)（每晚 {HOTEL_NIGHTLY_FEE} 金币）；深夜或精力低时使用，醒来后精力充沛。
+- talk(target_agent_id, message, intent)：与附近（距离 ≤ {TALK_DISTANCE} 格）且空闲的智能体对话；
   intent 取 greet/chat/ask/offer/leave 之一；对方忙碌或太远时会被拒绝；聊天能缓解孤单。
   收到【收到的消息】里的消息时应当回复（intent 用 chat/ask/offer）；如果不想继续聊，
   用 intent=leave 礼貌告别并结束对话。
@@ -57,9 +75,9 @@ _TOOL_CONVENTIONS = """工具约定：
 - use_item(item_id, reason)：食用背包里的食物提高饱食度（每次消耗 1 件）。
 - buy_stock(stock_id, reason, shares=1)：用现金买入【股票行情】里的公司股票；钱不够会被拒绝。
 - sell_stock(stock_id, reason, shares=1)：卖出你持有的股票换回现金。
-- transfer_money(target_agent_id, amount, reason)：给附近的智能体转账金币；对方无需空闲，但距离必须 ≤ 3 格（target_agent_id 用【可见人物】里的完整 id）。
+- transfer_money(target_agent_id, amount, reason)：给附近的智能体转账金币；对方无需空闲，但距离必须 ≤ {TALK_DISTANCE} 格（target_agent_id 用【可见人物】里的完整 id）。
 - give_item(target_agent_id, item_id, quantity=1, reason)：把背包里的物品送给附近的智能体。
-- build(col, row, blueprint_id, reason)：在 (col,row) 格建造【可建造的蓝图】里的建筑；要求离目标格 ≤ 3 格、目标格可行走且未被占用、背包材料足够。
+- build(col, row, blueprint_id, reason)：在 (col,row) 格建造【可建造的蓝图】里的建筑；要求离目标格 ≤ {MAX_BUILD_DISTANCE} 格、目标格可行走且未被占用、背包材料足够。
   建造是重体力活：完成后建筑永久留在地图上，挡住通行的建筑（栅栏/房屋）所有人都会绕行，别把路堵死。
 - plant(col, row, item_id, reason)：在农田 (col,row) 格种下一粒【可种植的种子】里的种子；作物按世界时钟生长，成熟后可 harvest 收获卖钱。
 - harvest(col, row, reason)：收获 (col,row) 格已成熟的作物（见【附近作物】里的"成熟可收"）。

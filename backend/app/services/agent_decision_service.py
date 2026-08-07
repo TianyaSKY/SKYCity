@@ -26,6 +26,20 @@ from app.agents.context import AgentToolContext
 from app.agents.observation_service import build_observation
 from app.agents.providers import get_provider
 from app.agents.providers.base import DecisionResult
+from app.config.gameplay import (
+    BUDGET_SKIP_DELAY,
+    DEGRADE_DELAY,
+    DEGRADE_WAIT_MINUTES,
+    FORCED_REST_MINUTES,
+    IDLE_DELAY,
+    MAX_CONSECUTIVE_FAILURES,
+    RETRY_DELAY,
+    SKIP_DECIDE_DELAY,
+    SLEEP_MAX_MINUTES,
+    SLEEP_MIN_MINUTES,
+    WAIT_MAX_MINUTES,
+    WAIT_MIN_MINUTES,
+)
 from app.config.settings import Settings, get_settings
 from app.database.models.agents import Agent
 from app.database.models.llm_runs import LLMRun
@@ -35,25 +49,11 @@ from app.domain.event import WorldEventEnvelope
 from app.services.company_employment_service import CompanyEmploymentError
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
-# Delay (game minutes) before the next decision after various outcomes.
-RETRY_DELAY = 10  # tool rejected by world rules
-IDLE_DELAY = 30  # agent still idle after a decision (periodic re-eval)
-DEGRADE_DELAY = 20  # after an LLM failure
-DEGRADE_WAIT_MINUTES = 15  # fallback action while the LLM is down
-MAX_CONSECUTIVE_FAILURES = 5
-
-# M8: cadence used when a decision is skipped (observation cache / budget).
-SKIP_DECIDE_DELAY = 15  # cache hit: re-evaluate shortly
-BUDGET_SKIP_DELAY = 30  # world LLM budget exhausted: dormant rhythm
-
 # M8 T8: one text event emitted (once per day) when the world budget runs out.
 BUDGET_EXHAUSTED_TEXT = "世界今日 LLM 预算已用尽，智能体转入休眠节奏"
 
-CLAMPED_WAIT_MINUTES = (1, 240)
-CLAMPED_SLEEP_MINUTES = (60, 480)
-
-# M5 R12: how long an exhausted agent is forced to rest before re-deciding.
-FORCED_REST_MINUTES = 60
+CLAMPED_WAIT_MINUTES = (WAIT_MIN_MINUTES, WAIT_MAX_MINUTES)
+CLAMPED_SLEEP_MINUTES = (SLEEP_MIN_MINUTES, SLEEP_MAX_MINUTES)
 
 # --------------------------------------------------------------------------- #
 # M8 T8-1: global LLM concurrency cap.

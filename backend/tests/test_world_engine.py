@@ -29,8 +29,9 @@ from app.services.action_execution_service import (
     find_path,
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
+from app.config.gameplay import HOTEL_NIGHTLY_FEE
 from app.world_engine.clock import WorldClock
-from app.world_engine.engine import HOTEL_NIGHTLY_FEE, WorldEngine
+from app.world_engine.engine import WorldEngine
 
 SHOP_ANCHOR = (23, 12)
 LINXIA_SPAWN = (18, 27)
@@ -519,7 +520,15 @@ def test_sleep_completes(engine: WorldEngine) -> None:
 
 
 def test_sleep_recovers_energy_faster_than_wait(engine: WorldEngine) -> None:
-    """R14: sleep +40/h (net +39 after the -1 base), wait only +5/h."""
+    """R14: sleep recovers energy per the global config (net of the -1/h base),
+    strictly faster than wait."""
+    from app.config.gameplay import (
+        ENERGY_DRAIN_PER_HOUR,
+        SLEEP_ENERGY_PER_HOUR,
+        WAIT_ENERGY_PER_HOUR,
+    )
+
+    assert SLEEP_ENERGY_PER_HOUR > WAIT_ENERGY_PER_HOUR
     runtime = engine.create_world()
     session = SessionLocal()
     try:
@@ -537,7 +546,8 @@ def test_sleep_recovers_energy_faster_than_wait(engine: WorldEngine) -> None:
     assert ok is True, reason
     advance_minutes(engine, runtime.world_id, 121)  # crosses >= 2 hour boundaries
     row = agent_row(engine, runtime.world_id, "agent_linxia")
-    assert row.energy == 100, f"sleep should cap energy at 100: {row.energy}"
+    expected = 30 - 2 * ENERGY_DRAIN_PER_HOUR + 2 * SLEEP_ENERGY_PER_HOUR
+    assert row.energy == expected, f"expected {expected}, got {row.energy}"
 
 
 def test_sleep_is_interruptible_by_move(engine: WorldEngine) -> None:
@@ -608,7 +618,7 @@ def test_hotel_sleep_charges_nightly_fee(engine: WorldEngine) -> None:
     """Hotel sleep deducts HOTEL_NIGHTLY_FEE on start (R7: no credit)."""
     runtime = engine.create_world()
     place_agent(engine, runtime.world_id, "agent_touzi", "village_hotel", 37, 20)
-    set_agent(engine, runtime.world_id, "agent_touzi", money=50)
+    set_agent(engine, runtime.world_id, "agent_touzi", money=HOTEL_NIGHTLY_FEE + 10)
 
     ok, envelope, reason = engine.action_service.execute_sleep(
         runtime.world_id, "agent_touzi", minutes=240, reason="住一晚"
@@ -616,7 +626,7 @@ def test_hotel_sleep_charges_nightly_fee(engine: WorldEngine) -> None:
     assert ok is True and reason is None
 
     row = agent_row(engine, runtime.world_id, "agent_touzi")
-    assert row.money == 50 - HOTEL_NIGHTLY_FEE
+    assert row.money == 10  # fee charged on start
     assert row.action_type == "sleep"
 
     session = SessionLocal()
@@ -684,7 +694,7 @@ def test_observation_shows_sleep_place_guidance(engine: WorldEngine) -> None:
     assert "家: 林夏的家" in home_obs
     assert "小镇旅店" in home_obs  # sleep tool line names the hotel
     homeless_obs = build_observation(world_id, "agent_touzi", SessionLocal, home_id=None)
-    assert "无家（睡觉需去小镇旅店，每晚15金币）" in homeless_obs
+    assert f"无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）" in homeless_obs
     assert "必须去小镇旅店(village_hotel)" in homeless_obs
 
 

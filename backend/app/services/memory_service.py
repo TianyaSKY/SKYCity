@@ -36,14 +36,20 @@ from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 
+from app.config.gameplay import (
+    MAX_RETRIEVE_LIMIT,
+    REFLECTION_MINUTE_OF_DAY,
+    WEIGHT_ENTITY,
+    WEIGHT_IMPORTANCE,
+    WEIGHT_KEYWORD,
+    WEIGHT_RECENCY,
+    WEIGHT_UNRESOLVED,
+    WORKING_MEMORY_CAP,
+)
+
 if TYPE_CHECKING:  # pragma: no cover - type hints only (engine imports us)
     from app.world_engine.engine import WorldEngine, WorldRuntime
 
-# Working memory cap: only the newest N working memories per agent survive.
-WORKING_MEMORY_CAP = 20
-
-# Daily reflection cadence (T6-6): 23:30 game time = minute 1410 of the day.
-REFLECTION_MINUTE_OF_DAY = 23 * 60 + 30  # 1410
 # Sentinel agent_id on the per-world recurring reflection action.
 REFLECTION_AGENT_ID = "__daily_reflection__"
 
@@ -56,15 +62,6 @@ _GOD_MEMORY_TEXTS: dict[str, str] = {
     "teleport": "被传送到 {location_id}",
     "change_weather": "天气变为 {weather}",
 }
-
-# Retrieval weights (T6-4).
-WEIGHT_ENTITY = 0.35
-WEIGHT_KEYWORD = 0.25
-WEIGHT_IMPORTANCE = 0.20
-WEIGHT_RECENCY = 0.15
-WEIGHT_UNRESOLVED = 0.05
-
-MAX_RETRIEVE_LIMIT = 20
 
 
 class MemoryService:

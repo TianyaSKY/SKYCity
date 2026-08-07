@@ -38,7 +38,7 @@ LLM 产生意图
 5. 企业经理审核申请（`review`，仅 `manager_agent_id` 有权限）。
 6. 录用后建立正式劳动合同（`employment_contracts`）。
 7. 系统自动生成下一班次（`work_shifts`，幂等）。
-8. 员工签到开始工作（`start_shift`，-30/+120 分钟窗口）。
+8. 员工签到开始工作（`start_shift`，窗口 `SHIFT_EARLY_WINDOW`/`SHIFT_LATE_LIMIT`，见 `backend/app/config/gameplay.py`）。
 9. 迟到计算与缺勤判定（调度器 `formal_shift_absence_check`）。
 10. 班次完成结算：工资从企业账户转入员工账户，产物进入企业库存。
 11. 企业余额不足时欠薪（`unpaid_wage` / `unpaid_wage_total`），不凭空发钱； 资金到位后自动补发（`wage_repaid`）。
@@ -105,7 +105,7 @@ LLM 产生意图
 - 状态：`active` / `resigned`（v1）；`pending` / `on_leave` / `suspended` /
   `terminated` / `ended` 预留给后续版本。
 - `wage_per_shift`：录用时从岗位快照，合同存续期内不变。
-- 统计字段：`attendance_score`（初始 100，迟到 -2，缺勤 -10，下限 0）、
+- 统计字段：`attendance_score`（初始 100，迟到 `ATTENDANCE_LATE_PENALTY`，缺勤 `ATTENDANCE_ABSENT_PENALTY`，下限 0）、
   `completed_shifts` / `late_shifts` / `absent_shifts`、`unpaid_wage`。
 - 第一版限制：一个居民最多一份 active 正式合同。
 

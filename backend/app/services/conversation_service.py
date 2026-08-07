@@ -20,6 +20,13 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import (
+    LONELINESS_RELIEF,
+    MAX_MESSAGE_CHARS,
+    MAX_TURNS,
+    PAIR_COOLDOWN_MINUTES,
+    TALK_DISTANCE,
+)
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
 from app.database.models.scheduled_actions import ScheduledAction
@@ -27,14 +34,7 @@ from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
-# Anti-loop guardrails (M4).
-PAIR_COOLDOWN_MINUTES = 60  # no new conversation between a pair within this window
-MAX_TURNS = 6  # total messages per conversation; the 7th is rejected and ends it
-MAX_MESSAGE_CHARS = 200
-TALK_DISTANCE = 3  # R9: manhattan distance (inclusive of 0)
-
-# R21: each delivered talk message relieves loneliness for both parties.
-LONELINESS_RELIEF = 10
+# Anti-loop guardrails (M4) — rates/limits live in app.config.gameplay.
 
 # conversation_ended reasons (event contract).
 REASON_LEAVE = "leave"

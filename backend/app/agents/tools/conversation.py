@@ -15,8 +15,7 @@ from typing import Literal
 from agents import RunContextWrapper, function_tool
 
 from app.agents.context import AgentToolContext
-
-MAX_TALK_CHARS = 200
+from app.config.gameplay import MAX_TALK_CHARS
 
 
 @function_tool

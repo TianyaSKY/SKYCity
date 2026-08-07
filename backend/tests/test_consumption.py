@@ -121,7 +121,7 @@ def test_mood_drains_hourly_and_sleep_restores(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 60)  # 540 -> 600
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.mood == 100  # -1 drain then +10 sleep recovery, capped
+    assert row.mood == 100  # -1 drain + sleep recovery (config rate), capped
 
 
 def test_mood_low_boosts_decision(world_config: ParsedWorldConfig) -> None:

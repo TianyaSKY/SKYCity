@@ -34,16 +34,22 @@ from app.database.models.locations import WorldLocation
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.stores import Store, StoreProduct
 from app.database.models.worlds import World
+from app.config.gameplay import (
+    HOTEL_NIGHTLY_FEE,
+    OBSERVATION_MAX_CHARS,
+    OBSERVATION_MAX_SHOP_PRODUCTS,
+    OBSERVATION_MAX_UNREAD_MESSAGES,
+    SHIFT_EARLY_WINDOW,
+    SHIFT_LATE_LIMIT,
+    SLEEP_ENERGY_PER_HOUR,
+    SLEEP_MAX_MINUTES,
+    SLEEP_MIN_MINUTES,
+    SLEEP_MOOD_PER_HOUR,
+    WAIT_MAX_MINUTES,
+    WAIT_MIN_MINUTES,
+)
 from app.services.seed_loader import load_blueprints, load_crops
-from app.world_engine.engine import HOTEL_NIGHTLY_FEE, is_location_open
-
-MAX_OBSERVATION_CHARS = 2000
-
-# M4: up to this many unread messages appear in one observation.
-MAX_UNREAD_MESSAGES = 3
-
-# M5: shop products shown per store in 可做的事 (bounded for the 2000 char cap).
-MAX_SHOP_PRODUCTS = 6
+from app.world_engine.engine import is_location_open
 
 _WEATHER_NAMES = {
     "clear": "晴朗",
@@ -224,7 +230,7 @@ def build_observation(
                     ConversationMessage.sent_at.desc(),
                     ConversationMessage.message_id.desc(),
                 )
-                .limit(MAX_UNREAD_MESSAGES)
+                .limit(OBSERVATION_MAX_UNREAD_MESSAGES)
             )
         )
         name_by_id = {a.agent_id: a.name for a in others}
@@ -263,9 +269,10 @@ def build_observation(
 
         lines.append("【可做的事】")
         lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
-        lines.append("- wait(minutes, reason): 原地等待 1~240 分钟")
+        lines.append(f"- wait(minutes, reason): 原地等待 {WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES} 分钟")
         lines.append(
-            "- sleep(minutes, reason): 睡觉 60~480 分钟，每小时恢复 40 点精力、20 点心情"
+            f"- sleep(minutes, reason): 睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 "
+            f"{SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情"
             "（比 wait 快）；有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)"
             f"（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
         )
@@ -293,7 +300,7 @@ def build_observation(
                     select(StoreProduct)
                     .where(StoreProduct.world_id == world_id, StoreProduct.store_id == store.store_id)
                     .order_by(StoreProduct.item_id)
-                    .limit(MAX_SHOP_PRODUCTS)
+                    .limit(OBSERVATION_MAX_SHOP_PRODUCTS)
                 ).all()
                 for product in products:
                     item = session.get(
@@ -612,7 +619,7 @@ def build_observation(
                 if upcoming_shift.status == "scheduled":
                     lines.append(
                         f"- start_shift({upcoming_shift.shift_id}, reason): 到达工作地点后签到"
-                        "开始班次（可提前30分钟，迟到上限120分钟）"
+                        f"开始班次（可提前{SHIFT_EARLY_WINDOW}分钟，迟到上限{SHIFT_LATE_LIMIT}分钟）"
                     )
                     lines.append(
                         f"- request_leave({upcoming_shift.shift_id}, reason): 无法到岗时请假"
@@ -672,8 +679,8 @@ def build_observation(
             lines.append("[记忆系统将在后续里程碑启用]")
 
         observation = "\n".join(lines)
-        if len(observation) > MAX_OBSERVATION_CHARS:
-            observation = observation[: MAX_OBSERVATION_CHARS - 20] + "\n…[观察已截断]"
+        if len(observation) > OBSERVATION_MAX_CHARS:
+            observation = observation[: OBSERVATION_MAX_CHARS - 20] + "\n…[观察已截断]"
         return observation
     finally:
         session.close()

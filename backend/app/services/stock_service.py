@@ -21,6 +21,11 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import (
+    DIV_BUSINESS_PER_SHARE,
+    MAX_SHARES,
+    STOCK_NOISE_RANGE,
+)
 from app.database.models.agents import Agent
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.stores import StoreProduct
@@ -41,18 +46,16 @@ from app.world_engine.engine import WorldEngine
 MSG_STOCK_MISSING = "股票不存在"
 MSG_NOT_ENOUGH_SHARES = "持股不足"
 
-# R18: per-trade share cap (schema le=9999 mirrors this).
-MAX_SHARES = 9999
-
 
 def _hourly_noise(world_id: str, stock_id: str, hour: int) -> int:
-    """Deterministic pseudo-random noise in [-2, +2] for one (world, stock, hour).
+    """Deterministic pseudo-random noise in [-STOCK_NOISE_RANGE, +STOCK_NOISE_RANGE]
+    for one (world, stock, hour).
 
     hashlib.md5 instead of built-in hash(): hash() is salted per process, so
     the value would not be stable across restarts / save-restore replay.
     """
     digest = hashlib.md5(f"{world_id}:{stock_id}:{hour}".encode()).hexdigest()
-    return int(digest[:8], 16) % 5 - 2
+    return int(digest[:8], 16) % (2 * STOCK_NOISE_RANGE + 1) - STOCK_NOISE_RANGE
 
 
 class StockService:
@@ -183,7 +186,7 @@ class StockService:
             select(Stock).where(Stock.world_id == world.world_id).order_by(Stock.stock_id)
         ).all()
         for stock in stocks:
-            div = max(1, stock.day_business // 5) if stock.day_business > 0 else 0
+            div = max(1, stock.day_business // DIV_BUSINESS_PER_SHARE) if stock.day_business > 0 else 0
             stock.last_div_per_share = div
             stock.prev_price = stock.price  # close
             stock.day_business = 0

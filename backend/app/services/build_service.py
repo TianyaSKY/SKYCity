@@ -34,11 +34,9 @@ from app.database.models.inventories import Inventory
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.structures import TileStructure
 from app.database.models.worlds import World
+from app.config.gameplay import MAX_BUILD_DISTANCE
 from app.services.seed_loader import BlueprintDef
 from app.world_engine.engine import WorldEngine
-
-# R22.3: the build anchor must be near the builder (same as talk range R9).
-MAX_BUILD_DISTANCE = 3
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
 MSG_WORLD_MISSING = "世界不存在"

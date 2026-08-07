@@ -29,6 +29,7 @@ from app.database.models.stores import StoreProduct
 from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
+from app.config.gameplay import VALID_SPEEDS, VALID_WEATHERS
 from app.world_engine.engine import WorldEngine
 
 COMMAND_TYPES = {
@@ -51,8 +52,6 @@ COMMAND_TYPES = {
     "remove_crop",
     "inject_company_money",
 }
-VALID_WEATHERS = {"clear", "cloudy", "rain", "snow"}
-VALID_SPEEDS = {1, 2, 5, 10}
 
 MSG_WORLD_MISSING = "世界不存在"
 MSG_UNKNOWN_COMMAND = "未知的神谕指令类型"

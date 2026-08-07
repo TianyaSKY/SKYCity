@@ -258,12 +258,15 @@ def test_talk_relieves_loneliness(world_config: ParsedWorldConfig) -> None:
     )
     assert ok is True and reason is None
 
+    from app.config.gameplay import LONELINESS_RELIEF
+
+    relieved = 50 - LONELINESS_RELIEF
     session = SessionLocal()
     try:
         linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         zhangming = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
-        assert linxia.loneliness == 40  # both relieved by LONELINESS_RELIEF
-        assert zhangming.loneliness == 40
+        assert linxia.loneliness == relieved  # both relieved by LONELINESS_RELIEF
+        assert zhangming.loneliness == relieved
     finally:
         session.close()
 
@@ -272,7 +275,7 @@ def test_talk_relieves_loneliness(world_config: ParsedWorldConfig) -> None:
         assert any(
             e.type == "needs_changed"
             and e.payload["agent_id"] == agent_id
-            and e.payload["loneliness"] == 40
+            and e.payload["loneliness"] == relieved
             for e in events
         ), f"needs_changed must carry the relieved loneliness for {agent_id}"
     eng._runtimes.clear()

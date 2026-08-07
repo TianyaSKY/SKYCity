@@ -70,7 +70,7 @@ cell_walkable(col, row) =
 | `wangfang_home`  | house  | 0-24 | 4    |
 
 > `hotel`（小镇旅店）与 `house`/`plaza` 一样全天开放（R8）；无家智能体的
-> 睡觉地点（R14），入住收取每晚 15 金币房费。
+> 睡觉地点（R14），入住收取每晚 85 金币房费（`HOTEL_NIGHTLY_FEE`，见 `backend/app/config/gameplay.py`）。
 
 ## 4. `interactables` 对象层
 

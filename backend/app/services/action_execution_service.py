@@ -16,6 +16,14 @@ from collections import deque
 from loguru import logger
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import (
+    CAPACITY_RECHECK_MINUTES,
+    DEFAULT_WAIT_MINUTES,
+    HOTEL_LOCATION_ID,
+    HOTEL_NIGHTLY_FEE,
+    MINUTES_PER_STEP,
+    WEATHER_MULTIPLIERS,
+)
 from app.database.models.agents import Agent
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
@@ -24,18 +32,12 @@ from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 from app.schemas.actions import ActionRequest
 from app.world_engine.engine import (
-    HOTEL_LOCATION_ID,
-    HOTEL_NIGHTLY_FEE,
     WorldEngine,
     WorldRuntime,
     count_location_occupants,
     is_location_open,
     next_open_time,
 )
-
-# R6: game minutes per grid step by weather.
-WEATHER_MULTIPLIERS = {"clear": 1.0, "cloudy": 1.0, "rain": 1.5, "snow": 2.0}
-MINUTES_PER_STEP = 2
 
 # R1 rejection messages.
 MSG_PAUSED = "世界已暂停"
@@ -51,12 +53,6 @@ MSG_WORLD_MISSING = "世界不存在"
 MSG_SLEEP_NEED_HOME = "有家必须回家睡觉（当前不在家）"
 MSG_SLEEP_NEED_HOTEL = "没有家的智能体需要去小镇旅店睡觉"
 MSG_HOTEL_UNAFFORDABLE = f"余额不足，付不起旅店房费（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
-
-# R15: capacity re-check interval (minutes) while waiting for a free slot.
-CAPACITY_RECHECK_MINUTES = 30
-
-# Default wait duration when the API omits minutes.
-DEFAULT_WAIT_MINUTES = 60
 
 Importance = "normal"
 
@@ -398,8 +394,9 @@ class ActionExecutionService:
         Sleep place rule (R14): an agent with a home must sleep at that home;
         a homeless agent must sleep at the hotel (village_hotel), which
         charges HOTEL_NIGHTLY_FEE per night on start (R7: no credit).
-        Sleep recovers energy/mood much faster than wait (R14: +40/+20 per
-        hour); the engine tick keys recovery off action_type == "sleep".
+        Sleep recovers energy/mood much faster than wait (rates live in
+        app.config.gameplay); the engine tick keys recovery off
+        action_type == "sleep".
         """
         session = self._session_factory()
         try:

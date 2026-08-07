@@ -13,9 +13,7 @@ import json
 from agents import RunContextWrapper, function_tool
 
 from app.agents.context import AgentToolContext
-
-WAIT_MIN_MINUTES = 1
-WAIT_MAX_MINUTES = 240
+from app.config.gameplay import WAIT_MAX_MINUTES, WAIT_MIN_MINUTES
 
 
 def _result_json(ok: bool, envelope, reason: str | None) -> str:
@@ -47,13 +45,16 @@ async def move(
     return _result_json(ok, envelope, err)
 
 
-@function_tool
+@function_tool(
+    description_override=f"原地等待 minutes 分钟（{WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES}），可被移动打断。",
+    use_docstring_info=False,
+)
 async def wait(
         ctx: RunContextWrapper[AgentToolContext],
         minutes: int,
         reason: str,
 ) -> str:
-    """原地等待 minutes 分钟（1~240），可被移动打断。"""
+    """原地等待；数值见 description_override（配置驱动）。"""
     minutes = max(WAIT_MIN_MINUTES, min(int(minutes), WAIT_MAX_MINUTES))
     ok, envelope, err = ctx.context.action_service.execute_wait(
         world_id=ctx.context.world_id,

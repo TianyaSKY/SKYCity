@@ -16,6 +16,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config.gameplay import (
+    ATTENDANCE_ABSENT_PENALTY,
+    ATTENDANCE_LATE_PENALTY,
+    SHIFT_EARLY_WINDOW,
+    SHIFT_LATE_LIMIT,
+    SHIFT_UPCOMING_REMIND,
+)
 from app.database.models.agents import Agent
 from app.database.models.companies import (
     Company,
@@ -510,16 +517,16 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("当前行动未完成")
             if agent.location_id != company.location_id:
                 raise CompanyEmploymentError("不在工作地点")
-            if world.world_time < shift.scheduled_start - 30:
+            if world.world_time < shift.scheduled_start - SHIFT_EARLY_WINDOW:
                 raise CompanyEmploymentError("尚未到签到时间")
-            if world.world_time > shift.scheduled_start + 120:
+            if world.world_time > shift.scheduled_start + SHIFT_LATE_LIMIT:
                 raise CompanyEmploymentError("已超过最晚签到时间")
             shift.actual_start = world.world_time
             shift.late_minutes = max(world.world_time - shift.scheduled_start, 0)
             shift.status = "late" if shift.late_minutes else "in_progress"
             if shift.late_minutes:
                 contract.late_shifts += 1
-                contract.attendance_score = max(0.0, contract.attendance_score - 2.0)
+                contract.attendance_score = max(0.0, contract.attendance_score - ATTENDANCE_LATE_PENALTY)
             duration = max(shift.scheduled_end - max(world.world_time, shift.scheduled_start), 1)
             end_at = world.world_time + duration
             agent.action_type = "formal_work"
@@ -970,7 +977,7 @@ class CompanyEmploymentService:
         shift.status = "absent"
         shift.absence_reason = "未在最晚签到时间前到岗"
         contract.absent_shifts += 1
-        contract.attendance_score = max(0.0, contract.attendance_score - 10.0)
+        contract.attendance_score = max(0.0, contract.attendance_score - ATTENDANCE_ABSENT_PENALTY)
         # Pending leave requests for a shift that already turned absent expire.
         for request in session.scalars(
                 select(LeaveRequest).where(
@@ -1125,9 +1132,9 @@ class CompanyEmploymentService:
             runtime = self.engine.get_runtime(world.world_id)
             if runtime is not None:
                 self.register_runtime(runtime)
-                runtime.scheduler.schedule(session, contract.agent_id, "formal_shift_absence_check", start + 120,
+                runtime.scheduler.schedule(session, contract.agent_id, "formal_shift_absence_check", start + SHIFT_LATE_LIMIT,
                                            {"shift_id": shift.shift_id})
-                upcoming_at = start - 60
+                upcoming_at = start - SHIFT_UPCOMING_REMIND
                 if upcoming_at > world.world_time:
                     runtime.scheduler.schedule(
                         session,

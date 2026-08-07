@@ -9,18 +9,14 @@ from __future__ import annotations
 from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.config.gameplay import (
+    INITIAL_ENERGY,
+    INITIAL_LONELINESS,
+    INITIAL_MONEY,
+    INITIAL_MOOD,
+    INITIAL_SATIETY,
+)
 from app.database.session import Base
-
-# R14 defaults. Satiety is 0-100, high = full; it drains hourly and is
-# restored by food (the 饥饿 "hunger" concept inverted to a resource meter).
-INITIAL_SATIETY = 100
-INITIAL_ENERGY = 100
-INITIAL_MONEY = 50
-# M12: mood dimension (0-100), drains hourly, restored by sleep/wait/items.
-INITIAL_MOOD = 100
-# R21: loneliness dimension (0-100, high = lonely), rises hourly, relieved
-# by talking with other agents.
-INITIAL_LONELINESS = 0
 
 
 class Agent(Base):

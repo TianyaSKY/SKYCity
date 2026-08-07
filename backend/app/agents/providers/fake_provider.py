@@ -31,6 +31,7 @@ import time
 from typing import Any
 
 from app.agents.providers.base import DecisionResult
+from app.config.gameplay import FAKE_SATIETY_THRESHOLD, TALK_DISTANCE
 from app.services.conversation_service import MSG_TARGET_BUSY
 
 # Per-agent scripts. agent_chenyu deliberately opens with a move to a
@@ -88,13 +89,12 @@ TALK_POOL = [
     "你吃过饭了吗？",
 ]
 LEAVE_MESSAGE = "不聊了，我得去忙了"
-TALK_DISTANCE = 3
 # An agent that has already sent this many messages in the current
 # conversation stops chatting and says goodbye.
 MAX_SENT_BEFORE_LEAVE = 2
 # At this satiety (0-100, high = full) the agent drops everything and
-# seeks food (branch 1.5).
-SATIETY_THRESHOLD = 20
+# seeks food (branch 1.5). Threshold lives in the global config.
+SATIETY_THRESHOLD = FAKE_SATIETY_THRESHOLD
 BREAD_PRICE = 12
 
 _SECTION_HEADER = "【上次工具结果】"

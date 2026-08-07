@@ -220,7 +220,9 @@ def test_hourly_wait_recovers_energy(engine: WorldEngine) -> None:
 
     row = agent_row(engine, world_id, "agent_linxia")
     assert row.satiety == 99
-    assert row.energy == 9  # -1 then +5 (wait recovery)
+    from app.config.gameplay import ENERGY_DRAIN_PER_HOUR, WAIT_ENERGY_PER_HOUR
+
+    assert row.energy == 5 - ENERGY_DRAIN_PER_HOUR + WAIT_ENERGY_PER_HOUR
 
 
 def test_hourly_tick_satiety_empty_extra_drain(engine: WorldEngine) -> None:

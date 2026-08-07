@@ -48,9 +48,8 @@ from app.agents.tools.employment import (
 from app.agents.tools.movement import move, wait
 from app.agents.tools.stocks import buy_stock, sell_stock
 from app.agents.tools.transfers import give_item, transfer_money
+from app.config.gameplay import OPENAI_SDK_MAX_TURNS
 from app.config.settings import Settings, get_settings
-
-MAX_TURNS = 4
 
 
 class OpenAIProvider:
@@ -108,7 +107,7 @@ class OpenAIProvider:
             agent,
             observation,
             context=RunContextWrapper(context),
-            max_turns=MAX_TURNS,
+            max_turns=OPENAI_SDK_MAX_TURNS,
         )
 
         tool_call = self._first_tool_call(result.new_items)
