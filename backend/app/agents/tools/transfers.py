@@ -44,10 +44,10 @@ def _result_json(ok: bool, envelope, reason: str | None) -> str:
 
 @function_tool
 async def transfer_money(
-    ctx: RunContextWrapper[AgentToolContext],
-    target_agent_id: str,
-    amount: int,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        target_agent_id: str,
+        amount: int,
+        reason: str,
 ) -> str:
     """给附近的智能体转账金币（target_agent_id 必须是【可见人物】里的 id，距离 ≤ 3 格）。钱不够会被拒绝。"""
     service = ctx.context.engine.transfer_service
@@ -65,11 +65,11 @@ async def transfer_money(
 
 @function_tool
 async def give_item(
-    ctx: RunContextWrapper[AgentToolContext],
-    target_agent_id: str,
-    item_id: str,
-    reason: str,
-    quantity: int = 1,
+        ctx: RunContextWrapper[AgentToolContext],
+        target_agent_id: str,
+        item_id: str,
+        reason: str,
+        quantity: int = 1,
 ) -> str:
     """把背包里的物品送给附近的智能体（不能超过持有数量）。"""
     service = ctx.context.engine.transfer_service

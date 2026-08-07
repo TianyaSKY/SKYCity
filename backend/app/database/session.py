@@ -31,6 +31,16 @@ SessionLocal = sessionmaker(
 class Base(DeclarativeBase):
     """Declarative base for all ORM models (imported by models package)."""
 
+def initialize_database() -> None:
+    """Create every table required by the current ORM model set.
+
+    Migration history is intentionally not supported: a database must be
+    created with the current application version.
+    """
+    from app.database import models  # noqa: F401 - registers all ORM models
+
+    Base.metadata.create_all(engine)
+
 
 def get_db() -> Generator[Session, None, None]:
     """FastAPI dependency yielding a scoped session, always closed afterwards."""

@@ -8,11 +8,9 @@ cache, god/public-event decision boosts, and trace_id completeness.
 from __future__ import annotations
 
 import asyncio
-import time
 from pathlib import Path
 
 import pytest
-
 from sqlalchemy import select
 
 from app.agents.providers.base import DecisionResult
@@ -27,7 +25,6 @@ from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 
@@ -308,7 +305,7 @@ def test_world_token_budget_stops_decisions(world_config: ParsedWorldConfig) -> 
 
 
 def test_observation_cache_skips_identical_observations(
-    world_config: ParsedWorldConfig,
+        world_config: ParsedWorldConfig,
 ) -> None:
     provider = CountingProvider()
     settings = Settings(observation_cache_window_minutes=10)

@@ -4,8 +4,15 @@
   "age": 52,
   "occupation": "小镇里正",
   "background": "在小镇住了三十年，做过木匠、种过地，现在是镇里大家信任的里正，负责调解和登记",
-  "values": ["公道", "念旧", "节俭"],
-  "long_term_goals": ["给小镇修一口新井", "看着年轻人把小镇建设好"],
+  "values": [
+    "公道",
+    "念旧",
+    "节俭"
+  ],
+  "long_term_goals": [
+    "给小镇修一口新井",
+    "看着年轻人把小镇建设好"
+  ],
   "speaking_style": "沉稳、爱说往事",
   "personality": {
     "openness": 0.40,
@@ -14,5 +21,9 @@
     "agreeableness": 0.88,
     "emotional_stability": 0.82
   },
-  "spawn": { "col": 30, "row": 9, "direction": "down" }
+  "spawn": {
+    "col": 30,
+    "row": 9,
+    "direction": "down"
+  }
 }

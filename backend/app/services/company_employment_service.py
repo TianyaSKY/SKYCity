@@ -32,7 +32,6 @@ from app.database.models.items import Item
 from app.database.models.jobs import Job
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import Store
-from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.services.payroll_service import PayrollService
 from app.services.seed_loader import load_stores
@@ -47,10 +46,10 @@ class CompanyEmploymentError(ValueError):
 
 class CompanyEmploymentService:
     def __init__(
-        self,
-        engine: WorldEngine,
-        session_factory: sessionmaker,
-        world_data_dir: Path,
+            self,
+            engine: WorldEngine,
+            session_factory: sessionmaker,
+            world_data_dir: Path,
     ) -> None:
         self.engine = engine
         self._session_factory = session_factory
@@ -183,8 +182,10 @@ class CompanyEmploymentService:
         try:
             rows = session.execute(
                 select(JobOpening, Position, Company)
-                .join(Position, (Position.world_id == JobOpening.world_id) & (Position.position_id == JobOpening.position_id))
-                .join(Company, (Company.world_id == JobOpening.world_id) & (Company.company_id == JobOpening.company_id))
+                .join(Position,
+                      (Position.world_id == JobOpening.world_id) & (Position.position_id == JobOpening.position_id))
+                .join(Company,
+                      (Company.world_id == JobOpening.world_id) & (Company.company_id == JobOpening.company_id))
                 .where(JobOpening.world_id == world_id, JobOpening.status == "open")
                 .order_by(Company.company_id, Position.position_id)
             ).all()
@@ -266,7 +267,8 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("企业不存在")
             rows = session.execute(
                 select(EmploymentContract, Agent)
-                .join(Agent, (Agent.world_id == EmploymentContract.world_id) & (Agent.agent_id == EmploymentContract.agent_id))
+                .join(Agent,
+                      (Agent.world_id == EmploymentContract.world_id) & (Agent.agent_id == EmploymentContract.agent_id))
                 .where(
                     EmploymentContract.world_id == world_id,
                     EmploymentContract.company_id == company_id,
@@ -282,7 +284,7 @@ class CompanyEmploymentService:
             session.close()
 
     def list_company_transactions(
-        self, world_id: str, company_id: str, limit: int = 50
+            self, world_id: str, company_id: str, limit: int = 50
     ) -> list[dict[str, Any]]:
         session = self._session_factory()
         try:
@@ -375,12 +377,12 @@ class CompanyEmploymentService:
             session.close()
 
     def review(
-        self,
-        world_id: str,
-        application_id: str,
-        manager_agent_id: str,
-        decision: str,
-        reason: str,
+            self,
+            world_id: str,
+            application_id: str,
+            manager_agent_id: str,
+            decision: str,
+            reason: str,
     ) -> dict[str, Any]:
         if decision not in {"accept", "reject"}:
             raise CompanyEmploymentError("decision 必须是 accept 或 reject")
@@ -564,19 +566,19 @@ class CompanyEmploymentService:
             contract.ended_at = world.world_time
             contract.termination_reason = reason
             for shift in session.scalars(
-                select(WorkShift).where(
-                    WorkShift.world_id == world_id,
-                    WorkShift.employment_id == employment_id,
-                    WorkShift.status == "scheduled",
-                )
+                    select(WorkShift).where(
+                        WorkShift.world_id == world_id,
+                        WorkShift.employment_id == employment_id,
+                        WorkShift.status == "scheduled",
+                    )
             ):
                 shift.status = "cancelled"
             for request in session.scalars(
-                select(LeaveRequest).where(
-                    LeaveRequest.world_id == world_id,
-                    LeaveRequest.employment_id == employment_id,
-                    LeaveRequest.status == "pending",
-                )
+                    select(LeaveRequest).where(
+                        LeaveRequest.world_id == world_id,
+                        LeaveRequest.employment_id == employment_id,
+                        LeaveRequest.status == "pending",
+                    )
             ):
                 request.status = "cancelled"
             position = session.get(Position, {"world_id": world_id, "position_id": contract.position_id})
@@ -611,11 +613,11 @@ class CompanyEmploymentService:
             session.close()
 
     def terminate(
-        self,
-        world_id: str,
-        employment_id: str,
-        manager_agent_id: str,
-        reason: str,
+            self,
+            world_id: str,
+            employment_id: str,
+            manager_agent_id: str,
+            reason: str,
     ) -> dict[str, Any]:
         """R32: manager dismisses an employee of their own company."""
         session = self._session_factory()
@@ -635,19 +637,19 @@ class CompanyEmploymentService:
             contract.ended_at = world.world_time
             contract.termination_reason = reason
             for shift in session.scalars(
-                select(WorkShift).where(
-                    WorkShift.world_id == world_id,
-                    WorkShift.employment_id == employment_id,
-                    WorkShift.status == "scheduled",
-                )
+                    select(WorkShift).where(
+                        WorkShift.world_id == world_id,
+                        WorkShift.employment_id == employment_id,
+                        WorkShift.status == "scheduled",
+                    )
             ):
                 shift.status = "cancelled"
             for request in session.scalars(
-                select(LeaveRequest).where(
-                    LeaveRequest.world_id == world_id,
-                    LeaveRequest.employment_id == employment_id,
-                    LeaveRequest.status == "pending",
-                )
+                    select(LeaveRequest).where(
+                        LeaveRequest.world_id == world_id,
+                        LeaveRequest.employment_id == employment_id,
+                        LeaveRequest.status == "pending",
+                    )
             ):
                 request.status = "cancelled"
             position = session.get(
@@ -700,11 +702,11 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("岗位当前不是招聘状态")
             position.status = "paused"
             for opening in session.scalars(
-                select(JobOpening).where(
-                    JobOpening.world_id == world_id,
-                    JobOpening.position_id == position_id,
-                    JobOpening.status == "open",
-                )
+                    select(JobOpening).where(
+                        JobOpening.world_id == world_id,
+                        JobOpening.position_id == position_id,
+                        JobOpening.status == "open",
+                    )
             ):
                 opening.status = "paused"
                 self._publish(session, world, "job_opening_closed", {
@@ -736,10 +738,10 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("企业未在经营，无法恢复招聘")
             position.status = "active"
             for opening in session.scalars(
-                select(JobOpening).where(
-                    JobOpening.world_id == world_id,
-                    JobOpening.position_id == position_id,
-                )
+                    select(JobOpening).where(
+                        JobOpening.world_id == world_id,
+                        JobOpening.position_id == position_id,
+                    )
             ):
                 if opening.vacancies > 0:
                     opening.status = "open"
@@ -769,19 +771,19 @@ class CompanyEmploymentService:
             company.status = "suspended"
             company.suspended_at = world.world_time
             for opening in session.scalars(
-                select(JobOpening).where(
-                    JobOpening.world_id == world_id,
-                    JobOpening.company_id == company_id,
-                    JobOpening.status == "open",
-                )
+                    select(JobOpening).where(
+                        JobOpening.world_id == world_id,
+                        JobOpening.company_id == company_id,
+                        JobOpening.status == "open",
+                    )
             ):
                 opening.status = "paused"
             for shift in session.scalars(
-                select(WorkShift).where(
-                    WorkShift.world_id == world_id,
-                    WorkShift.company_id == company_id,
-                    WorkShift.status == "scheduled",
-                )
+                    select(WorkShift).where(
+                        WorkShift.world_id == world_id,
+                        WorkShift.company_id == company_id,
+                        WorkShift.status == "scheduled",
+                    )
             ):
                 shift.status = "cancelled"
             self._publish(session, world, "company_status_changed", {
@@ -809,21 +811,21 @@ class CompanyEmploymentService:
             company.status = "active"
             company.suspended_at = None
             for opening in session.scalars(
-                select(JobOpening).where(
-                    JobOpening.world_id == world_id,
-                    JobOpening.company_id == company_id,
-                )
+                    select(JobOpening).where(
+                        JobOpening.world_id == world_id,
+                        JobOpening.company_id == company_id,
+                    )
             ):
                 if opening.vacancies > 0:
                     opening.status = "open"
             # Regenerate the next shift for every active contract whose
             # future shifts were cancelled during the suspension.
             for contract in session.scalars(
-                select(EmploymentContract).where(
-                    EmploymentContract.world_id == world_id,
-                    EmploymentContract.company_id == company_id,
-                    EmploymentContract.status.in_(ACTIVE_EMPLOYMENT),
-                )
+                    select(EmploymentContract).where(
+                        EmploymentContract.world_id == world_id,
+                        EmploymentContract.company_id == company_id,
+                        EmploymentContract.status.in_(ACTIVE_EMPLOYMENT),
+                    )
             ):
                 has_scheduled = session.scalar(
                     select(WorkShift).where(
@@ -896,12 +898,12 @@ class CompanyEmploymentService:
             session.close()
 
     def review_leave_request(
-        self,
-        world_id: str,
-        request_id: str,
-        manager_agent_id: str,
-        decision: str,
-        reason: str,
+            self,
+            world_id: str,
+            request_id: str,
+            manager_agent_id: str,
+            decision: str,
+            reason: str,
     ) -> dict[str, Any]:
         if decision not in {"approve", "reject"}:
             raise CompanyEmploymentError("decision 必须是 approve 或 reject")
@@ -971,11 +973,11 @@ class CompanyEmploymentService:
         contract.attendance_score = max(0.0, contract.attendance_score - 10.0)
         # Pending leave requests for a shift that already turned absent expire.
         for request in session.scalars(
-            select(LeaveRequest).where(
-                LeaveRequest.world_id == action.world_id,
-                LeaveRequest.shift_id == shift.shift_id,
-                LeaveRequest.status == "pending",
-            )
+                select(LeaveRequest).where(
+                    LeaveRequest.world_id == action.world_id,
+                    LeaveRequest.shift_id == shift.shift_id,
+                    LeaveRequest.status == "pending",
+                )
         ):
             request.status = "expired"
         self._publish(session, world, "shift_absent", {
@@ -1045,11 +1047,14 @@ class CompanyEmploymentService:
         for product in job.products_json or []:
             item_id = str(product.get("item_id") or "")
             quantity = int(product.get("quantity") or 0)
-            if not item_id or quantity <= 0 or session.get(Item, {"world_id": action.world_id, "item_id": item_id}) is None:
+            if not item_id or quantity <= 0 or session.get(Item,
+                                                           {"world_id": action.world_id, "item_id": item_id}) is None:
                 continue
-            row = session.get(CompanyInventory, {"world_id": action.world_id, "company_id": company.company_id, "item_id": item_id})
+            row = session.get(CompanyInventory,
+                              {"world_id": action.world_id, "company_id": company.company_id, "item_id": item_id})
             if row is None:
-                row = CompanyInventory(world_id=action.world_id, company_id=company.company_id, item_id=item_id, quantity=0)
+                row = CompanyInventory(world_id=action.world_id, company_id=company.company_id, item_id=item_id,
+                                       quantity=0)
                 session.add(row)
             row.quantity += quantity
             produced.append({"item_id": item_id, "quantity": quantity})
@@ -1087,7 +1092,8 @@ class CompanyEmploymentService:
         if self.engine.action_service is not None:
             self.engine.action_service._maybe_schedule_next_decision(session, action)
 
-    def _create_next_shift(self, session: Session, world: World, contract: EmploymentContract, position: Position) -> WorkShift:
+    def _create_next_shift(self, session: Session, world: World, contract: EmploymentContract,
+                           position: Position) -> WorkShift:
         day = max(world.world_time // 1440, 0)
         for offset in range(0, 8):
             candidate_day = day + offset
@@ -1119,7 +1125,8 @@ class CompanyEmploymentService:
             runtime = self.engine.get_runtime(world.world_id)
             if runtime is not None:
                 self.register_runtime(runtime)
-                runtime.scheduler.schedule(session, contract.agent_id, "formal_shift_absence_check", start + 120, {"shift_id": shift.shift_id})
+                runtime.scheduler.schedule(session, contract.agent_id, "formal_shift_absence_check", start + 120,
+                                           {"shift_id": shift.shift_id})
                 upcoming_at = start - 60
                 if upcoming_at > world.world_time:
                     runtime.scheduler.schedule(
@@ -1208,12 +1215,12 @@ class CompanyEmploymentService:
         return world
 
     def _publish(
-        self,
-        session: Session,
-        world: World,
-        event_type: str,
-        payload: dict[str, Any],
-        trace_id: str | None = None,
+            self,
+            session: Session,
+            world: World,
+            event_type: str,
+            payload: dict[str, Any],
+            trace_id: str | None = None,
     ) -> None:
         runtime = self.engine.get_runtime(world.world_id)
         if runtime is not None:

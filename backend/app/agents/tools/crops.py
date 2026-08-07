@@ -34,11 +34,11 @@ def _service(ctx: RunContextWrapper[AgentToolContext]):
 
 @function_tool
 async def plant(
-    ctx: RunContextWrapper[AgentToolContext],
-    col: int,
-    row: int,
-    item_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        col: int,
+        row: int,
+        item_id: str,
+        reason: str,
 ) -> str:
     """在农田 (col,row) 格种下一粒种子（item_id 必须是可种植的种子，如
     wheat_seed/carrot_seed/strawberry_seed/flower_seed）。要求：你离目标格 ≤ 3 格、
@@ -58,10 +58,10 @@ async def plant(
 
 @function_tool
 async def harvest(
-    ctx: RunContextWrapper[AgentToolContext],
-    col: int,
-    row: int,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        col: int,
+        row: int,
+        reason: str,
 ) -> str:
     """收获 (col,row) 格已成熟的作物（作物进入最后生长阶段才可收获；
     未成熟会被拒绝）。收获的产物进入背包，可以卖给商店。"""

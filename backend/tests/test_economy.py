@@ -42,7 +42,6 @@ from app.services.economy_service import (
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes, agent_row
 
 SHOP_ANCHOR = (23, 12)
@@ -55,7 +54,7 @@ def world_config() -> ParsedWorldConfig:
 
 
 def make_engine(
-    world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
+        world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
 ) -> WorldEngine:
     eng = WorldEngine(
         session_factory=SessionLocal,
@@ -79,7 +78,7 @@ def engine(world_config: ParsedWorldConfig) -> WorldEngine:
 
 
 def place_agent(
-    engine: WorldEngine, world_id: str, agent_id: str, location_id: str, col: int, row: int
+        engine: WorldEngine, world_id: str, agent_id: str, location_id: str, col: int, row: int
 ) -> None:
     session = SessionLocal()
     try:
@@ -94,7 +93,7 @@ def place_agent(
 
 
 def set_agent(
-    engine: WorldEngine, world_id: str, agent_id: str, **fields
+        engine: WorldEngine, world_id: str, agent_id: str, **fields
 ) -> None:
     session = SessionLocal()
     try:
@@ -125,7 +124,7 @@ def set_stock(engine: WorldEngine, world_id: str, item_id: str, stock: int) -> N
 
 
 def add_inventory(
-    engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
+        engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
 ) -> None:
     session = SessionLocal()
     try:

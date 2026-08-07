@@ -1,8 +1,29 @@
 {
   "version": "1.0.0",
   "stocks": [
-    {"stock_id": "stock_village_shop", "name": "晨露商店", "company_id": "village_shop", "source": "store", "base_price": 20, "outstanding_shares": 1000},
-    {"stock_id": "stock_village_farm", "name": "晨露农场", "company_id": "job_farm_field", "source": "job", "base_price": 15, "outstanding_shares": 1000},
-    {"stock_id": "stock_delivery", "name": "镇运输队", "company_id": "job_delivery", "source": "job", "base_price": 12, "outstanding_shares": 1000}
+    {
+      "stock_id": "stock_village_shop",
+      "name": "晨露商店",
+      "company_id": "village_shop",
+      "source": "store",
+      "base_price": 20,
+      "outstanding_shares": 1000
+    },
+    {
+      "stock_id": "stock_village_farm",
+      "name": "晨露农场",
+      "company_id": "job_farm_field",
+      "source": "job",
+      "base_price": 15,
+      "outstanding_shares": 1000
+    },
+    {
+      "stock_id": "stock_delivery",
+      "name": "镇运输队",
+      "company_id": "job_delivery",
+      "source": "job",
+      "base_price": 12,
+      "outstanding_shares": 1000
+    }
   ]
 }

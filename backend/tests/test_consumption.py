@@ -19,7 +19,6 @@ from sqlalchemy import select
 
 from app.agents.providers.fake_provider import FakeDecisionProvider
 from app.config.settings import get_settings
-from app.database.models.agents import Agent
 from app.database.models.relationships import Relationship
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.stores import StoreProduct
@@ -32,7 +31,6 @@ from app.services.save_service import SaveService
 from app.services.transfer_service import TransferService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine, _promo_roll
-
 from tests.test_economy import (
     add_inventory,
     inventory_of,
@@ -54,7 +52,7 @@ def world_config() -> ParsedWorldConfig:
 
 
 def make_engine(
-    world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
+        world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
 ) -> WorldEngine:
     eng = WorldEngine(
         session_factory=SessionLocal,
@@ -288,8 +286,8 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
         e
         for e in events
         if e.type == "money_changed"
-        and e.payload["agent_id"] == "agent_linxia"
-        and e.payload.get("reason") == "每日生活开销"
+           and e.payload["agent_id"] == "agent_linxia"
+           and e.payload.get("reason") == "每日生活开销"
     ]
     assert moved and moved[-1].payload == {
         "agent_id": "agent_linxia",

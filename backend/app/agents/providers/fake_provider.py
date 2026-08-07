@@ -109,8 +109,8 @@ class FakeDecisionProvider:
     """Scripted provider: deterministic, instant, no network."""
 
     def __init__(
-        self,
-        scripts: dict[str, list[tuple[str, dict[str, Any]]]] | None = None,
+            self,
+            scripts: dict[str, list[tuple[str, dict[str, Any]]]] | None = None,
     ) -> None:
         self._scripts = {
             agent_id: list(entries) for agent_id, entries in (scripts or DEFAULT_SCRIPTS).items()
@@ -127,11 +127,11 @@ class FakeDecisionProvider:
     # ------------------------------------------------------------------ #
 
     async def decide(
-        self,
-        *,
-        observation: str,
-        context: Any,
-        trace_id: str,
+            self,
+            *,
+            observation: str,
+            context: Any,
+            trace_id: str,
     ) -> DecisionResult:
         agent_id = context.agent_id
         started = time.perf_counter()
@@ -154,7 +154,7 @@ class FakeDecisionProvider:
                     }
                 else:
                     self._conversation_sent[(context.world_id, agent_id)] = (
-                        self._conversation_sent.get((context.world_id, agent_id), 0) + 1
+                            self._conversation_sent.get((context.world_id, agent_id), 0) + 1
                     )
                     tool_name, tool_arguments = "talk", {
                         "target_agent_id": first[0],
@@ -229,10 +229,10 @@ class FakeDecisionProvider:
             # conversation open and silent forever.
             last = self._last_tool_result(observation)
             if (
-                last is not None
-                and last[0] == "talk"
-                and last[1] is not None
-                and last[2] == MSG_TARGET_BUSY
+                    last is not None
+                    and last[0] == "talk"
+                    and last[1] is not None
+                    and last[2] == MSG_TARGET_BUSY
             ):
                 return self._result(agent_id, "talk", last[1], started)
 
@@ -242,13 +242,13 @@ class FakeDecisionProvider:
             if targets:
                 target = targets[0]
                 if (
-                    conversation_service.active_between(
-                        context.world_id, agent_id, target
-                    )
-                    is None
-                    and not conversation_service.in_cooldown(
-                        context.world_id, agent_id, target
-                    )
+                        conversation_service.active_between(
+                            context.world_id, agent_id, target
+                        )
+                        is None
+                        and not conversation_service.in_cooldown(
+                    context.world_id, agent_id, target
+                )
                 ):
                     self._conversation_sent[(context.world_id, agent_id)] = 1
                     return self._result(
@@ -301,11 +301,11 @@ class FakeDecisionProvider:
     # ------------------------------------------------------------------ #
 
     async def reflect(
-        self,
-        *,
-        digest: str,
-        context: Any,
-        trace_id: str,
+            self,
+            *,
+            digest: str,
+            context: Any,
+            trace_id: str,
     ) -> str:
         """Canned reflection derived from the digest's key numbers.
 
@@ -324,11 +324,11 @@ class FakeDecisionProvider:
         return f"今天完成了{work}次工作，和{friends}位朋友聊天。明天继续努力。"
 
     def _result(
-        self,
-        agent_id: str,
-        tool_name: str,
-        tool_arguments: dict[str, Any],
-        started: float,
+            self,
+            agent_id: str,
+            tool_name: str,
+            tool_arguments: dict[str, Any],
+            started: float,
     ) -> DecisionResult:
         latency_ms = max(int((time.perf_counter() - started) * 1000), 1)
         return DecisionResult(
@@ -352,7 +352,7 @@ class FakeDecisionProvider:
         idx = observation.find(_SECTION_HEADER)
         if idx < 0:
             return False
-        section = observation[idx : idx + 500]
+        section = observation[idx: idx + 500]
         return _FAILED_MARKER in section
 
     # ------------------------------------------------------------------ #
@@ -385,14 +385,14 @@ class FakeDecisionProvider:
 
     @staticmethod
     def _last_tool_result(
-        observation: str,
+            observation: str,
     ) -> tuple[str, dict[str, Any] | None, str | None] | None:
         """(tool_name, arguments, failure_reason) for the last tool result line,
         or None when the last tool succeeded / there is no recorded run."""
         idx = observation.find(_SECTION_HEADER)
         if idx < 0:
             return None
-        match = _TOOL_RESULT_LINE.search(observation[idx : idx + 500])
+        match = _TOOL_RESULT_LINE.search(observation[idx: idx + 500])
         if match is None:
             return None
         tool_name, arguments_json, status, detail = match.groups()
@@ -406,13 +406,13 @@ class FakeDecisionProvider:
 
     @staticmethod
     def _unread_messages(
-        observation: str,
+            observation: str,
     ) -> list[tuple[str, str, str, str]]:
         """Unread messages from 【收到的消息】: (from_agent_id, intent, name, text)."""
         start = observation.find(_MESSAGES_HEADER)
         if start < 0:
             return []
-        body = observation[start + len(_MESSAGES_HEADER) :]
+        body = observation[start + len(_MESSAGES_HEADER):]
         end = body.find("【")
         if end >= 0:
             body = body[:end]

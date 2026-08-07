@@ -4,8 +4,15 @@
   "age": 30,
   "occupation": "政务厅文书",
   "background": "小镇政务厅的文书，负责登记和公告，认真细致，话不多但很可靠",
-  "values": ["责任", "公正", "整洁"],
-  "long_term_goals": ["推动小镇修一条新路", "把政务厅的档案整理成册"],
+  "values": [
+    "责任",
+    "公正",
+    "整洁"
+  ],
+  "long_term_goals": [
+    "推动小镇修一条新路",
+    "把政务厅的档案整理成册"
+  ],
   "speaking_style": "正式、简洁",
   "personality": {
     "openness": 0.52,
@@ -14,6 +21,15 @@
     "agreeableness": 0.68,
     "emotional_stability": 0.74
   },
-  "spawn": { "col": 48, "row": 35, "direction": "down" },
-  "home": { "location_id": "wangfang_home", "name": "王芳的家", "col": 48, "row": 34 }
+  "spawn": {
+    "col": 48,
+    "row": 35,
+    "direction": "down"
+  },
+  "home": {
+    "location_id": "wangfang_home",
+    "name": "王芳的家",
+    "col": 48,
+    "row": 34
+  }
 }

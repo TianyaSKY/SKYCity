@@ -33,7 +33,6 @@ from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 # village_plaza anchor (32,20); village_farm anchor (47,24): manhattan 19 > 3.

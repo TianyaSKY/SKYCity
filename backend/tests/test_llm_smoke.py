@@ -62,11 +62,11 @@ def make_engine(world_config: ParsedWorldConfig) -> WorldEngine:
 
 
 def decide_once(
-    engine: WorldEngine,
-    world_id: str,
-    agent_id: str,
-    observation: str,
-    trace_id: str,
+        engine: WorldEngine,
+        world_id: str,
+        agent_id: str,
+        observation: str,
+        trace_id: str,
 ):
     """One real provider call; returns the extracted first tool call."""
     provider = OpenAIProvider(get_settings())
@@ -116,7 +116,7 @@ def test_llm_returns_legal_tool_call(world_config: ParsedWorldConfig) -> None:
 
 
 def test_llm_move_destination_is_visible_location(
-    world_config: ParsedWorldConfig,
+        world_config: ParsedWorldConfig,
 ) -> None:
     """(2) A move must target one of the world's 8 locations."""
     eng = make_engine(world_config)
@@ -150,7 +150,7 @@ def test_llm_move_destination_is_visible_location(
 
 
 def test_llm_talk_message_is_clean_dialogue(
-    world_config: ParsedWorldConfig,
+        world_config: ParsedWorldConfig,
 ) -> None:
     """(3) A talk reply must be real dialogue, not inner monologue."""
     eng = make_engine(world_config)
@@ -209,8 +209,8 @@ def test_llm_adjusts_after_failed_tool(world_config: ParsedWorldConfig) -> None:
         eng, world_id, "agent_linxia", observation, "trc_smoke_4"
     )
     same_failed_call = (
-        result.tool_name == "buy_item"
-        and result.tool_arguments.get("item_id") == "bread"
+            result.tool_name == "buy_item"
+            and result.tool_arguments.get("item_id") == "bread"
     )
     assert not same_failed_call, (
         f"provider retried the failed buy: {result.tool_name} {result.tool_arguments}"

@@ -16,7 +16,7 @@ def _save_service(request: Request) -> SaveService:
 
 @router.get("", response_model=list[SaveInfo])
 async def list_saves(
-    request: Request, world_id: str | None = None
+        request: Request, world_id: str | None = None
 ) -> list[SaveInfo]:
     """All saves, newest first; pass world_id to filter one world."""
     return [SaveInfo(**item) for item in _save_service(request).list_saves(world_id)]

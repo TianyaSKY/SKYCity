@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -78,6 +77,7 @@ NIGHT_START_HOUR = 22
 NIGHT_END_HOUR = 7
 NIGHT_SLEEP_ENERGY_THRESHOLD = 40
 
+
 def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
     """M12 D5: deterministic 20% chance of a promo day for one product.
 
@@ -107,10 +107,10 @@ class WorldEngine:
     """Registry of world runtimes + the background tick loop."""
 
     def __init__(
-        self,
-        session_factory: sessionmaker,
-        world_config: ParsedWorldConfig,
-        world_data_dir: Path | None = None,
+            self,
+            session_factory: sessionmaker,
+            world_config: ParsedWorldConfig,
+            world_data_dir: Path | None = None,
     ) -> None:
         self._session_factory = session_factory
         self.world_config = world_config
@@ -171,7 +171,7 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
 
     def _compute_plantable_cells(
-        self, world_data_dir: Path | None
+            self, world_data_dir: Path | None
     ) -> set[tuple[int, int]]:
         """R23.2: walkable cells within plant_radius of farm_field, excluding
         location anchors and spawn points."""
@@ -185,13 +185,13 @@ class WorldEngine:
         if field is None:
             return set()
         reserved = {
-            (loc.col, loc.row) for loc in self.world_config.locations
-        } | {(sp.col, sp.row) for sp in self.world_config.spawn_points}
+                       (loc.col, loc.row) for loc in self.world_config.locations
+                   } | {(sp.col, sp.row) for sp in self.world_config.spawn_points}
         return {
             (col, row)
             for col, row in self.world_config.walkable_cells
             if abs(col - field.col) + abs(row - field.row) <= radius
-            and (col, row) not in reserved
+               and (col, row) not in reserved
         }
 
     async def start(self) -> None:
@@ -241,7 +241,7 @@ class WorldEngine:
         return self._runtimes.get(world_id)
 
     def effective_walkable(
-        self, session: Session, world_id: str
+            self, session: Session, world_id: str
     ) -> frozenset[tuple[int, int]]:
         """R22.6: static walkable cells minus blocking built structures.
 
@@ -260,6 +260,7 @@ class WorldEngine:
             if blueprint is not None and blueprint.blocking:
                 blocked.add((row.col, row.row))
         return frozenset(self.world_config.walkable_cells - blocked)
+
     def home_location_id(self, agent_id: str) -> str | None:
         """The agent's home location id from its character card.
 
@@ -277,7 +278,7 @@ class WorldEngine:
         return self._home_by_agent.get(agent_id)
 
     def idle_agents_near(
-        self, world_id: str, agent_id: str, distance: int
+            self, world_id: str, agent_id: str, distance: int
     ) -> list[str]:
         """Other agents that are idle (no action in flight) and within
         manhattan ``distance`` cells of ``agent_id``, nearest first.
@@ -308,7 +309,7 @@ class WorldEngine:
             session.close()
 
     def waiting_agents_near(
-        self, world_id: str, agent_id: str, distance: int
+            self, world_id: str, agent_id: str, distance: int
     ) -> list[tuple[str, int]]:
         """(agent_id, remaining_minutes) for other agents currently waiting
         (action_type == "wait") within manhattan ``distance`` cells, sorted by
@@ -352,7 +353,7 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
 
     def _ensure_runtime(
-        self, world_id: str, clock: WorldClock | None = None, session: Session | None = None
+            self, world_id: str, clock: WorldClock | None = None, session: Session | None = None
     ) -> WorldRuntime:
         existing = self._runtimes.get(world_id)
         if existing is not None:
@@ -435,7 +436,7 @@ class WorldEngine:
                 )
 
     def _maybe_decision_boost(
-        self, session: Session, envelope: WorldEventEnvelope
+            self, session: Session, envelope: WorldEventEnvelope
     ) -> None:
         """M8 T8-3: important events wake idle agents sooner.
 
@@ -526,7 +527,7 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
 
     def create_world(
-        self, name: str | None = None, autonomous: bool = False
+            self, name: str | None = None, autonomous: bool = False
     ) -> WorldRuntime:
         """Create a new world seeded with locations + agents, return its runtime.
 
@@ -752,12 +753,12 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
 
     def publish(
-        self,
-        world_id: str,
-        type_: str,
-        payload: dict | None = None,
-        trace_id: str | None = None,
-        world_time: int | None = None,
+            self,
+            world_id: str,
+            type_: str,
+            payload: dict | None = None,
+            trace_id: str | None = None,
+            world_time: int | None = None,
     ) -> WorldEventEnvelope | None:
         """Persist one event for a world; returns its envelope (None if unknown world)."""
         runtime = self._runtimes.get(world_id)
@@ -852,11 +853,11 @@ class WorldEngine:
     # ------------------------------------------------------------------ #
 
     def _schedule_initial_decisions(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        base_delay: int = 2,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            base_delay: int = 2,
     ) -> None:
         """Schedule the first agent_decide for every agent, staggered."""
         agents = session.scalars(
@@ -874,11 +875,11 @@ class WorldEngine:
             )
 
     def _schedule_idle_decisions(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        delay: int = 2,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            delay: int = 2,
     ) -> None:
         """Re-arm the decision loop for agents that are currently idle."""
         agents = session.scalars(
@@ -939,11 +940,11 @@ class WorldEngine:
             session.close()
 
     def _maybe_hourly_tick(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """M5 R14: apply the hourly needs rhythm exactly once per hour.
 
@@ -969,33 +970,33 @@ class WorldEngine:
         runtime.last_day = world_time // 1440
 
     def _tick_stock_prices(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """M10: hourly market tick (delegates to StockService when wired)."""
         if self.stock_service is not None:
             self.stock_service.tick_prices(session, runtime, world, world_time)
 
     def _pay_dividends(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """M10: daily dividend settlement at 00:00 (delegates when wired)."""
         if self.stock_service is not None:
             self.stock_service.pay_dividends(session, runtime, world, world_time)
 
     def _apply_daily_upkeep(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """M12 D6: daily cost of living at 00:00.
 
@@ -1047,11 +1048,11 @@ class WorldEngine:
             agent.daily_call_count = 0
 
     def _apply_hourly_needs(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """R14 defaults: satiety -1/h, energy -1/h, wait +5/h, sleep +40/h,
         satiety==0 -1/h. M12: mood -1/h, wait +2/h, sleep +20/h.
@@ -1092,15 +1093,15 @@ class WorldEngine:
             # loneliness high -> high-priority decision. Night + low energy ->
             # go home/hotel to sleep (R14 sleep steering).
             if (
-                world.autonomous
-                and agent.action_type is None
-                and (
+                    world.autonomous
+                    and agent.action_type is None
+                    and (
                     agent.satiety <= 0
                     or agent.energy <= 0
                     or agent.mood <= 20
                     or agent.loneliness >= 80
                     or (night and agent.energy <= NIGHT_SLEEP_ENERGY_THRESHOLD)
-                )
+            )
             ):
                 runtime.scheduler.schedule(
                     session,
@@ -1111,11 +1112,11 @@ class WorldEngine:
                 )
 
     def _maybe_restock(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
     ) -> None:
         """R15: at a store's daily open hour, restock toward stock_cap."""
         # Open hours live on the location the store covers (R8).
@@ -1524,7 +1525,7 @@ class WorldEngine:
 
 
 def is_location_open(
-    location_type: str, open_hour: int, close_hour: int, world_time: int
+        location_type: str, open_hour: int, close_hour: int, world_time: int
 ) -> bool:
     """R8: houses, hotels and plazas are always open; others honour [open_hour, close_hour)."""
     if location_type in ("house", "hotel", "plaza"):

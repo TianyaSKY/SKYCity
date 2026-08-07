@@ -68,14 +68,14 @@ class BuildService:
     # ------------------------------------------------------------------ #
 
     def build_start(
-        self,
-        world_id: str,
-        agent_id: str,
-        col: int | None,
-        row: int | None,
-        blueprint_id: str | None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            col: int | None,
+            row: int | None,
+            blueprint_id: str | None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Validate + start a build action (R22.1~22.4)."""
         session = self._session_factory()
@@ -113,7 +113,7 @@ class BuildService:
             if not self._has_materials(session, world_id, agent_id, blueprint):
                 return False, None, MSG_NO_MATERIALS
             if blueprint.blocking and not self._connectivity_ok(
-                session, world_id, footprint
+                    session, world_id, footprint
             ):
                 return False, None, MSG_BLOCKS_VILLAGE  # R22.4
 
@@ -209,8 +209,8 @@ class BuildService:
 
         footprint = self._footprint_cells(blueprint, col, row)
         if (
-            self._cells_occupied_except(session, action.world_id, footprint, col, row)
-            or (blueprint.blocking and not self._connectivity_ok(session, action.world_id, footprint))
+                self._cells_occupied_except(session, action.world_id, footprint, col, row)
+                or (blueprint.blocking and not self._connectivity_ok(session, action.world_id, footprint))
         ):
             self._abort_build(
                 session, runtime, agent, structure, world_time, trace_id,
@@ -242,14 +242,14 @@ class BuildService:
     # ------------------------------------------------------------------ #
 
     def _abort_build(
-        self,
-        session: Session,
-        runtime: Any,
-        agent: Agent,
-        structure: TileStructure,
-        world_time: int,
-        trace_id: str | None,
-        text: str,
+            self,
+            session: Session,
+            runtime: Any,
+            agent: Agent,
+            structure: TileStructure,
+            world_time: int,
+            trace_id: str | None,
+            text: str,
     ) -> None:
         """Refund the pre-deducted materials and remove the pending row."""
         session.delete(structure)
@@ -294,23 +294,23 @@ class BuildService:
     def _cells_reserved(self, cells: list[tuple[int, int]]) -> bool:
         """R22.3: no location anchors or spawn points under the footprint."""
         anchors = {
-            (loc.col, loc.row) for loc in self.engine.world_config.locations
-        } | {(sp.col, sp.row) for sp in self.engine.world_config.spawn_points}
+                      (loc.col, loc.row) for loc in self.engine.world_config.locations
+                  } | {(sp.col, sp.row) for sp in self.engine.world_config.spawn_points}
         return any(cell in anchors for cell in cells)
 
     @staticmethod
     def _cells_occupied(
-        session: Session, world_id: str, cells: list[tuple[int, int]]
+            session: Session, world_id: str, cells: list[tuple[int, int]]
     ) -> bool:
         return BuildService._cells_occupied_except(session, world_id, cells, None, None)
 
     @staticmethod
     def _cells_occupied_except(
-        session: Session,
-        world_id: str,
-        cells: list[tuple[int, int]],
-        except_col: int | None,
-        except_row: int | None,
+            session: Session,
+            world_id: str,
+            cells: list[tuple[int, int]],
+            except_col: int | None,
+            except_row: int | None,
     ) -> bool:
         """Any structure row on the cells (optionally ignoring one cell —
         the builder's own anchor row)."""
@@ -325,7 +325,7 @@ class BuildService:
         return False
 
     def _has_materials(
-        self, session: Session, world_id: str, agent_id: str, blueprint: BlueprintDef
+            self, session: Session, world_id: str, agent_id: str, blueprint: BlueprintDef
     ) -> bool:
         for item_id, quantity in blueprint.materials.items():
             row = session.get(
@@ -337,7 +337,7 @@ class BuildService:
 
     @staticmethod
     def _deduct_materials(
-        session: Session, world_id: str, agent_id: str, blueprint: BlueprintDef
+            session: Session, world_id: str, agent_id: str, blueprint: BlueprintDef
     ) -> None:
         for item_id, quantity in blueprint.materials.items():
             row = session.get(
@@ -351,7 +351,7 @@ class BuildService:
 
     @staticmethod
     def _refund_materials(
-        session: Session, world_id: str, agent_id: str, materials: dict[str, Any]
+            session: Session, world_id: str, agent_id: str, materials: dict[str, Any]
     ) -> None:
         for item_id, quantity in materials.items():
             quantity = int(quantity or 0)
@@ -373,17 +373,17 @@ class BuildService:
                 row.quantity += quantity
 
     def _connectivity_ok(
-        self, session: Session, world_id: str, extra_blocked: list[tuple[int, int]]
+            self, session: Session, world_id: str, extra_blocked: list[tuple[int, int]]
     ) -> bool:
         """R22.4: after blocking ``extra_blocked``, every location anchor and
         spawn point must stay mutually reachable (BFS, 8-connected; anchor
         cells themselves count as passable — they sit on building tiles)."""
         blocked = set(extra_blocked)
         for row in session.scalars(
-            select(TileStructure).where(
-                TileStructure.world_id == world_id,
-                TileStructure.status == "built",
-            )
+                select(TileStructure).where(
+                    TileStructure.world_id == world_id,
+                    TileStructure.status == "built",
+                )
         ).all():
             blueprint = self.engine.blueprints.get(row.blueprint_id)
             if blueprint is not None and blueprint.blocking:
@@ -412,7 +412,7 @@ class BuildService:
 
     @staticmethod
     def _inventory_list(
-        session: Session, world_id: str, agent_id: str
+            session: Session, world_id: str, agent_id: str
     ) -> list[dict[str, Any]]:
         session.flush()  # include rows added in this transaction
         rows = session.scalars(

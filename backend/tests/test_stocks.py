@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import select, update
+from sqlalchemy import update
 
 from app.agents.providers.fake_provider import FakeDecisionProvider
 from app.config.settings import get_settings
@@ -35,7 +35,6 @@ from app.services.stock_service import (
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_economy import place_agent, set_agent, transaction_rows
 from tests.test_world_engine import advance_minutes
 
@@ -64,7 +63,7 @@ def client() -> TestClient:
 
 
 def make_engine(
-    world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
+        world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
 ) -> WorldEngine:
     eng = WorldEngine(
         session_factory=SessionLocal,
@@ -99,7 +98,7 @@ def stock_row(engine: WorldEngine, world_id: str, stock_id: str) -> Stock:
 
 
 def holding_of(
-    engine: WorldEngine, world_id: str, agent_id: str, stock_id: str
+        engine: WorldEngine, world_id: str, agent_id: str, stock_id: str
 ) -> int:
     session = SessionLocal()
     try:
@@ -358,8 +357,8 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
         e
         for e in engine.events_after(world_id, 0)
         if e.type == "money_changed"
-        and e.payload["agent_id"] == "agent_linxia"
-        and e.payload["amount"] == 4
+           and e.payload["agent_id"] == "agent_linxia"
+           and e.payload["amount"] == 4
     ]
     assert money, "dividend payout must surface as money_changed"
 

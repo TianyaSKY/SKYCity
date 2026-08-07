@@ -13,7 +13,6 @@ from app.schemas.actions import ActionRequest, ActionSuccess
 from app.schemas.god_actions import GodActionRequest, GodActionResponse
 from app.schemas.locations import LocationDetail
 from app.schemas.saves import RestoreRequest, RestoreResponse, SaveResponse
-from app.schemas.stocks import StocksResponse
 from app.schemas.snapshots import (
     AutonomousRequest,
     CreateWorldRequest,
@@ -22,6 +21,7 @@ from app.schemas.snapshots import (
     SpeedRequest,
     WorldInfo,
 )
+from app.schemas.stocks import StocksResponse
 from app.world_engine.engine import WorldEngine
 
 router = APIRouter(prefix="/api/worlds", tags=["worlds"])
@@ -143,7 +143,7 @@ async def set_speed(request: Request, world_id: str, body: SpeedRequest) -> OkRe
 
 @router.post("/{world_id}/autonomous", response_model=OkResponse)
 async def set_autonomous(
-    request: Request, world_id: str, body: AutonomousRequest
+        request: Request, world_id: str, body: AutonomousRequest
 ) -> OkResponse:
     """Enable/disable the LLM decision loop; enabling arms initial decisions."""
     engine = _engine(request)
@@ -157,7 +157,7 @@ async def set_autonomous(
 
 @router.get("/{world_id}/agents/{agent_id}/decisions")
 async def list_decisions(
-    request: Request, world_id: str, agent_id: str, limit: int = 50
+        request: Request, world_id: str, agent_id: str, limit: int = 50
 ) -> list[dict]:
     """LLM decision history for one agent (recent first), from llm_runs."""
     if _engine(request).get_runtime(world_id) is None:
@@ -177,7 +177,7 @@ async def list_decisions(
 
 @router.get("/{world_id}/agents/{agent_id}/conversations")
 async def list_conversations(
-    request: Request, world_id: str, agent_id: str, limit: int = 20
+        request: Request, world_id: str, agent_id: str, limit: int = 20
 ) -> list[dict]:
     """Conversation history for one agent (newest first), each with messages."""
     engine = _engine(request)
@@ -188,7 +188,7 @@ async def list_conversations(
 
 @router.get("/{world_id}/agents/{agent_id}/memories")
 async def list_memories(
-    request: Request, world_id: str, agent_id: str, limit: int = 30
+        request: Request, world_id: str, agent_id: str, limit: int = 30
 ) -> list[dict]:
     """M6: memories for one agent, newest first (working|episodic|semantic)."""
     engine = _engine(request)
@@ -199,7 +199,7 @@ async def list_memories(
 
 @router.get("/{world_id}/agents/{agent_id}/relationships")
 async def list_relationships(
-    request: Request, world_id: str, agent_id: str
+        request: Request, world_id: str, agent_id: str
 ) -> list[dict]:
     """M6: directional relationships where the agent is the source."""
     engine = _engine(request)
@@ -210,7 +210,7 @@ async def list_relationships(
 
 @router.post("/{world_id}/agents/{agent_id}/actions", response_model=None)
 async def agent_action(
-    request: Request, world_id: str, agent_id: str, body: ActionRequest
+        request: Request, world_id: str, agent_id: str, body: ActionRequest
 ) -> JSONResponse:
     """Manual action endpoint (M2): move or wait, validated by world rules."""
     engine = _engine(request)
@@ -237,7 +237,7 @@ async def get_agent(request: Request, world_id: str, agent_id: str) -> dict:
 
 @router.get("/{world_id}/locations/{location_id}", response_model=LocationDetail)
 async def get_location_detail(
-    request: Request, world_id: str, location_id: str
+        request: Request, world_id: str, location_id: str
 ) -> LocationDetail:
     """One location's detail: base fields + occupants + store products + jobs."""
     detail = _engine(request).location_detail(world_id, location_id)
@@ -248,7 +248,7 @@ async def get_location_detail(
 
 @router.post("/{world_id}/god-actions", response_model=GodActionResponse)
 async def god_action(
-    request: Request, world_id: str, body: GodActionRequest
+        request: Request, world_id: str, body: GodActionRequest
 ) -> GodActionResponse:
     """M7: apply one god intervention — audit row + events + WS push."""
     engine = _engine(request)

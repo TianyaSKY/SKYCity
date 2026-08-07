@@ -66,13 +66,13 @@ class TransferService:
     # ------------------------------------------------------------------ #
 
     def transfer_money(
-        self,
-        world_id: str,
-        from_agent_id: str,
-        to_agent_id: str,
-        amount: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            from_agent_id: str,
+            to_agent_id: str,
+            amount: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Transfer ``amount`` coins from one agent to another (R7: no credit)."""
 
@@ -96,8 +96,8 @@ class TransferService:
             if target is None:
                 return False, None, MSG_TARGET_MISSING
             if (
-                manhattan_distance(sender.col, sender.row, target.col, target.row)
-                > TALK_DISTANCE
+                    manhattan_distance(sender.col, sender.row, target.col, target.row)
+                    > TALK_DISTANCE
             ):
                 return False, None, MSG_NOT_NEAR  # R19.1: same as talk (R9)
 
@@ -190,14 +190,14 @@ class TransferService:
     # ------------------------------------------------------------------ #
 
     def give_item(
-        self,
-        world_id: str,
-        from_agent_id: str,
-        to_agent_id: str,
-        item_id: str,
-        quantity: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            from_agent_id: str,
+            to_agent_id: str,
+            item_id: str,
+            quantity: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Give ``quantity`` of ``item_id`` to another agent (no over-giving)."""
 
@@ -221,8 +221,8 @@ class TransferService:
             if target is None:
                 return False, None, MSG_TARGET_MISSING
             if (
-                manhattan_distance(sender.col, sender.row, target.col, target.row)
-                > TALK_DISTANCE
+                    manhattan_distance(sender.col, sender.row, target.col, target.row)
+                    > TALK_DISTANCE
             ):
                 return False, None, MSG_NOT_NEAR  # R19.1: same as talk (R9)
 
@@ -325,7 +325,7 @@ class TransferService:
 
     @staticmethod
     def _add_inventory(
-        session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+            session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
     ) -> None:
         row = session.get(
             Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -344,7 +344,7 @@ class TransferService:
 
     @staticmethod
     def _inventory_list(
-        session: Session, world_id: str, agent_id: str
+            session: Session, world_id: str, agent_id: str
     ) -> list[dict[str, Any]]:
         # The caller may have added/deleted inventory rows not yet flushed
         # (autoflush is off); flush so the snapshot list is complete.

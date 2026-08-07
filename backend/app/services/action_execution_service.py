@@ -62,9 +62,9 @@ Importance = "normal"
 
 
 def find_path(
-    start: tuple[int, int],
-    goal: tuple[int, int],
-    walkable_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        walkable_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
 ) -> list[tuple[int, int]] | None:
     """BFS over walkable cells from ``start`` to ``goal`` (inclusive).
 
@@ -118,7 +118,7 @@ class ActionExecutionService:
     # ------------------------------------------------------------------ #
 
     def execute_action(
-        self, world_id: str, agent_id: str, request: ActionRequest, trace_id: str | None = None
+            self, world_id: str, agent_id: str, request: ActionRequest, trace_id: str | None = None
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Dispatch a validated action request. Returns (ok, envelope, reason)."""
         if request.action_type == "move":
@@ -247,12 +247,12 @@ class ActionExecutionService:
     # ------------------------------------------------------------------ #
 
     def execute_move(
-        self,
-        world_id: str,
-        agent_id: str,
-        destination_id: str | None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            destination_id: str | None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Validate + start a move (R1/R6/R8-start/R15-at-completion/paused)."""
         session = self._session_factory()
@@ -290,8 +290,8 @@ class ActionExecutionService:
             # walkable set) are unaffected.
             walkable = self.engine.effective_walkable(session, world_id)
             if (
-                start in self.engine.world_config.walkable_cells
-                and start not in walkable
+                    start in self.engine.world_config.walkable_cells
+                    and start not in walkable
             ):
                 return False, None, MSG_START_BLOCKED
             path = find_path(start, goal, walkable)
@@ -333,12 +333,12 @@ class ActionExecutionService:
             session.close()
 
     def execute_wait(
-        self,
-        world_id: str,
-        agent_id: str,
-        minutes: int | None = None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            minutes: int | None = None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Validate + start a wait (R1: wait is interruptible)."""
         session = self._session_factory()
@@ -386,12 +386,12 @@ class ActionExecutionService:
             session.close()
 
     def execute_sleep(
-        self,
-        world_id: str,
-        agent_id: str,
-        minutes: int | None = None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            minutes: int | None = None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Validate + start a sleep (R1: interruptible like wait).
 
@@ -623,8 +623,8 @@ class ActionExecutionService:
         )
         world_time = runtime.clock.world_time
         if destination is not None and (
-            count_location_occupants(session, action.world_id, destination.location_id)
-            < destination.capacity
+                count_location_occupants(session, action.world_id, destination.location_id)
+                < destination.capacity
         ):
             agent.location_id = destination.location_id
             self._clear_action(agent)
@@ -652,7 +652,7 @@ class ActionExecutionService:
     # ------------------------------------------------------------------ #
 
     def _maybe_schedule_next_decision(
-        self, session: Session, action: ScheduledAction
+            self, session: Session, action: ScheduledAction
     ) -> None:
         """M3: autonomous worlds re-arm the LLM loop when an action completes.
 
@@ -679,14 +679,14 @@ class ActionExecutionService:
         )
 
     def _start_wait(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        agent: Agent,
-        minutes: int,
-        reason: str,
-        wait_until: int | None = None,
-        recheck_destination_id: str | None = None,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            agent: Agent,
+            minutes: int,
+            reason: str,
+            wait_until: int | None = None,
+            recheck_destination_id: str | None = None,
     ) -> None:
         """Begin an auto-scheduled wait (R8 door wait or R15 capacity wait)."""
         ends_at = wait_until if wait_until is not None else runtime.clock.world_time + minutes

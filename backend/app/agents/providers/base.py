@@ -43,17 +43,17 @@ class DecisionProvider(Protocol):
     """Anything that can turn an observation into a DecisionResult."""
 
     async def decide(
-        self,
-        *,
-        observation: str,
-        context: "AgentToolContext",
-        trace_id: str,
+            self,
+            *,
+            observation: str,
+            context: "AgentToolContext",
+            trace_id: str,
     ) -> DecisionResult: ...
 
     async def reflect(
-        self,
-        *,
-        digest: str,
-        context: "AgentToolContext | None",
-        trace_id: str,
+            self,
+            *,
+            digest: str,
+            context: "AgentToolContext | None",
+            trace_id: str,
     ) -> str: ...

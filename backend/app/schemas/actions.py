@@ -14,7 +14,8 @@ class ActionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    action_type: Literal["move", "wait", "talk", "work", "buy_item", "sell_item", "use_item", "sleep", "buy_stock", "sell_stock", "transfer_money", "give_item", "build", "plant", "harvest"]
+    action_type: Literal[
+        "move", "wait", "talk", "work", "buy_item", "sell_item", "use_item", "sleep", "buy_stock", "sell_stock", "transfer_money", "give_item", "build", "plant", "harvest"]
     destination_id: str | None = None
     minutes: int | None = Field(default=None, ge=1)
     reason: str | None = None

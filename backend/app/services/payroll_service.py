@@ -15,7 +15,6 @@ commit with the caller's transaction.
 
 from __future__ import annotations
 
-
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -36,15 +35,15 @@ class PayrollService:
         self.engine = engine
 
     def settle_shift(
-        self,
-        session: Session,
-        world: World,
-        shift: WorkShift,
-        contract: EmploymentContract,
-        company: Company,
-        agent: Agent,
-        wage_due: int,
-        trace_id: str,
+            self,
+            session: Session,
+            world: World,
+            shift: WorkShift,
+            contract: EmploymentContract,
+            company: Company,
+            agent: Agent,
+            wage_due: int,
+            trace_id: str,
     ) -> str:
         """Pay ``wage_due`` from company to agent; return wage_paid/wage_unpaid.
 
@@ -91,13 +90,13 @@ class PayrollService:
         return "wage_unpaid"
 
     def repay_contract(
-        self,
-        session: Session,
-        world: World,
-        contract: EmploymentContract,
-        company: Company,
-        agent: Agent,
-        trace_id: str,
+            self,
+            session: Session,
+            world: World,
+            contract: EmploymentContract,
+            company: Company,
+            agent: Agent,
+            trace_id: str,
     ) -> int:
         """Repay min(contract.unpaid_wage, company.money); return amount paid.
 

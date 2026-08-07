@@ -4,8 +4,15 @@
   "age": 21,
   "occupation": "打零工的学生",
   "background": "在镇上读职业学校的年轻人，课余帮农场和商店打零工，喜欢在广场闲逛",
-  "values": ["自由", "好奇", "乐观"],
-  "long_term_goals": ["攒钱买一辆送货小推车", "开一家自己的小吃摊"],
+  "values": [
+    "自由",
+    "好奇",
+    "乐观"
+  ],
+  "long_term_goals": [
+    "攒钱买一辆送货小推车",
+    "开一家自己的小吃摊"
+  ],
   "speaking_style": "轻快、话多",
   "personality": {
     "openness": 0.88,
@@ -14,6 +21,15 @@
     "agreeableness": 0.85,
     "emotional_stability": 0.58
   },
-  "spawn": { "col": 12, "row": 19, "direction": "down" },
-  "home": { "location_id": "chenyu_home", "name": "陈宇的家", "col": 12, "row": 18 }
+  "spawn": {
+    "col": 12,
+    "row": 19,
+    "direction": "down"
+  },
+  "home": {
+    "location_id": "chenyu_home",
+    "name": "陈宇的家",
+    "col": 12,
+    "row": 18
+  }
 }

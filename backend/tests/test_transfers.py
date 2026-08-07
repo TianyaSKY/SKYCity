@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
 
 from app.agents.providers.fake_provider import FakeDecisionProvider
 from app.config.settings import get_settings
@@ -34,7 +33,6 @@ from app.services.save_service import SaveService
 from app.services.transfer_service import MSG_SELF_TRANSFER, TransferService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_economy import add_inventory, inventory_of, place_agent, set_agent, transaction_rows
 from tests.test_world_engine import advance_minutes
 
@@ -53,7 +51,7 @@ def client() -> TestClient:
 
 
 def make_engine(
-    world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
+        world_config: ParsedWorldConfig, scripts=None, wire_decisions: bool = False
 ) -> WorldEngine:
     eng = WorldEngine(
         session_factory=SessionLocal,

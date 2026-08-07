@@ -22,8 +22,8 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
-from app.database.models.stores import StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.stores import StoreProduct
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.database.unit_of_work import UnitOfWork
@@ -134,11 +134,11 @@ class StockService:
     # ------------------------------------------------------------------ #
 
     def tick_prices(
-        self,
-        session: Session,
-        runtime: Any,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: Any,
+            world: World,
+            world_time: int,
     ) -> None:
         """Hourly: deterministic noise on every stock + one quote event each.
 
@@ -166,11 +166,11 @@ class StockService:
             )
 
     def pay_dividends(
-        self,
-        session: Session,
-        runtime: Any,
-        world: World,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: Any,
+            world: World,
+            world_time: int,
     ) -> None:
         """R18.3: at 00:00 pay out the day's profit as dividends.
 
@@ -261,13 +261,13 @@ class StockService:
     # ------------------------------------------------------------------ #
 
     def buy_stock(
-        self,
-        world_id: str,
-        agent_id: str,
-        stock_id: str,
-        shares: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            stock_id: str,
+            shares: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Buy ``shares`` of ``stock_id`` at the current price (R7: no credit)."""
 
@@ -367,13 +367,13 @@ class StockService:
         return self._uow.run(_inner)
 
     def sell_stock(
-        self,
-        world_id: str,
-        agent_id: str,
-        stock_id: str,
-        shares: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            stock_id: str,
+            shares: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Sell ``shares`` of ``stock_id`` at the current price (no oversell)."""
 

@@ -10,7 +10,6 @@ dependencies = [
     "pydantic-settings>=2",
     "loguru>=0.7",
     "sqlalchemy>=2.0.43",
-    "alembic>=1.13",
     "openai-agents>=0.19.3",
 ]
 

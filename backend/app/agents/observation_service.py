@@ -31,8 +31,8 @@ from app.database.models.items import Item
 from app.database.models.jobs import Job
 from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
-from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.worlds import World
 from app.services.seed_loader import load_blueprints, load_crops
 from app.world_engine.engine import HOTEL_NIGHTLY_FEE, is_location_open
@@ -102,11 +102,11 @@ def _action_text(agent: Agent, world_time: int) -> str:
 
 
 def build_observation(
-    world_id: str,
-    agent_id: str,
-    session_factory: sessionmaker[Session],
-    memory_service: Any = None,
-    home_id: str | None = None,
+        world_id: str,
+        agent_id: str,
+        session_factory: sessionmaker[Session],
+        memory_service: Any = None,
+        home_id: str | None = None,
 ) -> str:
     """Compose the observation text for one agent decision.
 
@@ -183,7 +183,7 @@ def build_observation(
             else f" 无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）"
         )
         lines.append(
-f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
+            f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"孤单: {agent.loneliness}/100 金钱: {agent.money} 所在位置: {here}（格 {agent.col},{agent.row}）"
             f" 当前行动: {_action_text(agent, world_time)}{home_text}"
         )

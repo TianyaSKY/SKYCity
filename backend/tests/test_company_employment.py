@@ -1133,7 +1133,6 @@ def test_god_inject_company_money_repays(system) -> None:
 
 def test_save_restore_v2_company_state(system) -> None:
     """E8: V2 存档保持进行中班次/欠薪/未来班次；恢复后缺勤检查与工资幂等."""
-    from app.database.models.saves import Save
     from app.services.save_service import SaveService
 
     engine, service = system
@@ -1269,9 +1268,9 @@ def test_restore_v1_save_migrates(system) -> None:
         assert row is not None
         payload = row.payload_json
         for key in (
-            "companies", "positions", "job_openings", "job_applications",
-            "employment_contracts", "work_shifts", "leave_requests",
-            "company_inventories", "company_transactions",
+                "companies", "positions", "job_openings", "job_applications",
+                "employment_contracts", "work_shifts", "leave_requests",
+                "company_inventories", "company_transactions",
         ):
             payload.pop(key, None)
         payload["schema_version"] = 1
@@ -1305,7 +1304,6 @@ def test_restore_v1_save_migrates(system) -> None:
 
 def test_first_version_acceptance_script(system) -> None:
     """§20 第一版最终验收剧本（确定性版）：招聘→录用→排班→出勤→工资→销售→存档."""
-    from app.database.models.saves import Save
     from app.services.save_service import SaveService
 
     engine, service = system

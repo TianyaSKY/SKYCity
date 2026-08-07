@@ -19,11 +19,9 @@ from app.database.models.inventories import Inventory
 from app.database.models.memories import Memory
 from app.database.models.structures import TileStructure
 from app.database.models.world_events import WorldEvent
-from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest
 from app.services.action_execution_service import (
-    MSG_NO_PATH,
     MSG_START_BLOCKED,
     ActionExecutionService,
 )
@@ -42,7 +40,6 @@ from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes, agent_row
 
 # A cell whose removal from walkable disconnects the anchor graph (probed
@@ -75,7 +72,7 @@ def engine(world_config: ParsedWorldConfig) -> WorldEngine:
 
 
 def give_item(
-    engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
+        engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
 ) -> None:
     session = SessionLocal()
     try:
@@ -100,7 +97,7 @@ def give_item(
 
 
 def place_agent(
-    engine: WorldEngine, world_id: str, agent_id: str, col: int, row: int
+        engine: WorldEngine, world_id: str, agent_id: str, col: int, row: int
 ) -> None:
     session = SessionLocal()
     try:
@@ -142,7 +139,7 @@ def held_quantity(engine: WorldEngine, world_id: str, agent_id: str, item_id: st
 
 
 def nearby_walkable(
-    engine: WorldEngine, world_id: str, col: int, row: int
+        engine: WorldEngine, world_id: str, col: int, row: int
 ) -> tuple[int, int]:
     """A walkable cell within manhattan distance 3 of (col, row) that is not
     an articulation point (its removal must not disconnect the town, so a
@@ -179,7 +176,7 @@ def nearby_walkable(
 
 
 def nearby_footprint(
-    engine: WorldEngine, world_id: str, col: int, row: int, size: int = 2
+        engine: WorldEngine, world_id: str, col: int, row: int, size: int = 2
 ) -> tuple[int, int]:
     """Anchor whose ``size``x``size`` footprint is fully walkable and whose
     removal does not disconnect the town (house build tests)."""
@@ -455,7 +452,7 @@ def test_build_blocking_at_choke_point_rejected(engine: WorldEngine) -> None:
 
 
 def test_build_non_blocking_flower_bed_at_choke_point_allowed(
-    engine: WorldEngine,
+        engine: WorldEngine,
 ) -> None:
     """Non-blocking structures never trip the connectivity invariant."""
     runtime = engine.create_world()

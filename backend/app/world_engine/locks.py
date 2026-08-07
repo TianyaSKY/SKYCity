@@ -50,10 +50,10 @@ def atomic_write(session_factory: SessionFactory) -> Iterator[Any]:
 
 
 def retry_on_lock(
-    session_factory: sessionmaker,
-    fn: Callable[[Any], Any],
-    retries: int = LOCK_RETRIES,
-    backoff_seconds: float = LOCK_BACKOFF_SECONDS,
+        session_factory: sessionmaker,
+        fn: Callable[[Any], Any],
+        retries: int = LOCK_RETRIES,
+        backoff_seconds: float = LOCK_BACKOFF_SECONDS,
 ) -> Any:
     """Run ``fn(session)`` inside ``BEGIN IMMEDIATE``, retrying up to
     ``retries`` times with backoff when SQLite reports a busy lock.

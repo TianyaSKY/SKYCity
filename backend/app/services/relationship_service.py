@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -123,7 +122,7 @@ class RelationshipService:
     # ------------------------------------------------------------------ #
 
     def ensure_row(
-        self, session: Session, world_id: str, source: str, target: str
+            self, session: Session, world_id: str, source: str, target: str
     ) -> Relationship:
         """The source->target row, created with zeroes when missing.
 
@@ -137,10 +136,10 @@ class RelationshipService:
         if row is None:
             for pending in session.new:
                 if (
-                    isinstance(pending, Relationship)
-                    and pending.world_id == world_id
-                    and pending.source_agent_id == source
-                    and pending.target_agent_id == target
+                        isinstance(pending, Relationship)
+                        and pending.world_id == world_id
+                        and pending.source_agent_id == source
+                        and pending.target_agent_id == target
                 ):
                     return pending
             row = Relationship(
@@ -158,13 +157,13 @@ class RelationshipService:
         return row
 
     def apply_deltas(
-        self,
-        session: Session,
-        world_id: str,
-        source: str,
-        target: str,
-        deltas: dict[str, int],
-        world_time: int | None = None,
+            self,
+            session: Session,
+            world_id: str,
+            source: str,
+            target: str,
+            deltas: dict[str, int],
+            world_time: int | None = None,
     ) -> Relationship | None:
         """Apply non-zero ``deltas``; emit relationship_changed.
 
@@ -240,7 +239,7 @@ class RelationshipService:
     # ------------------------------------------------------------------ #
 
     def _emit(
-        self, session: Session, world_id: str, type_: str, payload: dict
+            self, session: Session, world_id: str, type_: str, payload: dict
     ) -> None:
         runtime = self.engine.get_runtime(world_id)
         if runtime is None:

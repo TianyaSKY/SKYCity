@@ -40,7 +40,6 @@ from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 BREAD = "bread"
@@ -151,7 +150,7 @@ def world_state(world_id: str) -> dict:
 
 
 def _wait_until_idle(
-    client: TestClient, world_id: str, agent_id: str, timeout: float = 20.0
+        client: TestClient, world_id: str, agent_id: str, timeout: float = 20.0
 ) -> None:
     """Poll the agent detail endpoint until the agent has no in-flight action."""
     deadline = time.monotonic() + timeout
@@ -301,11 +300,11 @@ def test_restore_continues_sequence(client: TestClient) -> None:
 
     # A short wait gives the original world a real event stream.
     assert (
-        client.post(
-            f"/api/worlds/{world_id}/agents/agent_linxia/actions",
-            json={"action_type": "wait", "minutes": 1, "reason": "测试等待"},
-        ).status_code
-        == 200
+            client.post(
+                f"/api/worlds/{world_id}/agents/agent_linxia/actions",
+                json={"action_type": "wait", "minutes": 1, "reason": "测试等待"},
+            ).status_code
+            == 200
     )
     _wait_until_idle(client, world_id, "agent_linxia")
 
@@ -354,11 +353,11 @@ def test_replay_endpoint(client: TestClient) -> None:
     created = client.post("/api/worlds", json={}).json()
     world_id = created["world_id"]
     assert (
-        client.post(
-            f"/api/worlds/{world_id}/agents/agent_linxia/actions",
-            json={"action_type": "wait", "minutes": 1, "reason": "重放测试"},
-        ).status_code
-        == 200
+            client.post(
+                f"/api/worlds/{world_id}/agents/agent_linxia/actions",
+                json={"action_type": "wait", "minutes": 1, "reason": "重放测试"},
+            ).status_code
+            == 200
     )
     _wait_until_idle(client, world_id, "agent_linxia")
 

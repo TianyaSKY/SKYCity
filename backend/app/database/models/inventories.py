@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, ForeignKeyConstraint, Integer, String
+from sqlalchemy import ForeignKeyConstraint, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base

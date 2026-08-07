@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import {defineConfig} from '@playwright/test';
 
 /**
  * e2e smoke tests assume the stack is already running:
@@ -9,18 +9,18 @@ import { defineConfig } from '@playwright/test';
  * fails fast with a clear message when either is down.
  */
 export default defineConfig({
-  testDir: './e2e',
-  timeout: 60_000,
-  fullyParallel: false,
-  globalSetup: './e2e/global-setup.ts',
-  use: {
-    baseURL: 'http://localhost:5173',
-    trace: 'retain-on-failure',
-  },
-  projects: [
-    {
-      name: 'chromium',
-      use: { browserName: 'chromium' },
+    testDir: './e2e',
+    timeout: 60_000,
+    fullyParallel: false,
+    globalSetup: './e2e/global-setup.ts',
+    use: {
+        baseURL: 'http://localhost:5173',
+        trace: 'retain-on-failure',
     },
-  ],
+    projects: [
+        {
+            name: 'chromium',
+            use: {browserName: 'chromium'},
+        },
+    ],
 });

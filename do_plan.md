@@ -2,7 +2,8 @@
 
 项目定位：
 
-> 一个采用 **Tiny Farm 像素素材**的 2D 上帝视角 AI 世界。每个居民由身份卡、状态、记忆、关系和真实 LLM 驱动，通过工具完成移动、对话、工作、消费等行为；玩家负责观察、控制时间和干预世界。
+> 一个采用 **Tiny Farm 像素素材**的 2D 上帝视角 AI 世界。每个居民由身份卡、状态、记忆、关系和真实 LLM
+> 驱动，通过工具完成移动、对话、工作、消费等行为；玩家负责观察、控制时间和干预世界。
 
 整个项目按一条原则推进：
 
@@ -12,22 +13,23 @@
 
 # 一、最终技术路线
 
-| 模块         | 技术                          |
-| ---------- | --------------------------- |
-| Web 前端     | Vue 3、TypeScript、Vite、Pinia |
-| 世界渲染       | PixiJS 8                    |
-| 地图编辑       | Tiled，导出 JSON               |
-| 后端         | Python、FastAPI、Pydantic     |
-| LLM 框架     | OpenAI Agents SDK           |
-| 工具定义       | `@function_tool`            |
-| 实时通信       | WebSocket                   |
-| 数据访问       | SQLAlchemy 2                |
-| 初期数据库      | SQLite                      |
-| 数据迁移       | Alembic                     |
-| 调度系统       | 离散事件调度器                     |
-| 日志         | Loguru                      |
-| 测试         | Pytest、Vitest、Playwright    |
-| Python 包管理 | uv                          |
+| 模块          | 技术                           |
+|---------------|--------------------------------|
+| Web 前端      | Vue 3、TypeScript、Vite、Pinia |
+| 世界渲染      | PixiJS 8                       |
+| 地图编辑      | Tiled，导出 JSON               |
+| 后端          | Python、FastAPI、Pydantic      |
+| LLM 框架      | OpenAI Agents SDK              |
+| 工具定义      | `@function_tool`               |
+| 实时通信      | WebSocket                      |
+| 数据访问      | SQLAlchemy 2                   |
+| 初期数据库    | SQLite                         |
+| 数据迁移      | Alembic                        |
+| 调度系统      | 离散事件调度器                 |
+| 日志          | Loguru                         |
+| 测试          | Pytest、Vitest、Playwright     |
+| Python 包管理 | uv                             |
+
 ---
 
 # 二、架构边界
@@ -269,18 +271,18 @@ ai-tiny-world/
 
 # 五、里程碑总览
 
-| 里程碑 | 可运行成果                 |
-| --- | --------------------- |
-| M0  | Tiny Farm 地图和素材规范完成   |
-| M1  | 前后端骨架运行，地图显示          |
-| M2  | 世界状态、时钟和 WebSocket 打通 |
-| M3  | 第一个真实 LLM 智能体可以移动     |
-| M4  | 多智能体可以见面和对话           |
-| M5  | 工作、金钱、商店和消费闭环         |
-| M6  | 记忆、关系和持续行为            |
-| M7  | 完整上帝视角与世界干预           |
-| M8  | 稳定性、成本控制和可观测性         |
-| M9  | 存档、测试、打包和首个正式版本       |
+| 里程碑 | 可运行成果                      |
+|--------|---------------------------------|
+| M0     | Tiny Farm 地图和素材规范完成    |
+| M1     | 前后端骨架运行，地图显示        |
+| M2     | 世界状态、时钟和 WebSocket 打通 |
+| M3     | 第一个真实 LLM 智能体可以移动   |
+| M4     | 多智能体可以见面和对话          |
+| M5     | 工作、金钱、商店和消费闭环      |
+| M6     | 记忆、关系和持续行为            |
+| M7     | 完整上帝视角与世界干预          |
+| M8     | 稳定性、成本控制和可观测性      |
+| M9     | 存档、测试、打包和首个正式版本  |
 
 依赖关系：
 
@@ -369,7 +371,7 @@ foreground
 * `map-specification.md`
 * 一张能在 Tiled 中完整查看的小镇地图
 
-Tiled 官方建议将 Tileset 保存为独立文件，方便多个地图复用。([Tiled Documentation][5])
+Tiled 官方建议将 Tileset 保存为独立文件，方便多个地图复用。 ([Tiled Documentation][5])
 
 ## 验收标准
 
@@ -412,7 +414,7 @@ Tiled 官方建议将 Tileset 保存为独立文件，方便多个地图复用�
 * 设置 `nearest` 像素采样
 * 实现基础摄像机拖动和缩放
 
-PixiJS 支持通过资源 Manifest 和 Bundle 管理成组素材，适合后续按地图或界面分包加载。([PixiJS][6])
+PixiJS 支持通过资源 Manifest 和 Bundle 管理成组素材，适合后续按地图或界面分包加载。 ([PixiJS][6])
 
 ## 验收标准
 
@@ -600,7 +602,8 @@ async def wait(...):
     ...
 ```
 
-这里统一使用 SDK 官方名称 `@function_tool`，不自行定义另一套 `@tool`。SDK 会从 Python 签名、类型和 docstring 生成工具定义。([OpenAI GitHub Pages][4])
+这里统一使用 SDK 官方名称 `@function_tool`，不自行定义另一套 `@tool`。SDK 会从 Python 签名、类型和 docstring 生成工具定义。
+([OpenAI GitHub Pages][4])
 
 ## 运行上下文
 
@@ -1121,7 +1124,8 @@ daily_call_count
 → WebSocket
 ```
 
-Agents SDK 的 `Runner` 负责智能体和工具循环，官方还提供运行追踪能力，适合辅助检查模型选择了什么工具及调用过程。([OpenAI GitHub Pages][7])
+Agents SDK 的 `Runner` 负责智能体和工具循环，官方还提供运行追踪能力，适合辅助检查模型选择了什么工具及调用过程。
+([OpenAI GitHub Pages][7])
 
 ## 验收标准
 

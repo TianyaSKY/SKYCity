@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from sqlalchemy import select
 
 from app.config.settings import get_settings
@@ -84,7 +83,7 @@ def agent_row(engine: WorldEngine, world_id: str, agent_id: str):
 
 
 def place_agent(
-    engine: WorldEngine, world_id: str, agent_id: str, location_id: str, col: int, row: int
+        engine: WorldEngine, world_id: str, agent_id: str, location_id: str, col: int, row: int
 ) -> None:
     """Move an agent onto a location anchor (test shortcut)."""
     session = SessionLocal()
@@ -334,8 +333,8 @@ def test_delete_world_api() -> None:
         session = SessionLocal()
         try:
             assert (
-                session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-                is not None
+                    session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+                    is not None
             )
         finally:
             session.close()
@@ -352,14 +351,14 @@ def test_delete_world_api() -> None:
             from app.database.models.world_events import WorldEvent
 
             assert (
-                session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-                is None
+                    session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+                    is None
             )
             assert (
-                session.scalar(
-                    select(WorldEvent).where(WorldEvent.world_id == world_id)
-                )
-                is None
+                    session.scalar(
+                        select(WorldEvent).where(WorldEvent.world_id == world_id)
+                    )
+                    is None
             )
         finally:
             session.close()

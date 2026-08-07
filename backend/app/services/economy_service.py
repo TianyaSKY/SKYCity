@@ -70,12 +70,12 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def work_start(
-        self,
-        world_id: str,
-        agent_id: str,
-        job_id: str,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            job_id: str,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Validate + start a work action (R1/R3/R8/R11/R12)."""
         session = self._session_factory()
@@ -102,7 +102,7 @@ class EconomyService:
                 WorldLocation, {"world_id": world_id, "location_id": job.location_id}
             )
             if location is not None and not is_location_open(
-                location.location_type, location.open_hour, location.close_hour, world.world_time
+                    location.location_type, location.open_hour, location.close_hour, world.world_time
             ):
                 return False, None, MSG_LOCATION_CLOSED  # R8
             if agent.satiety <= 0:
@@ -278,13 +278,13 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def buy(
-        self,
-        world_id: str,
-        agent_id: str,
-        item_id: str,
-        quantity: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            item_id: str,
+            quantity: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Buy ``quantity`` of ``item_id`` at the store covering the agent.
 
@@ -449,13 +449,13 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def sell(
-        self,
-        world_id: str,
-        agent_id: str,
-        item_id: str,
-        quantity: int = 1,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            item_id: str,
+            quantity: int = 1,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Sell ``quantity`` of ``item_id`` to the store covering the agent.
 
@@ -620,12 +620,12 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def use_item(
-        self,
-        world_id: str,
-        agent_id: str,
-        item_id: str,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            item_id: str,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Consume one usable item: food restores satiety, M12 mood items
         restore mood (both may apply for hybrid items)."""
@@ -713,7 +713,7 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def _find_product(
-        self, session: Session, world_id: str, item_id: str
+            self, session: Session, world_id: str, item_id: str
     ) -> tuple[StoreProduct, Store] | None:
         """The (product, store) pair selling/buying ``item_id`` in this world."""
         product = session.scalars(
@@ -730,7 +730,7 @@ class EconomyService:
 
     @staticmethod
     def _store_open(
-        session: Session, world_id: str, store: Store, world_time: int
+            session: Session, world_id: str, store: Store, world_time: int
     ) -> bool:
         location = session.get(WorldLocation, {"world_id": world_id, "location_id": store.location_id})
         if location is None:
@@ -741,7 +741,7 @@ class EconomyService:
 
     @staticmethod
     def _add_inventory(
-        session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+            session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
     ) -> None:
         row = session.get(
             Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -760,7 +760,7 @@ class EconomyService:
 
     @staticmethod
     def _inventory_list(
-        session: Session, world_id: str, agent_id: str
+            session: Session, world_id: str, agent_id: str
     ) -> list[dict[str, Any]]:
         # The caller may have added inventory rows not yet flushed
         # (autoflush is off); flush so the snapshot list is complete.

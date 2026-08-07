@@ -27,11 +27,11 @@ def _result_json(ok: bool, envelope, reason: str | None) -> str:
 
 @function_tool
 async def build(
-    ctx: RunContextWrapper[AgentToolContext],
-    col: int,
-    row: int,
-    blueprint_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        col: int,
+        row: int,
+        blueprint_id: str,
+        reason: str,
 ) -> str:
     """在 (col,row) 格建造蓝图建筑（蓝图名见可做的事列表）。要求：你离目标格 ≤ 3 格、
     目标格可行走且未被占用、背包里有足够材料；建造期间不能做其他事，

@@ -9,7 +9,12 @@
       "duration_minutes": 120,
       "wage": 30,
       "energy_cost_per_hour": 4,
-      "products": [{"item_id": "wheat", "quantity": 1}],
+      "products": [
+        {
+          "item_id": "wheat",
+          "quantity": 1
+        }
+      ],
       "description": "浇水、播种或收获，晨露农场的日常农活"
     },
     {

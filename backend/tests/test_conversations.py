@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
 from sqlalchemy import select
 
 from app.agents.observation_service import build_observation
@@ -36,7 +35,6 @@ from app.services.conversation_service import (
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 PLAZA = (32, 20)
@@ -377,10 +375,10 @@ def test_distance_break(world_config: ParsedWorldConfig) -> None:
 
     # chenyu walks to the town hall (> 3 cells from the plaza)
     assert (
-        eng.action_service.execute_move(
-            world_id, "agent_chenyu", "town_hall", reason="去镇公所"
-        )[0]
-        is True
+            eng.action_service.execute_move(
+                world_id, "agent_chenyu", "town_hall", reason="去镇公所"
+            )[0]
+            is True
     )
     advance_minutes(eng, world_id, 60)
 

@@ -32,9 +32,9 @@ def _result_json(ok: bool, envelope, reason: str | None) -> str:
 
 @function_tool
 async def move(
-    ctx: RunContextWrapper[AgentToolContext],
-    destination_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        destination_id: str,
+        reason: str,
 ) -> str:
     """移动到地图上的一个地点（destination_id 必须是可见地点列表中的 id）。"""
     ok, envelope, err = ctx.context.action_service.execute_move(
@@ -49,9 +49,9 @@ async def move(
 
 @function_tool
 async def wait(
-    ctx: RunContextWrapper[AgentToolContext],
-    minutes: int,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        minutes: int,
+        reason: str,
 ) -> str:
     """原地等待 minutes 分钟（1~240），可被移动打断。"""
     minutes = max(WAIT_MIN_MINUTES, min(int(minutes), WAIT_MAX_MINUTES))

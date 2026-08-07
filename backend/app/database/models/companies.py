@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, UniqueConstraint, text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, ForeignKeyConstraint, Index, Integer, String, \
+    UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
@@ -22,7 +23,8 @@ def _utcnow() -> datetime:
 class Company(Base):
     __tablename__ = "companies"
 
-    world_id: Mapped[str] = mapped_column(String(64), ForeignKey("worlds.world_id", ondelete="CASCADE"), primary_key=True)
+    world_id: Mapped[str] = mapped_column(String(64), ForeignKey("worlds.world_id", ondelete="CASCADE"),
+                                          primary_key=True)
     company_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(96), nullable=False)
     company_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -41,7 +43,8 @@ class Company(Base):
 class Position(Base):
     __tablename__ = "positions"
     __table_args__ = (
-        ForeignKeyConstraint(["world_id", "company_id"], ["companies.world_id", "companies.company_id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["world_id", "company_id"], ["companies.world_id", "companies.company_id"],
+                             ondelete="CASCADE"),
     )
 
     world_id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -61,7 +64,8 @@ class Position(Base):
 class JobOpening(Base):
     __tablename__ = "job_openings"
     __table_args__ = (
-        ForeignKeyConstraint(["world_id", "position_id"], ["positions.world_id", "positions.position_id"], ondelete="CASCADE"),
+        ForeignKeyConstraint(["world_id", "position_id"], ["positions.world_id", "positions.position_id"],
+                             ondelete="CASCADE"),
     )
 
     opening_id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: _id("opening"))

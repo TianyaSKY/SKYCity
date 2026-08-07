@@ -30,7 +30,6 @@ from app.services.agent_decision_service import DecisionService
 from app.services.conversation_service import ConversationService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 REFLECTION_SUMMARY_ZERO = "今天完成了0次工作，和0位朋友聊天。明天继续努力。"
@@ -482,9 +481,9 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
     assert world_time(world_id) == 1410
 
     for agent_id in (
-        "agent_linxia", "agent_zhangming", "agent_chenyu",
-        "agent_wangfang", "agent_laozhang",
-        "agent_touzi",
+            "agent_linxia", "agent_zhangming", "agent_chenyu",
+            "agent_wangfang", "agent_laozhang",
+            "agent_touzi",
     ):
         memories = memories_for(world_id, agent_id)
         semantic = [m for m in memories if m.memory_type == "semantic"]
@@ -508,9 +507,9 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
     events = [e for e in eng.events_after(world_id, 0) if e.type == "daily_reflection"]
     assert len(events) == 12  # 6 agents x 2 days
     for agent_id in (
-        "agent_linxia", "agent_zhangming", "agent_chenyu",
-        "agent_wangfang", "agent_laozhang",
-        "agent_touzi",
+            "agent_linxia", "agent_zhangming", "agent_chenyu",
+            "agent_wangfang", "agent_laozhang",
+            "agent_touzi",
     ):
         assert len(memories_for(world_id, agent_id)) == 2
     eng._runtimes.clear()

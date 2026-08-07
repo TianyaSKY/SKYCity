@@ -87,10 +87,10 @@ async def list_job_openings(request: Request, world_id: str) -> list[dict]:
 
 @router.post("/{world_id}/job-openings/{opening_id}/apply", status_code=201)
 async def apply_for_job(
-    request: Request,
-    world_id: str,
-    opening_id: str,
-    body: JobApplicationRequest,
+        request: Request,
+        world_id: str,
+        opening_id: str,
+        body: JobApplicationRequest,
 ) -> dict:
     try:
         result = _service(request).apply(world_id, opening_id, body.agent_id, body.reason)
@@ -102,10 +102,10 @@ async def apply_for_job(
 
 @router.post("/{world_id}/job-applications/{application_id}/review")
 async def review_job_application(
-    request: Request,
-    world_id: str,
-    application_id: str,
-    body: JobApplicationReviewRequest,
+        request: Request,
+        world_id: str,
+        application_id: str,
+        body: JobApplicationReviewRequest,
 ) -> dict:
     try:
         result = _service(request).review(
@@ -123,10 +123,10 @@ async def review_job_application(
 
 @router.post("/{world_id}/job-applications/{application_id}/withdraw")
 async def withdraw_job_application(
-    request: Request,
-    world_id: str,
-    application_id: str,
-    body: ApplicationWithdrawRequest,
+        request: Request,
+        world_id: str,
+        application_id: str,
+        body: ApplicationWithdrawRequest,
 ) -> dict:
     try:
         return _service(request).withdraw(world_id, application_id, body.agent_id)
@@ -146,10 +146,10 @@ async def get_agent_shifts(request: Request, world_id: str, agent_id: str) -> li
 
 @router.post("/{world_id}/work-shifts/{shift_id}/start")
 async def start_work_shift(
-    request: Request,
-    world_id: str,
-    shift_id: str,
-    body: ShiftStartRequest,
+        request: Request,
+        world_id: str,
+        shift_id: str,
+        body: ShiftStartRequest,
 ) -> dict:
     try:
         result = _service(request).start_shift(world_id, shift_id, body.agent_id)
@@ -161,7 +161,7 @@ async def start_work_shift(
 
 @router.post("/{world_id}/work-shifts/{shift_id}/leave")
 async def request_shift_leave(
-    request: Request, world_id: str, shift_id: str, body: ShiftLeaveRequest
+        request: Request, world_id: str, shift_id: str, body: ShiftLeaveRequest
 ) -> dict:
     try:
         return _service(request).request_leave(world_id, shift_id, body.agent_id, body.reason)
@@ -171,7 +171,7 @@ async def request_shift_leave(
 
 @router.post("/{world_id}/leave-requests/{request_id}/review")
 async def review_leave_request(
-    request: Request, world_id: str, request_id: str, body: LeaveReviewRequest
+        request: Request, world_id: str, request_id: str, body: LeaveReviewRequest
 ) -> dict:
     try:
         result = _service(request).review_leave_request(
@@ -185,10 +185,10 @@ async def review_leave_request(
 
 @router.post("/{world_id}/employments/{employment_id}/resign")
 async def resign_employment(
-    request: Request,
-    world_id: str,
-    employment_id: str,
-    body: EmploymentResignRequest,
+        request: Request,
+        world_id: str,
+        employment_id: str,
+        body: EmploymentResignRequest,
 ) -> dict:
     try:
         result = _service(request).resign(world_id, employment_id, body.agent_id, body.reason)
@@ -200,10 +200,10 @@ async def resign_employment(
 
 @router.post("/{world_id}/employments/{employment_id}/terminate")
 async def terminate_employment(
-    request: Request,
-    world_id: str,
-    employment_id: str,
-    body: EmploymentTerminateRequest,
+        request: Request,
+        world_id: str,
+        employment_id: str,
+        body: EmploymentTerminateRequest,
 ) -> dict:
     try:
         result = _service(request).terminate(
@@ -217,10 +217,10 @@ async def terminate_employment(
 
 @router.post("/{world_id}/positions/{position_id}/pause-recruitment")
 async def pause_recruitment(
-    request: Request,
-    world_id: str,
-    position_id: str,
-    body: RecruitmentToggleRequest,
+        request: Request,
+        world_id: str,
+        position_id: str,
+        body: RecruitmentToggleRequest,
 ) -> dict:
     try:
         return _service(request).pause_recruitment(world_id, position_id, body.manager_agent_id)
@@ -230,10 +230,10 @@ async def pause_recruitment(
 
 @router.post("/{world_id}/positions/{position_id}/resume-recruitment")
 async def resume_recruitment(
-    request: Request,
-    world_id: str,
-    position_id: str,
-    body: RecruitmentToggleRequest,
+        request: Request,
+        world_id: str,
+        position_id: str,
+        body: RecruitmentToggleRequest,
 ) -> dict:
     try:
         return _service(request).resume_recruitment(world_id, position_id, body.manager_agent_id)
@@ -243,10 +243,10 @@ async def resume_recruitment(
 
 @router.post("/{world_id}/companies/{company_id}/suspend")
 async def suspend_company(
-    request: Request,
-    world_id: str,
-    company_id: str,
-    body: CompanyStatusRequest,
+        request: Request,
+        world_id: str,
+        company_id: str,
+        body: CompanyStatusRequest,
 ) -> dict:
     try:
         result = _service(request).suspend_company(
@@ -260,10 +260,10 @@ async def suspend_company(
 
 @router.post("/{world_id}/companies/{company_id}/resume")
 async def resume_company(
-    request: Request,
-    world_id: str,
-    company_id: str,
-    body: CompanyStatusRequest,
+        request: Request,
+        world_id: str,
+        company_id: str,
+        body: CompanyStatusRequest,
 ) -> dict:
     try:
         result = _service(request).resume_company(

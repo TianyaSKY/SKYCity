@@ -112,6 +112,6 @@ frontend/src/
 
 ## 8. 配置
 
-- `backend/.env` → `app/config/settings.py`（pydantic-settings）：
-  DATABASE_URL、CORS_ORIGINS、WORLD_MAP_PATH、LLM 模型/密钥、并发上限、预算等。
+- `backend/.env` → `app/config/settings.py`（pydantic-settings）： DATABASE_URL、CORS_ORIGINS、WORLD_MAP_PATH、LLM
+  模型/密钥、并发上限、预算等。
 - 地图与素材通过 `world_data/asset-manifest.json` 加载（不硬编码路径）。

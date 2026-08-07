@@ -31,9 +31,9 @@ def _service(ctx: RunContextWrapper[AgentToolContext]):
 
 @function_tool
 async def apply_job(
-    ctx: RunContextWrapper[AgentToolContext],
-    opening_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        opening_id: str,
+        reason: str,
 ) -> str:
     """申请【公开招聘】中的正式职位（opening_id 必须是公告里括号内的完整 id）。
     录用与否由企业经理决定；重复申请、岗位已满或招聘关闭会被拒绝。"""
@@ -54,9 +54,9 @@ async def apply_job(
 
 @function_tool
 async def withdraw_job_application(
-    ctx: RunContextWrapper[AgentToolContext],
-    application_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        application_id: str,
+        reason: str,
 ) -> str:
     """撤回自己尚未被处理的求职申请（application_id 必须是【我的申请】里括号内的完整 id）。"""
     service = _service(ctx)
@@ -75,10 +75,10 @@ async def withdraw_job_application(
 
 @function_tool
 async def review_job_application(
-    ctx: RunContextWrapper[AgentToolContext],
-    application_id: str,
-    decision: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        application_id: str,
+        decision: str,
+        reason: str,
 ) -> str:
     """审核【待审核求职申请】里的申请（仅企业经理可用）。
     decision 只能是 accept（录用，立即建立合同并安排班次）或 reject（拒绝）。"""
@@ -102,9 +102,9 @@ async def review_job_application(
 
 @function_tool
 async def start_shift(
-    ctx: RunContextWrapper[AgentToolContext],
-    shift_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        shift_id: str,
+        reason: str,
 ) -> str:
     """在【今天班次】的工作地点签到开始正式班次（shift_id 用班次行的完整 id）。
     必须位于企业地点；可提前 30 分钟签到，迟到上限 120 分钟，超时班次作缺勤。"""
@@ -124,9 +124,9 @@ async def start_shift(
 
 @function_tool
 async def resign_job(
-    ctx: RunContextWrapper[AgentToolContext],
-    employment_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        employment_id: str,
+        reason: str,
 ) -> str:
     """辞去当前正式工作（employment_id 用【正式职业】行的完整 id）。
     辞职后未来班次取消、岗位重新开放；欠薪仍然保留。"""
@@ -147,9 +147,9 @@ async def resign_job(
 
 @function_tool
 async def request_leave(
-    ctx: RunContextWrapper[AgentToolContext],
-    shift_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        shift_id: str,
+        reason: str,
 ) -> str:
     """为【今天班次】申请请假（shift_id 用班次行的完整 id）。
     由企业经理审批；批准后该班次不判缺勤也不发工资。"""
@@ -170,10 +170,10 @@ async def request_leave(
 
 @function_tool
 async def review_leave_request(
-    ctx: RunContextWrapper[AgentToolContext],
-    request_id: str,
-    decision: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        request_id: str,
+        decision: str,
+        reason: str,
 ) -> str:
     """审批员工的请假申请（仅企业经理可用；request_id 用【待审批请假】行的完整 id）。
     decision 只能是 approve（准假，班次转请假）或 reject（拒绝，班次保持待签到）。"""
@@ -197,9 +197,9 @@ async def review_leave_request(
 
 @function_tool
 async def terminate_employment(
-    ctx: RunContextWrapper[AgentToolContext],
-    employment_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        employment_id: str,
+        reason: str,
 ) -> str:
     """解雇本企业的员工（仅企业经理可用；employment_id 用员工列表里的完整 id）。
     合同终止、未来班次取消、招聘名额恢复；欠薪不会因解雇消失。"""
@@ -220,9 +220,9 @@ async def terminate_employment(
 
 @function_tool
 async def pause_recruitment(
-    ctx: RunContextWrapper[AgentToolContext],
-    position_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        position_id: str,
+        reason: str,
 ) -> str:
     """暂停某个岗位的招聘（仅企业经理可用；position_id 用【企业经营】行里的完整 id）。
     暂停期间该岗位不再接受新申请，已有员工不受影响。"""
@@ -242,9 +242,9 @@ async def pause_recruitment(
 
 @function_tool
 async def resume_recruitment(
-    ctx: RunContextWrapper[AgentToolContext],
-    position_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        position_id: str,
+        reason: str,
 ) -> str:
     """恢复某个岗位的招聘（仅企业经理可用；岗位需处于暂停状态且企业正常经营）。"""
     service = _service(ctx)

@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sqlalchemy import select
 
 from app.agents.providers.base import DecisionResult
@@ -26,7 +25,6 @@ from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
 from tests.test_world_engine import advance_minutes
 
 

@@ -1,7 +1,7 @@
-<script setup lang="ts">
+<script lang="ts" setup>
 import WorldView from './views/WorldView.vue';
 </script>
 
 <template>
-  <WorldView />
+    <WorldView/>
 </template>

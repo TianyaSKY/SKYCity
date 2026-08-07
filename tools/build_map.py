@@ -24,9 +24,8 @@ from __future__ import annotations
 
 import json
 import random
-from pathlib import Path
-
 from PIL import Image
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MAP_DIR = ROOT / "world_data" / "maps"
@@ -37,14 +36,14 @@ TILE = 16
 SEED = 20260804
 
 # ---- Tile ids (1-based gid = id + 1) ---------------------------------------
-GRASS = [106, 107, 94, 119]          # solid grass
+GRASS = [106, 107, 94, 119]  # solid grass
 GRASS_DARK = 94
-DIRT = [0, 12, 24, 36]               # soil with grass corners
-DIRT_FLOWER = [1, 13, 25, 37]        # soil with red details
-GRASS_SOIL_T = [60, 61, 62, 63]      # grass top, soil bottom (unused w/o flips)
+DIRT = [0, 12, 24, 36]  # soil with grass corners
+DIRT_FLOWER = [1, 13, 25, 37]  # soil with red details
+GRASS_SOIL_T = [60, 61, 62, 63]  # grass top, soil bottom (unused w/o flips)
 TREES = [64, 65, 66, 67, 68]
 BUSHES = [27, 39, 15, 3]
-PLANTS = [52, 53, 54, 55, 56]        # small plants / flowers
+PLANTS = [52, 53, 54, 55, 56]  # small plants / flowers
 CROPS = [4, 5, 6, 7, 8, 16, 17, 18, 19, 20]
 DETAILS = [26, 38, 55, 5, 6, 17, 28, 40]  # ground_detail sprinkles
 FENCE = 69
@@ -54,13 +53,13 @@ POND = 100
 POND2 = 101
 WELL = 112
 FOUNTAIN = 120
-BARN = 48          # big red barn (front)
-HOUSE_SHOP = 126   # big building (front, windows)
+BARN = 48  # big red barn (front)
+HOUSE_SHOP = 126  # big building (front, windows)
 HOUSE_SMALL = 125
-HOUSE_TOPS = [96, 97, 98, 99]        # top-down houses
+HOUSE_TOPS = [96, 97, 98, 99]  # top-down houses
 HOUSE_FRONTS = [108, 109, 110, 111]  # front-view houses with doors
 ROOF_TOPS = [102, 103, 104, 114, 115, 116]
-HOUSE_ROOFS = [72, 73, 74, 75, 76]   # top-down roofs w/ white trim
+HOUSE_ROOFS = [72, 73, 74, 75, 76]  # top-down roofs w/ white trim
 
 
 def gid(tile_id: int) -> int:
@@ -69,7 +68,6 @@ def gid(tile_id: int) -> int:
 
 
 MARKER = 133  # gid of the marker tile in markers.tsj (firstgid=133)
-
 
 # ---- Character cards (single source of truth for agents) -------------------
 # world_data/identities/agent_*.json: identity fields + spawn (col/row/
@@ -91,28 +89,27 @@ def load_characters() -> list[tuple[str, dict]]:
 
 CARDS = load_characters()
 
-
 # ---- Layout -----------------------------------------------------------------
 # Row/col coordinates in tiles. Cells are (col, row).
 
-MAIN_ROAD_ROWS = [20, 21]                     # full-width horizontal road
-VERT_ROAD_COLS = [30, 31]                     # full-height vertical road
-SHOP_ROAD_ROW = 12                            # cols 16..44
+MAIN_ROAD_ROWS = [20, 21]  # full-width horizontal road
+VERT_ROAD_COLS = [30, 31]  # full-height vertical road
+SHOP_ROAD_ROW = 12  # cols 16..44
 SHOP_ROAD_COLS = list(range(16, 45))
-SHOP_SPUR_COL = 23                            # rows 13..19 (connects to main road)
-FARM_ROAD_ROW = 24                            # cols 30..45
+SHOP_SPUR_COL = 23  # rows 13..19 (connects to main road)
+FARM_ROAD_ROW = 24  # cols 30..45
 FARM_ROAD_COLS = list(range(30, 46))
-FARM_SPUR_COLS = [46, 47]                     # rows 24..34 (to wangfang home)
-WANGFANG_ROAD_ROW = 34                        # cols 38..47
+FARM_SPUR_COLS = [46, 47]  # rows 24..34 (to wangfang home)
+WANGFANG_ROAD_ROW = 34  # cols 38..47
 WANGFANG_ROAD_COLS = list(range(38, 48))
-LINXIA_PATH_COLS = [17]                       # rows 22..26
-CHENYU_PATH_ROW = 19                          # cols 12..16
-ZHANGMING_PATH_COLS = [40]                    # rows 11..12
-PLAZA = ((28, 18), (36, 23))                  # inclusive corners (col,row)
+LINXIA_PATH_COLS = [17]  # rows 22..26
+CHENYU_PATH_ROW = 19  # cols 12..16
+ZHANGMING_PATH_COLS = [40]  # rows 11..12
+PLAZA = ((28, 18), (36, 23))  # inclusive corners (col,row)
 POND_CELLS = [(6, 32), (7, 32), (6, 33), (7, 33)]
-FIELD = ((43, 26), (51, 31))                  # crop field corners
-FENCE_TOP_ROW = 25                            # cols 43..51
-FENCE_BOTTOM_ROW = 32                         # cols 43..51
+FIELD = ((43, 26), (51, 31))  # crop field corners
+FENCE_TOP_ROW = 25  # cols 43..51
+FENCE_BOTTOM_ROW = 32  # cols 43..51
 # The wangfang farm spur (cols 46-47) crosses both fence rows; these cells
 # are gates (walkable) instead of fence posts, or the farm is unreachable.
 FENCE_GATE_CELLS = {(46, 25), (47, 25), (46, 32), (47, 32)}

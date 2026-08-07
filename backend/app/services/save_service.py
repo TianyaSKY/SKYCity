@@ -46,16 +46,16 @@ from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job, WorkHistory
 from app.database.models.llm_runs import LLMRun
-from app.database.models.world_events import WorldEvent
 from app.database.models.locations import WorldLocation
 from app.database.models.memories import Memory
 from app.database.models.relationships import Relationship
 from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
-from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
+from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.world_engine.clock import WorldClock
 from app.world_engine.engine import WorldEngine, WorldRuntime
@@ -142,7 +142,7 @@ class SaveService:
             session.close()
 
     def _serialize(
-        self, session: Session, world: World, runtime: WorldRuntime
+            self, session: Session, world: World, runtime: WorldRuntime
     ) -> dict[str, Any]:
         """One JSON payload per R17 (schema_version 1)."""
         world_id = world.world_id
@@ -160,9 +160,9 @@ class SaveService:
         ).all()
         products_by_store: dict[str, list[dict[str, Any]]] = {}
         for product in session.scalars(
-            select(StoreProduct)
-            .where(StoreProduct.world_id == world_id)
-            .order_by(StoreProduct.store_id, StoreProduct.item_id)
+                select(StoreProduct)
+                        .where(StoreProduct.world_id == world_id)
+                        .order_by(StoreProduct.store_id, StoreProduct.item_id)
         ):
             products_by_store.setdefault(product.store_id, []).append(
                 self._row_dict(product)
@@ -258,9 +258,9 @@ class SaveService:
         migrated = dict(payload)
         migrated["schema_version"] = 2
         for key in (
-            "companies", "positions", "job_openings", "job_applications",
-            "employment_contracts", "work_shifts", "leave_requests",
-            "company_inventories", "company_transactions",
+                "companies", "positions", "job_openings", "job_applications",
+                "employment_contracts", "work_shifts", "leave_requests",
+                "company_inventories", "company_transactions",
         ):
             migrated.setdefault(key, [])
         for store in migrated.get("stores", []):
@@ -352,7 +352,7 @@ class SaveService:
         return runtime
 
     def _reinsert(
-        self, session: Session, payload: dict[str, Any], world_id: str
+            self, session: Session, payload: dict[str, Any], world_id: str
     ) -> None:
         """Insert every saved entity under ``world_id`` (FK-safe order)."""
         # Locations are map-derived (R17: map only stores its version), so

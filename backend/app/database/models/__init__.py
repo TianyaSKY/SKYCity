@@ -1,7 +1,7 @@
 """Database models package: every ORM model used by the world engine.
 
-Importing this package registers all tables on Base.metadata so alembic
-autogenerate and create_all see the full schema.
+Importing this package registers all tables on Base.metadata so a fresh
+database can be created directly from the current ORM schema.
 """
 
 from app.database.models.agents import Agent
@@ -28,8 +28,8 @@ from app.database.models.memories import Memory
 from app.database.models.relationships import Relationship
 from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
-from app.database.models.stores import Store, StoreProduct
 from app.database.models.stocks import Stock, StockHolding
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.world_events import WorldEvent

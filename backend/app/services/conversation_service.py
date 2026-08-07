@@ -58,7 +58,7 @@ MSG_DUPLICATE = "内容重复，对话结束"
 
 
 def manhattan_distance(
-    a_col: int, a_row: int, b_col: int, b_row: int
+        a_col: int, a_row: int, b_col: int, b_row: int
 ) -> int:
     return abs(a_col - b_col) + abs(a_row - b_row)
 
@@ -67,7 +67,7 @@ class ConversationService:
     """Owns the conversation lifecycle for one world engine."""
 
     def __init__(
-        self, engine: WorldEngine, session_factory: sessionmaker[Session]
+            self, engine: WorldEngine, session_factory: sessionmaker[Session]
     ) -> None:
         self.engine = engine
         self._session_factory = session_factory
@@ -77,13 +77,13 @@ class ConversationService:
     # ------------------------------------------------------------------ #
 
     def send_message(
-        self,
-        world_id: str,
-        from_agent_id: str,
-        to_agent_id: str,
-        message: str,
-        intent: str | None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            from_agent_id: str,
+            to_agent_id: str,
+            message: str,
+            intent: str | None,
+            trace_id: str | None = None,
     ) -> tuple[bool, str | None, WorldEventEnvelope | None]:
         """Deliver one talk message, enforcing R1/R2/R9 + the anti-loop rules.
 
@@ -110,8 +110,8 @@ class ConversationService:
             if target.action_type is not None:  # R2: both parties must be idle
                 return False, MSG_TARGET_BUSY, None
             if (
-                manhattan_distance(sender.col, sender.row, target.col, target.row)
-                > TALK_DISTANCE
+                    manhattan_distance(sender.col, sender.row, target.col, target.row)
+                    > TALK_DISTANCE
             ):  # R9
                 return False, MSG_NOT_NEAR, None
             if world.paused:
@@ -277,10 +277,10 @@ class ConversationService:
                 if partner is None:
                     continue
                 if (
-                    manhattan_distance(
-                        agent.col, agent.row, partner.col, partner.row
-                    )
-                    > TALK_DISTANCE
+                        manhattan_distance(
+                            agent.col, agent.row, partner.col, partner.row
+                        )
+                        > TALK_DISTANCE
                 ):
                     self._end(
                         session,
@@ -299,7 +299,7 @@ class ConversationService:
     # ------------------------------------------------------------------ #
 
     def history(
-        self, world_id: str, agent_id: str, limit: int = 20
+            self, world_id: str, agent_id: str, limit: int = 20
     ) -> list[dict]:
         """Recent conversations involving ``agent_id``, newest first, each with
         its messages (oldest first)."""
@@ -354,7 +354,7 @@ class ConversationService:
     # ------------------------------------------------------------------ #
 
     def active_between(
-        self, world_id: str, agent_a: str, agent_b: str
+            self, world_id: str, agent_a: str, agent_b: str
     ) -> Conversation | None:
         """The active conversation between the pair, or None."""
         session = self._session_factory()
@@ -387,7 +387,7 @@ class ConversationService:
 
     @staticmethod
     def _active_between(
-        session: Session, world_id: str, agent_a: str, agent_b: str
+            session: Session, world_id: str, agent_a: str, agent_b: str
     ) -> Conversation | None:
         return session.scalar(
             select(Conversation).where(
@@ -400,11 +400,11 @@ class ConversationService:
 
     @staticmethod
     def _in_cooldown(
-        session: Session,
-        world_id: str,
-        agent_a: str,
-        agent_b: str,
-        world_time: int,
+            session: Session,
+            world_id: str,
+            agent_a: str,
+            agent_b: str,
+            world_time: int,
     ) -> bool:
         latest_end = session.scalar(
             select(func.max(Conversation.ended_at)).where(
@@ -420,31 +420,31 @@ class ConversationService:
 
     @staticmethod
     def _is_duplicate(
-        session: Session, conversation: Conversation, from_agent_id: str, message: str
+            session: Session, conversation: Conversation, from_agent_id: str, message: str
     ) -> bool:
         """True when the sender already sent the exact same text in this
         conversation (anti-infinite-loop: an agent repeating itself ends it)."""
         return (
-            session.scalar(
-                select(func.count())
-                .select_from(ConversationMessage)
-                .where(
-                    ConversationMessage.conversation_id == conversation.conversation_id,
-                    ConversationMessage.from_agent_id == from_agent_id,
-                    ConversationMessage.message == message,
+                session.scalar(
+                    select(func.count())
+                    .select_from(ConversationMessage)
+                    .where(
+                        ConversationMessage.conversation_id == conversation.conversation_id,
+                        ConversationMessage.from_agent_id == from_agent_id,
+                        ConversationMessage.message == message,
+                    )
                 )
-            )
-            or 0
+                or 0
         ) > 0
 
     def _end(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        conversation: Conversation,
-        reason: str,
-        world_time: int,
-        trace_id: str | None,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            conversation: Conversation,
+            reason: str,
+            world_time: int,
+            trace_id: str | None,
     ) -> None:
         """Close the conversation and emit conversation_ended (idempotent)."""
         if conversation.ended_at is not None:
@@ -460,12 +460,12 @@ class ConversationService:
         )
 
     def _boost_target(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        target: Agent,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            target: Agent,
+            world_time: int,
     ) -> None:
         """T4-2 priority boost: an idle target in an autonomous, unpaused world
         gets an agent_decide at world_time + 1 unless a decision is already
@@ -478,9 +478,9 @@ class ConversationService:
         ``leave`` — wedging the conversation open.
         """
         if (
-            target.action_type is not None
-            or not world.autonomous
-            or world.paused
+                target.action_type is not None
+                or not world.autonomous
+                or world.paused
         ):
             return
         existing = session.scalar(

@@ -22,13 +22,11 @@ from app.database.models.memories import Memory
 from app.database.models.structures import TileStructure
 from app.database.models.world_events import WorldEvent
 from app.database.session import SessionLocal
-from app.schemas.actions import ActionRequest
 from app.services.action_execution_service import ActionExecutionService
 from app.services.build_service import BuildService
 from app.services.crop_service import (
     MSG_BUSY,
     MSG_CELL_OCCUPIED,
-    MSG_CROP_MISSING,
     MSG_CROP_UNKNOWN,
     MSG_NO_SEED,
     MSG_NOT_PLANTABLE,
@@ -41,8 +39,7 @@ from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
-
-from tests.test_world_engine import advance_minutes, agent_row
+from tests.test_world_engine import advance_minutes
 
 WHEAT = "wheat_seed"
 FLOWER = "flower_seed"
@@ -69,7 +66,7 @@ def engine(world_config: ParsedWorldConfig) -> WorldEngine:
 
 
 def give_item(
-    engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
+        engine: WorldEngine, world_id: str, agent_id: str, item_id: str, quantity: int
 ) -> None:
     session = SessionLocal()
     try:
@@ -94,7 +91,7 @@ def give_item(
 
 
 def place_agent(
-    engine: WorldEngine, world_id: str, agent_id: str, col: int, row: int
+        engine: WorldEngine, world_id: str, agent_id: str, col: int, row: int
 ) -> None:
     session = SessionLocal()
     try:
@@ -136,7 +133,7 @@ def crop_rows(engine: WorldEngine, world_id: str) -> list[Crop]:
 
 
 def plantable_near(
-    engine: WorldEngine, col: int, row: int
+        engine: WorldEngine, col: int, row: int
 ) -> tuple[int, int]:
     """A plantable cell within manhattan distance 3 of (col, row)."""
     for dc in range(-3, 4):
@@ -148,7 +145,7 @@ def plantable_near(
 
 
 def non_plantable_walkable_near(
-    engine: WorldEngine, col: int, row: int
+        engine: WorldEngine, col: int, row: int
 ) -> tuple[int, int]:
     """A walkable but NOT plantable cell within distance 3 (R23.2 rejection)."""
     for dc in range(-3, 4):
@@ -423,7 +420,7 @@ def test_harvest_with_fertilizer_bonus(engine: WorldEngine) -> None:
 
 
 def test_god_set_crop_stage_to_final_and_stale_callback_skipped(
-    engine: WorldEngine,
+        engine: WorldEngine,
 ) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
@@ -537,7 +534,7 @@ def test_observation_lists_seeds(engine: WorldEngine) -> None:
 
 
 def _make_llm_engine(
-    world_config: ParsedWorldConfig, scripts
+        world_config: ParsedWorldConfig, scripts
 ) -> WorldEngine:
     from app.services.agent_decision_service import DecisionService
     from app.agents.providers.fake_provider import FakeDecisionProvider
@@ -558,7 +555,7 @@ def _make_llm_engine(
 
 
 def _non_cut_walkable_near(
-    engine: WorldEngine, col: int, row: int
+        engine: WorldEngine, col: int, row: int
 ) -> tuple[int, int]:
     """Walkable cell within 3 of (col,row) whose removal keeps the town
     connected (legal fence spot, R22.4)."""
@@ -588,16 +585,16 @@ def _non_cut_walkable_near(
         for dr in range(-3, 4):
             cell = (col + dc, row + dr)
             if (
-                abs(dc) + abs(dr) <= 3
-                and cell in engine.world_config.walkable_cells
-                and not is_cut(cell)
+                    abs(dc) + abs(dr) <= 3
+                    and cell in engine.world_config.walkable_cells
+                    and not is_cut(cell)
             ):
                 return cell
     raise AssertionError("no non-cut walkable cell near the target")
 
 
 def test_autonomous_farm_chain_buy_plant_harvest_sell(
-    world_config: ParsedWorldConfig,
+        world_config: ParsedWorldConfig,
 ) -> None:
     """A scripted LLM agent runs the full farming economy chain: buy seeds ->
     plant -> (world grows the crop) -> harvest -> sell produce."""
@@ -620,7 +617,8 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
             ("move", {"destination_id": "village_shop", "reason": "去商店买小麦种子"}),
             ("buy_item", {"item_id": "wheat_seed", "quantity": 1, "reason": "买一袋小麦种子"}),
             ("move", {"destination_id": "village_farm", "reason": "去农场播种"}),
-            ("plant", {"col": plant_cell[0], "row": plant_cell[1], "item_id": "wheat_seed", "reason": "在田里种下小麦"}),
+            ("plant",
+             {"col": plant_cell[0], "row": plant_cell[1], "item_id": "wheat_seed", "reason": "在田里种下小麦"}),
             ("wait", {"minutes": 240, "reason": "等小麦长大"}),
             ("harvest", {"col": plant_cell[0], "row": plant_cell[1], "reason": "收小麦"}),
             ("move", {"destination_id": "village_shop", "reason": "去商店卖小麦"}),
@@ -668,7 +666,7 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
 
 
 def test_autonomous_build_chain_buy_wood_build_fence(
-    world_config: ParsedWorldConfig,
+        world_config: ParsedWorldConfig,
 ) -> None:
     """M14 LLM smoke (previously never driven through the decision loop):
     buy wood -> move to a buildable spot -> build a fence -> it completes."""
@@ -683,7 +681,8 @@ def test_autonomous_build_chain_buy_wood_build_fence(
             ("move", {"destination_id": "village_shop", "reason": "去商店买木材"}),
             ("buy_item", {"item_id": "wood", "quantity": 1, "reason": "买一根木料"}),
             ("move", {"destination_id": "village_farm", "reason": "去农场边上搭栅栏"}),
-            ("build", {"col": fence_cell[0], "row": fence_cell[1], "blueprint_id": "fence_wood", "reason": "给田边围一圈栅栏"}),
+            ("build",
+             {"col": fence_cell[0], "row": fence_cell[1], "blueprint_id": "fence_wood", "reason": "给田边围一圈栅栏"}),
             ("wait", {"minutes": 60, "reason": "等栅栏搭完"}),
         ]
     }

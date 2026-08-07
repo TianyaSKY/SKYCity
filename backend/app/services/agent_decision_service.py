@@ -30,7 +30,6 @@ from app.config.settings import Settings, get_settings
 from app.database.models.agents import Agent
 from app.database.models.llm_runs import LLMRun
 from app.database.models.scheduled_actions import ScheduledAction
-from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.domain.event import WorldEventEnvelope
 from app.services.company_employment_service import CompanyEmploymentError
@@ -94,11 +93,11 @@ class DecisionService:
     """Owns one world's agents' decision loop."""
 
     def __init__(
-        self,
-        engine: WorldEngine,
-        session_factory: sessionmaker[Session],
-        settings: Settings | None = None,
-        provider: Any | None = None,
+            self,
+            engine: WorldEngine,
+            session_factory: sessionmaker[Session],
+            settings: Settings | None = None,
+            provider: Any | None = None,
     ) -> None:
         self.engine = engine
         self._session_factory = session_factory
@@ -252,7 +251,7 @@ class DecisionService:
             if world is None or runtime is None or agent is None:
                 return
             if not self._observation_or_budget_gate(
-                session, runtime, world, agent, observation, world.world_time
+                    session, runtime, world, agent, observation, world.world_time
             ):
                 return
         finally:
@@ -276,9 +275,9 @@ class DecisionService:
                 # (the degrade backoff formula keys off consecutive_failures).
                 agent.daily_call_count = (agent.daily_call_count or 0) + 1
                 agent.daily_token_usage = (
-                    (agent.daily_token_usage or 0)
-                    + result.input_tokens
-                    + result.output_tokens
+                        (agent.daily_token_usage or 0)
+                        + result.input_tokens
+                        + result.output_tokens
                 )
                 agent.consecutive_failures = 0
             # Record BEFORE executing the tool; success is patched afterwards.
@@ -355,13 +354,13 @@ class DecisionService:
     # ------------------------------------------------------------------ #
 
     def _observation_or_budget_gate(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        agent: Agent,
-        observation: str,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            agent: Agent,
+            observation: str,
+            world_time: int,
     ) -> bool:
         """Run before any LLM call; returns True to proceed, False to skip.
 
@@ -378,11 +377,11 @@ class DecisionService:
         cached = self._observation_cache.get((world.world_id, agent.agent_id))
         window = self._settings.observation_cache_window_minutes
         if (
-            cached is not None
-            and cached[0] == obs_hash
-            and agent.action_type is None
-            and window > 0
-            and world_time - cached[1] < window
+                cached is not None
+                and cached[0] == obs_hash
+                and agent.action_type is None
+                and window > 0
+                and world_time - cached[1] < window
         ):
             runtime.scheduler.schedule(
                 session,
@@ -419,12 +418,12 @@ class DecisionService:
         return True
 
     def _handle_budget_exhausted(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world: World,
-        agent: Agent,
-        world_time: int,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            agent: Agent,
+            world_time: int,
     ) -> None:
         """World LLM budget spent: skip the call, keep agents on a slow
         cadence, and announce the dormancy once per day (deduped)."""
@@ -451,12 +450,12 @@ class DecisionService:
         session.commit()
 
     async def _call_decision(
-        self,
-        observation: str,
-        context: AgentToolContext,
-        trace_id: str,
-        world_id: str,
-        agent_id: str,
+            self,
+            observation: str,
+            context: AgentToolContext,
+            trace_id: str,
+            world_id: str,
+            agent_id: str,
     ) -> DecisionResult | None:
         """Provider decide under the global semaphore, with retry-once.
 
@@ -506,7 +505,7 @@ class DecisionService:
     # ------------------------------------------------------------------ #
 
     async def run_daily_reflection(
-        self, world_id: str, agent_id: str, digest: str
+            self, world_id: str, agent_id: str, digest: str
     ) -> str | None:
         """Ask the provider for a day-summary reflection (summary text).
 
@@ -539,7 +538,7 @@ class DecisionService:
         return summary or None
 
     def _execute_tool(
-        self, result: DecisionResult, world_id: str, agent_id: str, trace_id: str
+            self, result: DecisionResult, world_id: str, agent_id: str, trace_id: str
     ) -> tuple[bool, Any, str | None]:
         """Run the chosen tool through the action service (world rule gate)."""
         service = self.engine.action_service
@@ -746,8 +745,8 @@ class DecisionService:
                 return False, None, str(exc)
         # M13 shift + leave tools through the company rule gate (R27-R28).
         if result.tool_name in (
-            "start_shift", "resign_job", "request_leave", "review_leave_request",
-            "terminate_employment", "pause_recruitment", "resume_recruitment",
+                "start_shift", "resign_job", "request_leave", "review_leave_request",
+                "terminate_employment", "pause_recruitment", "resume_recruitment",
         ):
             company_service = getattr(self.engine, "company_employment_service", None)
             if company_service is None:
@@ -806,13 +805,13 @@ class DecisionService:
         return False, None, f"未知工具: {result.tool_name}"
 
     def _schedule_next(
-        self,
-        session: Session,
-        runtime: WorldRuntime,
-        world_id: str,
-        agent_id: str,
-        *,
-        ok: bool,
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world_id: str,
+            agent_id: str,
+            *,
+            ok: bool,
     ) -> None:
         """Queue the next decision.
 
@@ -842,7 +841,7 @@ class DecisionService:
     # ------------------------------------------------------------------ #
 
     def _degrade(
-        self, world_id: str, agent_id: str, trace_id: str, error_type: str, detail: str
+            self, world_id: str, agent_id: str, trace_id: str, error_type: str, detail: str
     ) -> None:
         """Record the failed run, start a fallback wait, keep the world ticking."""
         session = self._session_factory()

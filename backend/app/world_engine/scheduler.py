@@ -44,12 +44,12 @@ class Scheduler:
     # ------------------------------------------------------------------ #
 
     def schedule(
-        self,
-        session: Session,
-        agent_id: str,
-        action_type: str,
-        due_at: int,
-        payload: dict | None = None,
+            self,
+            session: Session,
+            agent_id: str,
+            action_type: str,
+            due_at: int,
+            payload: dict | None = None,
     ) -> ScheduledAction:
         """Enqueue a callback to fire at world_time ``due_at``."""
         row = ScheduledAction(

@@ -177,7 +177,7 @@ def _cell(obj: dict[str, Any], tile_size: int) -> tuple[int, int]:
 
 
 def _load_tilesets(
-    map_dir: Path, raw_tilesets: list[dict[str, Any]]
+        map_dir: Path, raw_tilesets: list[dict[str, Any]]
 ) -> tuple[dict[str, TilesetInfo], dict[int, str]]:
     """Resolve external tilesets relative to the map file's directory.
 
@@ -213,14 +213,14 @@ def _load_tilesets(
 
 
 def _tile_layer_grid(
-    data: list[int], width: int, height: int, layer_name: str
+        data: list[int], width: int, height: int, layer_name: str
 ) -> list[list[int]]:
     if len(data) != width * height:
         raise WorldConfigError(
             f"Tile layer '{layer_name}': data length {len(data)} "
             f"does not match {width}x{height}"
         )
-    return [data[row * width : (row + 1) * width] for row in range(height)]
+    return [data[row * width: (row + 1) * width] for row in range(height)]
 
 
 def _marker_cells(grid: list[list[int]], width: int, height: int) -> set[tuple[int, int]]:
@@ -234,7 +234,7 @@ def _marker_cells(grid: list[list[int]], width: int, height: int) -> set[tuple[i
 
 
 def _check_bounds(
-    col: int, row: int, width: int, height: int, what: str
+        col: int, row: int, width: int, height: int, what: str
 ) -> None:
     if not (0 <= col < width and 0 <= row < height):
         raise WorldConfigError(f"{what} at ({col},{row}) is outside the {width}x{height} map")
@@ -267,7 +267,7 @@ def _load_character_cards(world_data_dir: Path) -> list[tuple[str, dict[str, Any
 
 
 def _card_spawn_def(
-    agent_id: str, card: dict[str, Any], width: int, height: int
+        agent_id: str, card: dict[str, Any], width: int, height: int
 ) -> SpawnPointDef:
     """Build an agent's spawn definition from its character card."""
     spawn = card.get("spawn")

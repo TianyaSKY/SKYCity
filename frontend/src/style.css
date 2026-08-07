@@ -1,26 +1,25 @@
 * {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
 
 html,
 body,
 #app {
-  width: 100%;
-  height: 100%;
+    width: 100%;
+    height: 100%;
 }
 
 body {
-  font-family:
-    system-ui,
+    font-family: system-ui,
     -apple-system,
     'Segoe UI',
     Roboto,
     'Helvetica Neue',
     Arial,
     sans-serif;
-  background: #07150e;
-  color: #e8f5e9;
-  overflow: hidden;
+    background: #07150e;
+    color: #e8f5e9;
+    overflow: hidden;
 }

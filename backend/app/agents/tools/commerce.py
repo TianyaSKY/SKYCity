@@ -37,9 +37,9 @@ def _result_json(ok: bool, envelope, reason: str | None) -> str:
 
 @function_tool
 async def work(
-    ctx: RunContextWrapper[AgentToolContext],
-    job_id: str,
-    reason: str,
+        ctx: RunContextWrapper[AgentToolContext],
+        job_id: str,
+        reason: str,
 ) -> str:
     """在当前地点开始一份工作（job_id 必须是可见工作之一）。工作期间不能做其他事，
     完成后一次性结算工资与产物。饱食度=0 或精力=0 时无法工作。"""
@@ -57,10 +57,10 @@ async def work(
 
 @function_tool
 async def buy_item(
-    ctx: RunContextWrapper[AgentToolContext],
-    item_id: str,
-    reason: str,
-    quantity: int = 1,
+        ctx: RunContextWrapper[AgentToolContext],
+        item_id: str,
+        reason: str,
+        quantity: int = 1,
 ) -> str:
     """在商店购买商品（item_id 必须是可见商品之一）。钱不够会被拒绝（不能赊账）。"""
     service = ctx.context.engine.economy_service
@@ -78,10 +78,10 @@ async def buy_item(
 
 @function_tool
 async def sell_item(
-    ctx: RunContextWrapper[AgentToolContext],
-    item_id: str,
-    reason: str,
-    quantity: int = 1,
+        ctx: RunContextWrapper[AgentToolContext],
+        item_id: str,
+        reason: str,
+        quantity: int = 1,
 ) -> str:
     """把背包里的物品卖给商店换钱（商店只收购它收购的品类且有库存空间）。"""
     service = ctx.context.engine.economy_service

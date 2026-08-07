@@ -18,7 +18,15 @@
           "wage_per_shift": 60,
           "shift_start_minute": 480,
           "shift_end_minute": 720,
-          "working_days": [0, 1, 2, 3, 4, 5, 6]
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
         }
       ]
     },
@@ -39,7 +47,15 @@
           "wage_per_shift": 90,
           "shift_start_minute": 540,
           "shift_end_minute": 1020,
-          "working_days": [0, 1, 2, 3, 4, 5, 6]
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
         }
       ]
     }

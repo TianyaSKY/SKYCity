@@ -29,7 +29,6 @@ from app.database.models.items import Item
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.structures import TileStructure
 from app.database.models.worlds import World
-from app.services.seed_loader import CropDef
 from app.world_engine.engine import WorldEngine
 
 # R23.1: same adjacency rule as talk/build (R9/R22.3).
@@ -63,14 +62,14 @@ class CropService:
     # ------------------------------------------------------------------ #
 
     def plant(
-        self,
-        world_id: str,
-        agent_id: str,
-        col: int | None,
-        row: int | None,
-        item_id: str | None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            col: int | None,
+            row: int | None,
+            item_id: str | None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Validate + plant a seed (R23.1~23.4)."""
         session = self._session_factory()
@@ -96,11 +95,11 @@ class CropService:
             if (col, row) not in self.engine.plantable_cells:
                 return False, None, MSG_NOT_PLANTABLE  # R23.2
             if session.get(
-                Crop, {"world_id": world_id, "col": col, "row": row}
+                    Crop, {"world_id": world_id, "col": col, "row": row}
             ) is not None:
                 return False, None, MSG_CELL_OCCUPIED  # R23.3
             if session.get(
-                TileStructure, {"world_id": world_id, "col": col, "row": row}
+                    TileStructure, {"world_id": world_id, "col": col, "row": row}
             ) is not None:
                 return False, None, MSG_CELL_OCCUPIED  # R23.3 cross-table
             if abs(agent.col - col) + abs(agent.row - row) > MAX_PLANT_DISTANCE:
@@ -213,13 +212,13 @@ class CropService:
     # ------------------------------------------------------------------ #
 
     def harvest(
-        self,
-        world_id: str,
-        agent_id: str,
-        col: int | None,
-        row: int | None,
-        reason: str | None = None,
-        trace_id: str | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            col: int | None,
+            row: int | None,
+            reason: str | None = None,
+            trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
         """Validate + harvest a ripe crop (R23.6)."""
         session = self._session_factory()
@@ -257,10 +256,10 @@ class CropService:
             }
             yield_extra = 0
             for row_inv in session.scalars(
-                select(Inventory).where(
-                    Inventory.world_id == world_id,
-                    Inventory.agent_id == agent_id,
-                )
+                    select(Inventory).where(
+                        Inventory.world_id == world_id,
+                        Inventory.agent_id == agent_id,
+                    )
             ).all():
                 item = items.get(row_inv.item_id)
                 if item is not None:
@@ -312,7 +311,7 @@ class CropService:
 
     @staticmethod
     def _add_inventory(
-        session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+            session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
     ) -> None:
         row = session.get(
             Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -331,7 +330,7 @@ class CropService:
 
     @staticmethod
     def _inventory_list(
-        session: Session, world_id: str, agent_id: str
+            session: Session, world_id: str, agent_id: str
     ) -> list[dict[str, Any]]:
         session.flush()  # include rows added in this transaction
         rows = session.scalars(

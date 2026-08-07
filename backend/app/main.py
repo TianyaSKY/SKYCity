@@ -1,7 +1,6 @@
 """AI Tiny World backend — FastAPI application entry point."""
 
 import uuid
-from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -17,7 +16,7 @@ from app.api.saves import router as saves_router
 from app.api.websocket import router as websocket_router
 from app.api.worlds import router as worlds_router
 from app.config.settings import get_settings
-from app.database.session import SessionLocal
+from app.database.session import SessionLocal, initialize_database
 from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
 from app.services.build_service import BuildService
@@ -53,6 +52,7 @@ async def lifespan(app: FastAPI):
     is the single source of truth for world state (see docs/architecture.md).
     """
     _configure_logging(settings.log_level)
+    initialize_database()
     try:
         world = load_world_config(settings)
     except WorldConfigError as exc:
@@ -124,7 +124,7 @@ app.add_middleware(
 
 @app.exception_handler(RequestValidationError)
 async def _validation_exception_handler(
-    request: Request, exc: RequestValidationError
+        request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     request_id = uuid.uuid4().hex
     logger.warning("Request {} validation error: {}", request_id, exc.errors())
@@ -139,7 +139,7 @@ async def _validation_exception_handler(
 
 @app.exception_handler(Exception)
 async def _unhandled_exception_handler(
-    request: Request, exc: Exception
+        request: Request, exc: Exception
 ) -> JSONResponse:
     request_id = uuid.uuid4().hex
     logger.exception("Request {} failed: {}", request_id, exc)

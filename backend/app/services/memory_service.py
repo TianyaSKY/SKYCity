@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
 
 from loguru import logger
 from sqlalchemy import select
@@ -79,16 +79,16 @@ class MemoryService:
     # ------------------------------------------------------------------ #
 
     def record(
-        self,
-        world_id: str,
-        agent_id: str,
-        memory_type: str,
-        text: str,
-        importance: float,
-        entities: list[str] | None = None,
-        keywords: list[str] | None = None,
-        resolve_entity: Callable[[str], str | None] | None = None,
-        session: Session | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            memory_type: str,
+            text: str,
+            importance: float,
+            entities: list[str] | None = None,
+            keywords: list[str] | None = None,
+            resolve_entity: Callable[[str], str | None] | None = None,
+            session: Session | None = None,
     ) -> Memory:
         """Persist one memory and emit a memory_created event.
 
@@ -114,16 +114,16 @@ class MemoryService:
             own.close()
 
     def _record(
-        self,
-        session: Session,
-        world_id: str,
-        agent_id: str,
-        memory_type: str,
-        text: str,
-        importance: float,
-        entities: list[str] | None,
-        keywords: list[str] | None,
-        resolve_entity: Callable[[str], str | None] | None,
+            self,
+            session: Session,
+            world_id: str,
+            agent_id: str,
+            memory_type: str,
+            text: str,
+            importance: float,
+            entities: list[str] | None,
+            keywords: list[str] | None,
+            resolve_entity: Callable[[str], str | None] | None,
     ) -> Memory:
         world_time = self._world_time(session, world_id)
         entity_ids = list(entities or [])
@@ -179,14 +179,14 @@ class MemoryService:
     # ------------------------------------------------------------------ #
 
     def retrieve(
-        self,
-        world_id: str,
-        agent_id: str,
-        context_entities: list[str],
-        context_keywords: list[str],
-        limit: int = 4,
-        session: Session | None = None,
-        world_time: int | None = None,
+            self,
+            world_id: str,
+            agent_id: str,
+            context_entities: list[str],
+            context_keywords: list[str],
+            limit: int = 4,
+            session: Session | None = None,
+            world_time: int | None = None,
     ) -> list[Memory]:
         """Top ``limit`` memories by weighted score; bumps recall stats.
 
@@ -212,14 +212,14 @@ class MemoryService:
             own.close()
 
     def _retrieve(
-        self,
-        session: Session,
-        world_id: str,
-        agent_id: str,
-        context_entities: list[str],
-        context_keywords: list[str],
-        limit: int,
-        world_time: int | None,
+            self,
+            session: Session,
+            world_id: str,
+            agent_id: str,
+            context_entities: list[str],
+            context_keywords: list[str],
+            limit: int,
+            world_time: int | None,
     ) -> list[Memory]:
         if world_time is None:
             world_time = self._world_time(session, world_id)
@@ -241,10 +241,10 @@ class MemoryService:
 
     @staticmethod
     def _score(
-        memory: Memory,
-        context_entities: list[str],
-        context_keywords: list[str],
-        world_time: int,
+            memory: Memory,
+            context_entities: list[str],
+            context_keywords: list[str],
+            world_time: int,
     ) -> float:
         """Weighted relevance score (T6-4); all terms in [0, 1]."""
         memory_entities = set(memory.entities_json or [])
@@ -261,11 +261,11 @@ class MemoryService:
         recency = memory.created_at / max(world_time, 1)
         unresolved = 0.0 if memory.resolved else 1.0
         return (
-            WEIGHT_ENTITY * entity_hit
-            + WEIGHT_KEYWORD * keyword_hit
-            + WEIGHT_IMPORTANCE * importance
-            + WEIGHT_RECENCY * recency
-            + WEIGHT_UNRESOLVED * unresolved
+                WEIGHT_ENTITY * entity_hit
+                + WEIGHT_KEYWORD * keyword_hit
+                + WEIGHT_IMPORTANCE * importance
+                + WEIGHT_RECENCY * recency
+                + WEIGHT_UNRESOLVED * unresolved
         )
 
     # ------------------------------------------------------------------ #
@@ -301,7 +301,7 @@ class MemoryService:
     # ------------------------------------------------------------------ #
 
     def ensure_daily_reflection_scheduled(
-        self, session: Session, runtime: WorldRuntime, world_time: int
+            self, session: Session, runtime: WorldRuntime, world_time: int
     ) -> None:
         """Arm the per-world 23:30 reflection unless one is already queued."""
         pending = session.scalar(
@@ -329,7 +329,7 @@ class MemoryService:
         return candidate
 
     def handle_daily_reflection(
-        self, session: Session, action: ScheduledAction
+            self, session: Session, action: ScheduledAction
     ) -> None:
         """Scheduler callback: reflect for every agent, re-arm tomorrow.
 
@@ -395,7 +395,7 @@ class MemoryService:
             session.close()
 
     def _build_digest(
-        self, session: Session, world_id: str, agent_id: str, day_start: int, world_time: int
+            self, session: Session, world_id: str, agent_id: str, day_start: int, world_time: int
     ) -> str:
         """Short day summary from events the agent was part of (T6-6)."""
         events = session.scalars(
@@ -453,7 +453,7 @@ class MemoryService:
     # ------------------------------------------------------------------ #
 
     def _emit(
-        self, session: Session, world_id: str, type_: str, payload: dict
+            self, session: Session, world_id: str, type_: str, payload: dict
     ) -> None:
         runtime = self.engine.get_runtime(world_id)
         if runtime is None:
@@ -473,10 +473,10 @@ class MemoryRecorder:
     """T6-3: translate observed world events into memories (engine hook)."""
 
     def __init__(
-        self,
-        engine: WorldEngine,
-        session_factory: sessionmaker,
-        memory_service: MemoryService,
+            self,
+            engine: WorldEngine,
+            session_factory: sessionmaker,
+            memory_service: MemoryService,
     ) -> None:
         self.engine = engine
         self._session_factory = session_factory
@@ -525,7 +525,7 @@ class MemoryRecorder:
             self._on_crop_harvested(session, envelope, payload)
 
     def record_llm_failure(
-        self, session: Session, world_id: str, agent_id: str, reason: str
+            self, session: Session, world_id: str, agent_id: str, reason: str
     ) -> None:
         """Working memory for a failed LLM tool execution (llm_run success=0)."""
         self._memory_service.record(
@@ -544,7 +544,7 @@ class MemoryRecorder:
     # ------------------------------------------------------------------ #
 
     def _on_conversation_message(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         world_id = envelope.world_id
         from_id = payload.get("from_agent_id")
@@ -567,7 +567,7 @@ class MemoryRecorder:
         )
 
     def _on_conversation_ended(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         world_id = envelope.world_id
         conversation = session.get(Conversation, payload.get("conversation_id"))
@@ -589,7 +589,7 @@ class MemoryRecorder:
         )
 
     def _on_work_completed(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         agent_id = payload.get("agent_id")
         if not agent_id:
@@ -604,7 +604,7 @@ class MemoryRecorder:
         )
 
     def _on_item(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict, action: str
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict, action: str
     ) -> None:
         agent_id = payload.get("agent_id")
         if not agent_id:
@@ -623,7 +623,7 @@ class MemoryRecorder:
         )
 
     def _on_item_used(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         agent_id = payload.get("agent_id")
         if not agent_id:
@@ -636,7 +636,7 @@ class MemoryRecorder:
         )
 
     def _on_money_changed(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         agent_id = payload.get("agent_id")
         amount = payload.get("amount") or 0
@@ -652,7 +652,7 @@ class MemoryRecorder:
         )
 
     def _on_money_transferred(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M11: a transfer between two agents — both sides remember it.
 
@@ -681,7 +681,7 @@ class MemoryRecorder:
         )
 
     def _on_item_given(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M11: an item gift between two agents — both sides remember it."""
         world_id = envelope.world_id
@@ -708,7 +708,7 @@ class MemoryRecorder:
         )
 
     def _on_world_event(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         agent_id = payload.get("agent_id")
         text = payload.get("text") or ""
@@ -735,7 +735,7 @@ class MemoryRecorder:
         )
 
     def _on_god_action(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M7: god_action_applied targeting the agent (episodic 0.7).
 
@@ -761,7 +761,7 @@ class MemoryRecorder:
         )
 
     def _on_structure_built(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M14: the builder remembers its finished construction (R22.5)."""
         agent_id = payload.get("agent_id")
@@ -780,7 +780,7 @@ class MemoryRecorder:
         )
 
     def _on_crop_planted(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M15: the farmer remembers sowing (R23)."""
         agent_id = payload.get("agent_id")
@@ -799,7 +799,7 @@ class MemoryRecorder:
         )
 
     def _on_crop_harvested(
-        self, session: Session, envelope: WorldEventEnvelope, payload: dict
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
     ) -> None:
         """M15: the farmer remembers the harvest."""
         agent_id = payload.get("agent_id")

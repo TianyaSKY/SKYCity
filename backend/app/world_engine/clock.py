@@ -21,10 +21,10 @@ class WorldClock:
     __slots__ = ("world_time", "speed", "paused", "_accumulator")
 
     def __init__(
-        self,
-        world_time: int = DEFAULT_WORLD_TIME,
-        speed: int = DEFAULT_SPEED,
-        paused: bool = False,
+            self,
+            world_time: int = DEFAULT_WORLD_TIME,
+            speed: int = DEFAULT_SPEED,
+            paused: bool = False,
     ) -> None:
         if speed not in VALID_SPEEDS:
             raise ValueError(f"invalid speed {speed!r}, expected one of {VALID_SPEEDS}")

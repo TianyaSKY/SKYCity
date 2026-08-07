@@ -18,14 +18,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
-from app.database.models.crops import Crop
 from app.database.models.companies import Company, CompanyTransaction, EmploymentContract
+from app.database.models.crops import Crop
 from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.locations import WorldLocation
-from app.database.models.stores import StoreProduct
 from app.database.models.stocks import Stock
+from app.database.models.stores import StoreProduct
 from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
@@ -90,12 +90,12 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def apply(
-        self,
-        world_id: str,
-        command_type: str,
-        target_id: str | None = None,
-        parameters: dict[str, Any] | None = None,
-        reason: str = "",
+            self,
+            world_id: str,
+            command_type: str,
+            target_id: str | None = None,
+            parameters: dict[str, Any] | None = None,
+            reason: str = "",
     ) -> dict[str, Any]:
         """Apply one god command; returns {command_id, success, result, events}.
 
@@ -154,17 +154,17 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _announce(
-        self,
-        session: Session,
-        runtime: Any,
-        command_type: str,
-        command_id: str,
-        trace_id: str,
-        world_time: int,
-        target_id: str | None,
-        parameters: dict[str, Any],
-        reason: str,
-        result: dict[str, Any],
+            self,
+            session: Session,
+            runtime: Any,
+            command_type: str,
+            command_id: str,
+            trace_id: str,
+            world_time: int,
+            target_id: str | None,
+            parameters: dict[str, Any],
+            reason: str,
+            result: dict[str, Any],
     ) -> Any:
         """Publish god_action_applied FIRST (memory/relationship hooks fire)."""
         return runtime.event_bus.publish(
@@ -183,7 +183,7 @@ class GodActionService:
         )
 
     def _agent(
-        self, session: Session, world_id: str, target_id: str | None
+            self, session: Session, world_id: str, target_id: str | None
     ) -> Agent:
         if not target_id:
             raise HTTPException(status_code=404, detail=MSG_AGENT_MISSING)
@@ -194,7 +194,7 @@ class GodActionService:
 
     @staticmethod
     def _inventory_list(
-        session: Session, world_id: str, agent_id: str
+            session: Session, world_id: str, agent_id: str
     ) -> list[dict[str, Any]]:
         session.flush()  # include rows added in this transaction
         rows = session.scalars(
@@ -209,8 +209,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_pause(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         announce = self._announce(
             session, runtime, "pause", command_id, trace_id, world_time,
@@ -224,8 +224,8 @@ class GodActionService:
         return {"paused": True, "already": True}, [announce]
 
     def _cmd_resume(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         announce = self._announce(
             session, runtime, "resume", command_id, trace_id, world_time,
@@ -237,8 +237,8 @@ class GodActionService:
         return {"resumed": True, "already": True}, [announce]
 
     def _cmd_set_speed(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         speed = parameters.get("speed")
         if speed not in VALID_SPEEDS:
@@ -257,8 +257,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_change_weather(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         weather = parameters.get("weather")
         if weather not in VALID_WEATHERS:
@@ -279,8 +279,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_grant_money(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         amount = int(parameters.get("amount") or 0)
         if amount <= 0:
@@ -320,8 +320,8 @@ class GodActionService:
         return result, [announce, money]
 
     def _cmd_inject_company_money(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         """M13: 上帝注资企业账户；资金足够时立即补发欠薪（R29/R32）."""
         amount = int(parameters.get("amount") or 0)
@@ -392,8 +392,8 @@ class GodActionService:
         return result, [announce, changed]
 
     def _cmd_deduct_money(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         amount = int(parameters.get("amount") or 0)
         if amount <= 0:
@@ -443,8 +443,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_spawn_item(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         item_id = str(parameters.get("item_id") or "")
         quantity = int(parameters.get("quantity") or 1)
@@ -506,8 +506,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_teleport(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         location_id = str(parameters.get("location_id") or "")
         if not location_id:
@@ -573,8 +573,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_public_event(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         text = str(parameters.get("text") or "")
         if not text:
@@ -597,8 +597,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_change_store_stock(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         item_id = str(parameters.get("item_id") or "")
         quantity = int(parameters.get("quantity") or 0)
@@ -631,8 +631,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_change_stock_price(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         price = parameters.get("price")
         if not isinstance(price, int) or isinstance(price, bool) or price < 1:
@@ -667,8 +667,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_remove_structure(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         """Demolish a structure. Interrupting a build (status="building")
         refunds materials proportionally to remaining time (R22.2) and frees
@@ -741,8 +741,8 @@ class GodActionService:
         return result, [announce, removed, *events]
 
     def _cmd_build_structure(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         """God places a completed structure directly (R13: god may bypass the
         build process, but never invents blueprints or occupies an
@@ -798,10 +798,10 @@ class GodActionService:
         col = parameters.get("col")
         row = parameters.get("row")
         if (
-            not isinstance(col, int)
-            or isinstance(col, bool)
-            or not isinstance(row, int)
-            or isinstance(row, bool)
+                not isinstance(col, int)
+                or isinstance(col, bool)
+                or not isinstance(row, int)
+                or isinstance(row, bool)
         ):
             raise HTTPException(status_code=400, detail=MSG_CELL_REQUIRED)
         return col, row
@@ -811,8 +811,8 @@ class GodActionService:
     # ------------------------------------------------------------------ #
 
     def _cmd_set_crop_stage(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         """Jump a crop to a given stage: recompute next_stage_at and schedule
         a fresh crop_grow callback. Stale callbacks from before the rewrite
@@ -855,8 +855,8 @@ class GodActionService:
         return result, [announce, grown]
 
     def _cmd_remove_crop(
-        self, session, runtime, world, command_id, trace_id, world_time,
-        target_id, parameters, reason,
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
     ):
         """Clear a farm cell (crops hold no materials, so no refund)."""
         col, row = self._structure_cell(parameters)
@@ -888,7 +888,7 @@ class GodActionService:
 
     @staticmethod
     def _refund_inventory(
-        session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+            session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
     ) -> None:
         row = session.get(
             Inventory,

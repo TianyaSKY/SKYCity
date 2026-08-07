@@ -72,12 +72,12 @@ class EventBus:
     # ------------------------------------------------------------------ #
 
     def publish(
-        self,
-        session: Session,
-        world_time: int,
-        type_: str,
-        payload: dict | None = None,
-        trace_id: str | None = None,
+            self,
+            session: Session,
+            world_time: int,
+            type_: str,
+            payload: dict | None = None,
+            trace_id: str | None = None,
     ) -> WorldEventEnvelope:
         """Allocate the next sequence, persist the row, queue the push.
 

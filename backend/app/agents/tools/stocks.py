@@ -36,10 +36,10 @@ def _result_json(ok: bool, envelope, reason: str | None) -> str:
 
 @function_tool
 async def buy_stock(
-    ctx: RunContextWrapper[AgentToolContext],
-    stock_id: str,
-    reason: str,
-    shares: int = 1,
+        ctx: RunContextWrapper[AgentToolContext],
+        stock_id: str,
+        reason: str,
+        shares: int = 1,
 ) -> str:
     """买入小镇公司股票（stock_id 必须是【股票行情】中的 id，股数 1~9999）。钱不够会被拒绝。"""
     service = ctx.context.engine.stock_service
@@ -57,10 +57,10 @@ async def buy_stock(
 
 @function_tool
 async def sell_stock(
-    ctx: RunContextWrapper[AgentToolContext],
-    stock_id: str,
-    reason: str,
-    shares: int = 1,
+        ctx: RunContextWrapper[AgentToolContext],
+        stock_id: str,
+        reason: str,
+        shares: int = 1,
 ) -> str:
     """卖出持股变现（不能卖出超过持有的数量）。"""
     service = ctx.context.engine.stock_service

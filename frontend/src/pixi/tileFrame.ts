@@ -7,20 +7,20 @@
  * 133 marker), which render nothing.
  */
 
-import { Rectangle } from 'pixi.js';
-import type { ResolvedTileset } from '../types/tiled';
+import {Rectangle} from 'pixi.js';
+import type {ResolvedTileset} from '../types/tiled';
 
 export function tileFrameRect(
-  gid: number,
-  tileSize: number,
-  tileset: ResolvedTileset,
+    gid: number,
+    tileSize: number,
+    tileset: ResolvedTileset,
 ): Rectangle | null {
-  const local = gid - tileset.firstGid;
-  if (local < 0 || local >= tileset.tilecount) return null;
-  const margin = tileset.margin ?? 0;
-  const spacing = tileset.spacing ?? 0;
-  const columns = tileset.columns;
-  const sx = margin + (local % columns) * (tileSize + spacing);
-  const sy = margin + Math.floor(local / columns) * (tileSize + spacing);
-  return new Rectangle(sx, sy, tileSize, tileSize);
+    const local = gid - tileset.firstGid;
+    if (local < 0 || local >= tileset.tilecount) return null;
+    const margin = tileset.margin ?? 0;
+    const spacing = tileset.spacing ?? 0;
+    const columns = tileset.columns;
+    const sx = margin + (local % columns) * (tileSize + spacing);
+    const sy = margin + Math.floor(local / columns) * (tileSize + spacing);
+    return new Rectangle(sx, sy, tileSize, tileSize);
 }

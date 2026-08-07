@@ -21,10 +21,10 @@ MAX_TALK_CHARS = 200
 
 @function_tool
 async def talk(
-    ctx: RunContextWrapper[AgentToolContext],
-    target_agent_id: str,
-    message: str,
-    intent: Literal["greet", "chat", "ask", "offer", "leave"],
+        ctx: RunContextWrapper[AgentToolContext],
+        target_agent_id: str,
+        message: str,
+        intent: Literal["greet", "chat", "ask", "offer", "leave"],
 ) -> str:
     """与附近（距离 ≤ 3 格）且空闲的智能体对话。intent 表示意图：greet 打招呼、
     chat 闲聊、ask 询问、offer 提议、leave 告别（发出后对话结束）。"""

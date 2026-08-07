@@ -21,9 +21,9 @@ import time
 from functools import lru_cache
 from typing import Any
 
-from loguru import logger
 from agents import Agent, ModelSettings, OpenAIProvider as SdkOpenAIProvider, RunContextWrapper, Runner
 from agents.items import ToolCallItem
+from loguru import logger
 
 from app.agents.context import AgentToolContext
 from app.agents.instructions import build_system_prompt
@@ -83,11 +83,11 @@ class OpenAIProvider:
     # ------------------------------------------------------------------ #
 
     async def decide(
-        self,
-        *,
-        observation: str,
-        context: AgentToolContext,
-        trace_id: str,
+            self,
+            *,
+            observation: str,
+            context: AgentToolContext,
+            trace_id: str,
     ) -> DecisionResult:
         started = time.perf_counter()
         agent = Agent(
@@ -176,11 +176,11 @@ class OpenAIProvider:
     # ------------------------------------------------------------------ #
 
     async def reflect(
-        self,
-        *,
-        digest: str,
-        context: AgentToolContext | None,
-        trace_id: str,
+            self,
+            *,
+            digest: str,
+            context: AgentToolContext | None,
+            trace_id: str,
     ) -> str:
         """One short first-person day summary from the digest.
 
@@ -222,7 +222,7 @@ class OpenAIProvider:
     @staticmethod
     def _load_identity(agent_id: str) -> dict[str, Any]:
         path = (
-            get_settings().world_data_dir / "identities" / f"{agent_id}.json"
+                get_settings().world_data_dir / "identities" / f"{agent_id}.json"
         )
         try:
             with path.open("r", encoding="utf-8") as handle:
