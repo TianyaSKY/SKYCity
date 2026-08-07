@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
@@ -2106,5 +2107,231 @@ def test_m16_save_restore_keeps_inventory_and_seed_idempotent(system) -> None:
         )
         assert wheat is not None
         assert wheat.quantity == 10 and wheat.reserved_quantity == 10
+    finally:
+        session.close()
+
+
+# --------------------------------------------------------------------------- #
+# 企业系统修复（A1–A5 / B3 / D1）：中断班次、并发录用、停业招聘、解绑商店
+# --------------------------------------------------------------------------- #
+
+def test_interrupted_shift_cancelled_and_releases_reserved(system) -> None:
+    """A1: 行动被中断（如上帝传送）的进行中班次 → 取消、释放预留、不发工资不产出."""
+    engine, service = system
+    runtime = engine.create_world("中断班次测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    view = service.list_agent_employment(world_id, "agent_chenyu")
+    shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
+    advance_minutes(engine, world_id, shift["scheduled_start"] - 30 - runtime.clock.world_time)
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert agent is not None
+        agent.location_id = "village_bakery"
+        session.add(
+            CompanyInventory(
+                world_id=world_id, company_id="company_village_bakery",
+                item_id="wheat", quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    started = service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    assert started["status"] in {"in_progress", "late"}
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 10 and wheat.reserved_quantity == 10
+        # 模拟上帝传送：行动被清除（与 teleport 行为一致）
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert agent is not None and agent.action_type == "formal_work"
+        agent.action_type = None
+        agent.action_data = None
+        session.commit()
+    finally:
+        session.close()
+    # 班次结束时回调触发 → 取消而非结算
+    from types import SimpleNamespace
+
+    session = SessionLocal()
+    try:
+        service.handle_shift_completed(
+            session,
+            SimpleNamespace(
+                world_id=world_id,
+                agent_id="agent_chenyu",
+                payload={"shift_id": shift["shift_id"]},
+            ),
+        )
+        session.commit()
+        shift_row = session.get(WorkShift, shift["shift_id"])
+        assert shift_row is not None
+        assert shift_row.status == "cancelled"
+        assert shift_row.absence_reason == "行动被中断，班次取消"
+        wheat = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "wheat"},
+        )
+        assert wheat is not None
+        assert wheat.quantity == 10 and wheat.reserved_quantity == 0  # 原料未消耗，预留释放
+        bread = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "bread"},
+        )
+        assert bread is None or bread.quantity == 0  # 无产出
+        assert session.scalar(
+            select(func.count()).select_from(Transaction).where(
+                Transaction.world_id == world_id,
+                Transaction.agent_id == "agent_chenyu",
+                Transaction.type == "work_wage",
+            )
+        ) == 0  # 不发工资
+        assert session.scalar(
+            select(func.count()).select_from(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.company_id == "company_village_bakery",
+                CompanyTransaction.type == "wage_payment",
+            )
+        ) == 0
+        cancelled_events = session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "shift_cancelled",
+            )
+        ).all()
+        assert any(
+            e.payload.get("shift_id") == shift["shift_id"] for e in cancelled_events
+        )
+    finally:
+        session.close()
+
+
+def test_active_contract_unique_index_enforced(system) -> None:
+    """A2: DB 层部分唯一索引拒绝同人第二条 active 合同（纵深防御）."""
+    engine, service = system
+    runtime = engine.create_world("合同索引测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire_farm_worker(service, world_id)
+    session = SessionLocal()
+    try:
+        contract = session.get(EmploymentContract, employment_id)
+        assert contract is not None and contract.status == "active"
+        session.add(
+            EmploymentContract(
+                world_id=world_id,
+                company_id="company_village_shop",
+                position_id="position_shop_attendant",
+                job_id=contract.job_id,
+                agent_id=contract.agent_id,
+                status="active",
+                hired_at=contract.hired_at,
+                started_at=contract.started_at,
+                wage_per_shift=contract.wage_per_shift,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+    finally:
+        session.close()
+
+
+def test_suspend_keeps_recruitment_paused_on_resign(system) -> None:
+    """A3: 停业期间辞职/解雇不重开招聘；恢复后重新开放并发布事件."""
+    engine, service = system
+    runtime = engine.create_world("停业辞职测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire_farm_worker(service, world_id)
+    service.suspend_company(world_id, "company_morning_farm", "agent_zhangming", "整顿")
+    resigned = service.resign(world_id, employment_id, "agent_linxia", "另谋高就")
+    assert resigned["status"] == "resigned"
+    session = SessionLocal()
+    try:
+        opening = session.scalar(
+            select(JobOpening).where(
+                JobOpening.world_id == world_id,
+                JobOpening.position_id == "position_farm_worker",
+            )
+        )
+        assert opening is not None
+        assert opening.status == "paused"  # 停业期间招聘保持暂停
+        assert opening.vacancies == 2  # 原 1 空 + 辞职恢复 1
+        assert session.scalar(
+            select(func.count()).select_from(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "shift_cancelled",
+            )
+        ) >= 1  # 停业取消班次发布 shift_cancelled
+    finally:
+        session.close()
+    service.resume_company(world_id, "company_morning_farm", "agent_zhangming", "恢复")
+    session = SessionLocal()
+    try:
+        opening = session.scalar(
+            select(JobOpening).where(
+                JobOpening.world_id == world_id,
+                JobOpening.position_id == "position_farm_worker",
+            )
+        )
+        assert opening is not None and opening.status == "open" and opening.vacancies == 2
+        assert session.scalar(
+            select(func.count()).select_from(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "job_opening_created",
+            )
+        ) >= 1  # 恢复时重新开放并发布
+    finally:
+        session.close()
+
+
+def test_unbound_store_rejects_buy_and_sell(system) -> None:
+    """A4: 商店未绑定企业 → 买卖均拒绝，资金/库存零变动."""
+    engine, service = system
+    runtime = engine.create_world("商店解绑测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.location_id = "village_shop"
+        session.add(
+            Inventory(world_id=world_id, agent_id="agent_linxia", item_id="wheat", quantity=3)
+        )
+        store = session.get(Store, {"world_id": world_id, "store_id": "village_shop"})
+        assert store is not None and store.company_id == "company_village_shop"
+        store.company_id = None
+        session.commit()
+    finally:
+        session.close()
+    ok, _, reason = engine.economy_service.buy(world_id, "agent_linxia", "bread", quantity=1, reason="买面包")
+    assert ok is False and reason == "商店未绑定企业，无法交易"
+    ok, _, reason = engine.economy_service.sell(world_id, "agent_linxia", "wheat", quantity=1, reason="卖小麦")
+    assert ok is False and reason == "商店未绑定企业，无法交易"
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None and agent.money == 50  # 未扣款也未入账
+        bread = session.get(
+            StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
+        )
+        assert bread is not None and bread.stock == 20  # 货架未变
+        wheat = session.get(
+            Inventory, {"world_id": world_id, "agent_id": "agent_linxia", "item_id": "wheat"}
+        )
+        assert wheat is not None and wheat.quantity == 3  # 背包未变
     finally:
         session.close()
