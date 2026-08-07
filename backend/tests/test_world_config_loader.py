@@ -85,6 +85,10 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "zhoushen_home",
         "limujiang_home",
         "sunshen_home",
+        # M18 plaza stalls.
+        "stall_plaza_1",
+        "stall_plaza_2",
+        "stall_plaza_3",
     }
     # every location exposes the full property set
     for loc in world.locations:

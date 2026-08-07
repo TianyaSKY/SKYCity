@@ -33,6 +33,7 @@ from app.agents.tools.commerce import buy_item, sell_item, work
 from app.agents.tools.conversation import talk
 from app.agents.tools.crops import harvest, plant
 from app.agents.tools.daily_life import sleep, use_item
+from app.agents.tools.entrepreneurship import adjust_price, close_shop, open_shop, stock_shop
 from app.agents.tools.employment import (
     apply_job,
     pause_recruitment,
@@ -71,6 +72,7 @@ class OpenAIProvider:
             start_shift, resign_job, request_leave, review_leave_request,
             terminate_employment, pause_recruitment, resume_recruitment,
             purchase_company_goods, stock_store,
+            open_shop, stock_shop, adjust_price, close_shop,
         ]
         # Explicit SDK provider: routes through settings (base_url / key) and
         # uses chat completions so third-party OpenAI-compatible APIs work.

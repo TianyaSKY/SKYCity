@@ -195,9 +195,23 @@ class SaveService:
                     "store_id": store.store_id,
                     "location_id": store.location_id,
                     "company_id": store.company_id,
+                    # M18: personal-shop ownership + display name.
+                    "owner_agent_id": store.owner_agent_id,
+                    "name": store.name,
                     "products": products_by_store.get(store.store_id, []),
                 }
                 for store in stores
+            ],
+            # M18 R44: wild-cell stall locations created by open_shop are not
+            # part of the map (map restores only its version), so they travel
+            # with the save and are re-inserted after the map locations.
+            "runtime_locations": [
+                self._row_dict(row)
+                for row in session.scalars(
+                    select(WorldLocation).where(WorldLocation.world_id == world_id)
+                ).all()
+                if row.location_id
+                not in {loc.location_id for loc in self.engine.world_config.locations}
             ],
             "jobs": rows(Job),
             "employments": rows(WorkHistory),
@@ -265,6 +279,8 @@ class SaveService:
             migrated.setdefault(key, [])
         for store in migrated.get("stores", []):
             store.setdefault("company_id", None)
+            store.setdefault("owner_agent_id", None)
+            store.setdefault("name", None)
         return migrated
 
     # ------------------------------------------------------------------ #
@@ -372,6 +388,13 @@ class SaveService:
                 )
             )
 
+        # M18 R44: wild-cell stalls created by open_shop restore after the map
+        # locations (their location_id is stall_<hex>, disjoint from map ids).
+        for row in payload.get("runtime_locations", []):
+            data = self._row_data(row)
+            data["world_id"] = world_id  # re-point at the restored world
+            session.add(WorldLocation(**data))
+
         restored_agents: list[Agent] = []
         for row in payload.get("agents", []):
             data = self._row_data(row)
@@ -391,6 +414,8 @@ class SaveService:
                     store_id=store["store_id"],
                     location_id=store["location_id"],
                     company_id=store.get("company_id"),
+                    owner_agent_id=store.get("owner_agent_id"),
+                    name=store.get("name"),
                 )
             )
             for product in store.get("products", []):

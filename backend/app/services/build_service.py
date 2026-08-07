@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
 from app.database.models.inventories import Inventory
+from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.structures import TileStructure
 from app.database.models.worlds import World
@@ -115,7 +116,7 @@ class BuildService:
                     return False, None, MSG_UNPAVABLE
             elif not self._cells_walkable(footprint):
                 return False, None, MSG_NOT_WALKABLE
-            if self._cells_reserved(footprint):
+            if self._cells_reserved(session, world_id, footprint):
                 return False, None, MSG_CELL_RESERVED
             if self._cells_occupied(session, world_id, footprint):
                 return False, None, MSG_CELL_OCCUPIED
@@ -314,10 +315,19 @@ class BuildService:
             cell not in self.engine.world_config.collision_cells for cell in cells
         )
 
-    def _cells_reserved(self, cells: list[tuple[int, int]]) -> bool:
-        """R22.3: no location anchors or spawn points under the footprint."""
+    def _cells_reserved(
+            self, session: Session, world_id: str, cells: list[tuple[int, int]]
+    ) -> bool:
+        """R22.3: no location anchors or spawn points under the footprint.
+
+        Anchors come from the DB (map-seeded + M18 runtime stall rows, single
+        source), spawn points from the world config.
+        """
         anchors = {
-                      (loc.col, loc.row) for loc in self.engine.world_config.locations
+                      (loc.col, loc.row)
+                      for loc in session.scalars(
+                          select(WorldLocation).where(WorldLocation.world_id == world_id)
+                      )
                   } | {(sp.col, sp.row) for sp in self.engine.world_config.spawn_points}
         return any(cell in anchors for cell in cells)
 
@@ -447,7 +457,13 @@ class BuildService:
                     frontier.append(neighbour)
         if any((col, row) not in seen for col, row in spawns[1:]):
             return False
-        for loc in self.engine.world_config.locations:
+        # M18: anchors come from the DB (map-seeded + runtime stall rows), so
+        # a wild-cell shop enters the invariant on open_shop and leaves it on
+        # close_shop without any extra bookkeeping.
+        anchors = session.scalars(
+            select(WorldLocation).where(WorldLocation.world_id == world_id)
+        ).all()
+        for loc in anchors:
             col, row = loc.col, loc.row
             if (col, row) in seen:
                 continue  # anchor itself is walkable and connected

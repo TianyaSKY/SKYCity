@@ -24,8 +24,8 @@ from app.database.models.god_actions import GodAction
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.locations import WorldLocation
-from app.database.models.stocks import Stock
-from app.database.models.stores import StoreProduct
+from app.database.models.stocks import Stock, StockHolding
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.structures import TileStructure
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
@@ -51,6 +51,8 @@ COMMAND_TYPES = {
     "set_crop_stage",
     "remove_crop",
     "inject_company_money",
+    # M18 (R43): god can force-close a personal store.
+    "close_store",
 }
 
 MSG_WORLD_MISSING = "世界不存在"
@@ -72,6 +74,7 @@ MSG_CELL_OCCUPIED = "该位置已有建筑"
 MSG_CELL_REQUIRED = "col/row 必须为地图内的整数坐标"
 MSG_CROP_MISSING = "该位置没有作物"
 MSG_STAGE_REQUIRED = "stage 必须为非负整数"
+MSG_STORE_NOT_FOUND = "店铺不存在"
 
 DEFAULT_STORE_ID = "village_shop"
 
@@ -624,6 +627,84 @@ class GodActionService:
             trace_id,
         )
         return result, [announce, stock]
+
+    def _cmd_close_store(
+            self, session, runtime, world, command_id, trace_id, world_time,
+            target_id, parameters, reason,
+    ):
+        """Force-close a personal store (R43): shelf stock returns to the
+        owner's backpack, the store (and a wild-cell stall location) and its
+        stock listing are deleted, and ``store_closed`` is published with
+        reason=上帝干预."""
+        store = session.get(
+            Store, {"world_id": world.world_id, "store_id": target_id}
+        )
+        if store is None:
+            raise HTTPException(status_code=404, detail=MSG_STORE_NOT_FOUND)
+        products = session.scalars(
+            select(StoreProduct).where(
+                StoreProduct.world_id == world.world_id,
+                StoreProduct.store_id == store.store_id,
+            )
+        ).all()
+        for product in products:
+            if product.stock > 0 and store.owner_agent_id:
+                self._refund_inventory(
+                    session,
+                    world.world_id,
+                    store.owner_agent_id,
+                    product.item_id,
+                    product.stock,
+                )
+            session.delete(product)
+        # R43: 歇业即退市 — the listing and any holdings disappear (explicit
+        # deletes: SQLite sessions run with FKs off, so ondelete=CASCADE on
+        # stock_holdings/stores would not fire).
+        for stock in session.scalars(
+                select(Stock).where(
+                    Stock.world_id == world.world_id,
+                    Stock.company_id == store.store_id,
+                    Stock.source == "store",
+                )
+        ).all():
+            for holding in session.scalars(
+                    select(StockHolding).where(
+                        StockHolding.world_id == world.world_id,
+                        StockHolding.stock_id == stock.stock_id,
+                    )
+            ).all():
+                session.delete(holding)
+            session.delete(stock)
+        map_location_ids = {
+            loc.location_id for loc in self.engine.world_config.locations
+        }
+        if store.location_id not in map_location_ids:
+            location_row = session.get(
+                WorldLocation,
+                {"world_id": world.world_id, "location_id": store.location_id},
+            )
+            if location_row is not None:
+                session.delete(location_row)
+        result = {
+            "store_id": store.store_id,
+            "owner_agent_id": store.owner_agent_id,
+            "name": store.name,
+        }
+        announce = self._announce(
+            session, runtime, "close_store", command_id, trace_id, world_time,
+            target_id, parameters, reason, result,
+        )
+        closed = runtime.event_bus.publish(
+            session, world_time, "store_closed",
+            {
+                "store_id": store.store_id,
+                "owner_agent_id": store.owner_agent_id,
+                "reason": "上帝干预",
+            },
+            trace_id,
+        )
+        session.delete(store)
+        return result, [announce, closed]
 
     # ------------------------------------------------------------------ #
     # Stock price (M10, R18.4)

@@ -57,6 +57,7 @@ import type {
     MemoryItem,
     RelationshipItem,
     StockItem,
+    StoreSnapshot,
     StructureSnapshot,
     WorldEventEnvelope,
     WorldEventItem,
@@ -174,6 +175,7 @@ export const GOD_COMMAND_LABELS: Record<string, string> = {
     public_event: '公共事件',
     change_store_stock: '修改库存',
     change_stock_price: '调整股价',
+    close_store: '强制收摊',
 };
 
 /** Map backend company status tokens onto Chinese labels (M13). */
@@ -363,6 +365,7 @@ function eventText(
     companies: CompanyInfo[],
     jobOpenings: JobOpening[],
     endedPair: [string, string] | null = null,
+    stores: StoreSnapshot[] = [],
 ): string {
     const p = env.payload as Record<string, unknown>;
     switch (env.type) {
@@ -594,6 +597,33 @@ function eventText(
             const name = agentName(agents, p.agent_id);
             const item = itemLabel(p.item_id, p.item_name) || '作物';
             return `${name} 收获了${item}`;
+        }
+        // ---- M18 personal-shop events ----
+        case 'store_opened': {
+            const owner = agentName(agents, p.owner_agent_id);
+            const storeName = typeof p.name === 'string' && p.name ? p.name : p.store_id;
+            return `${owner} 在 ${storeName} 开店了`;
+        }
+        case 'store_closed': {
+            const known = stores.find((s) => s.store_id === p.store_id);
+            const storeName = known?.name ?? (typeof p.name === 'string' && p.name ? p.name : p.store_id);
+            const reason = typeof p.reason === 'string' && p.reason ? p.reason : '';
+            return `${storeName} 收摊了${reason ? `（${reason}）` : ''}`;
+        }
+        case 'store_stocked': {
+            const known = stores.find((s) => s.store_id === p.store_id);
+            const storeName = known?.name ?? (typeof p.name === 'string' && p.name ? p.name : p.store_id);
+            const item = itemLabel(p.item_id);
+            const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+            return `${storeName} 上架了 ${item}×${qty}`;
+        }
+        case 'store_sale_completed': {
+            const known = stores.find((s) => s.store_id === p.store_id);
+            const storeName = known?.name ?? (typeof p.name === 'string' && p.name ? p.name : p.store_id);
+            const item = itemLabel(p.item_id, p.item_name);
+            const qty = typeof p.quantity === 'number' ? p.quantity : 1;
+            const total = typeof p.total === 'number' ? p.total : '?';
+            return `${storeName} 售出 ${item}×${qty}（${total} 金币）`;
         }
         // ---- M13 company & formal-work events ----
         case
@@ -917,6 +947,8 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
             structures: [] as StructureSnapshot[],
             /** Planted crops (single-cell; M15). */
             crops: [] as CropSnapshot[],
+            /** All stores incl. personal shops (M18; snapshot + WS events). */
+            stores: [] as StoreSnapshot[],
             events: [] as WorldEventItem[],
             latestSequence: 0,
             agentColors: {} as Record<string, string>,
@@ -1103,6 +1135,10 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                 // A snapshot supersedes any incremental crop state.
                 this.crops = Array.isArray(payload.crops)
                     ? payload.crops.map((c) => ({...c}))
+                    : [];
+                // M18: same for the store list (company stores + personal shops).
+                this.stores = Array.isArray(payload.stores)
+                    ? payload.stores.map((s) => ({...s}))
                     : [];
                 this.latestSequence = payload.latest_sequence;
                 // A snapshot supersedes any incremental history accumulated so far.
@@ -1499,6 +1535,50 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                     case 'crop_harvested':
                         this.removeCrop(p);
                         break;
+                    // ---- M18 personal-shop events ----
+                    case 'store_opened': {
+                        const opened = {
+                            store_id: String(p.store_id ?? ''),
+                            name: typeof p.name === 'string' ? p.name : null,
+                            location_id: String(p.location_id ?? ''),
+                            owner_agent_id:
+                                typeof p.owner_agent_id === 'string' ? p.owner_agent_id : null,
+                            company_id: null,
+                            products: Array.isArray(p.products) ? p.products : [],
+                        } as StoreSnapshot;
+                        const idx = this.stores.findIndex((s) => s.store_id === opened.store_id);
+                        if (idx >= 0) this.stores[idx] = opened;
+                        else this.stores.push(opened);
+                        break;
+                    }
+                    case 'store_closed': {
+                        const closedId = String(p.store_id ?? '');
+                        this.stores = this.stores.filter((s) => s.store_id !== closedId);
+                        break;
+                    }
+                    case 'store_stocked': {
+                        const stocked = this.stores.find((s) => s.store_id === p.store_id);
+                        if (stocked) {
+                            const product = stocked.products.find(
+                                (pr) => pr.item_id === p.item_id,
+                            );
+                            if (product && typeof p.stock_after === 'number') {
+                                product.stock = p.stock_after;
+                            } else if (typeof p.stock_after === 'number') {
+                                stocked.products.push({
+                                    item_id: String(p.item_id ?? ''),
+                                    sell_price: 0,
+                                    buy_price: 0,
+                                    stock: p.stock_after,
+                                    stock_cap: 0,
+                                });
+                            }
+                        }
+                        break;
+                    }
+                    case 'store_sale_completed':
+                        // Stream text only; the owner's money arrives via money_changed.
+                        break;
                     // ---- M13 shift lifecycle (light WS cache, REST is authoritative) ----
                     case 'shift_scheduled':
                         this.upsertShift(p, 'scheduled');
@@ -1557,7 +1637,7 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                         break;
                 }
 
-                const text = eventText(env, this.agents, this.locations, this.companies, this.jobOpenings, endedPair);
+                const text = eventText(env, this.agents, this.locations, this.companies, this.jobOpenings, endedPair, this.stores);
                 if (text) {
                     this.events.unshift({
                         sequence: env.sequence,
@@ -1581,6 +1661,7 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                         case 'item_sold':
                         case 'store_restocked':
                         case 'store_price_changed':
+                        case 'store_stocked':
                             void this.fetchLocationDetail(selected.location_id);
                             break;
                         default:

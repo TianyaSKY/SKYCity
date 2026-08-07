@@ -59,6 +59,32 @@ class WorldSnapshot(BaseModel):
     day: int
 
 
+class StoreProductSnapshot(BaseModel):
+    """One product on a store's shelf (M18 snapshot extension)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_id: str
+    sell_price: int
+    buy_price: int
+    stock: int
+    stock_cap: int
+
+
+class StoreSnapshot(BaseModel):
+    """One store in the world snapshot (M18): company stores and personal
+    shops alike; personal shops carry owner_agent_id and name."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    store_id: str
+    name: str | None = None
+    location_id: str
+    owner_agent_id: str | None = None
+    company_id: str | None = None
+    products: list[StoreProductSnapshot] = Field(default_factory=list)
+
+
 class WorldSnapshotPayload(BaseModel):
     """Full state sent once per WS connection (type=world_snapshot)."""
 
@@ -69,4 +95,5 @@ class WorldSnapshotPayload(BaseModel):
     locations: list[LocationSnapshot] = Field(default_factory=list)
     structures: list[StructureSnapshot] = Field(default_factory=list)
     crops: list[CropSnapshot] = Field(default_factory=list)
+    stores: list[StoreSnapshot] = Field(default_factory=list)
     latest_sequence: int = 0

@@ -136,6 +136,8 @@ export interface WorldSnapshotPayload {
     structures: StructureSnapshot[];
     /** Planted crops (single-cell; M15). */
     crops: CropSnapshot[];
+    /** All stores incl. personal shops (M18). */
+    stores: StoreSnapshot[];
     latest_sequence: number;
 }
 
@@ -271,6 +273,65 @@ export interface StorePriceChangedPayload {
     promo: boolean;
 }
 
+/** One product on a store's shelf (world snapshot, M18). */
+export interface StoreProductSnapshot {
+    item_id: string;
+    sell_price: number;
+    buy_price: number;
+    stock: number;
+    stock_cap: number;
+}
+
+/** One store as reported by the world snapshot (M18): company stores and
+ * personal shops alike; personal shops carry owner_agent_id + name. */
+export interface StoreSnapshot {
+    store_id: string;
+    name: string | null;
+    location_id: string;
+    owner_agent_id: string | null;
+    company_id: string | null;
+    products: StoreProductSnapshot[];
+}
+
+/** Payload of the WS store_opened event (M18 R39). */
+export interface StoreOpenedPayload {
+    store_id: string;
+    name: string;
+    owner_agent_id: string;
+    location_id: string;
+    col: number;
+    row: number;
+    products: StoreProductSnapshot[];
+}
+
+/** Payload of the WS store_closed event (M18 R43). */
+export interface StoreClosedPayload {
+    store_id: string;
+    owner_agent_id: string;
+    reason: string;
+}
+
+/** Payload of the WS store_stocked event (M18 R41). */
+export interface StoreStockedPayload {
+    store_id: string;
+    owner_agent_id: string;
+    item_id: string;
+    quantity: number;
+    stock_after: number;
+}
+
+/** Payload of the WS store_sale_completed event (M18 R41). */
+export interface StoreSaleCompletedPayload {
+    store_id: string;
+    owner_agent_id: string;
+    buyer_agent_id: string;
+    item_id: string;
+    item_name: string;
+    quantity: number;
+    unit_price: number;
+    total: number;
+}
+
 /** One agent-built structure as reported by the world snapshot (M14). */
 export interface StructureSnapshot {
     /** Anchor cell of the blueprint (the cell the builder chose). */
@@ -399,6 +460,10 @@ export type WorldEventType =
     | 'crop_planted'
     | 'crop_grown'
     | 'crop_harvested'
+    | 'store_opened'
+    | 'store_closed'
+    | 'store_stocked'
+    | 'store_sale_completed'
     | (string & {});
 
 /** Uniform envelope wrapping every event (HTTP, WS, replay). */

@@ -147,6 +147,11 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "village_bakery": (30, 12),
     "carpenter_shop": (10, 5),
     "flower_garden": (6, 14),
+    # M18 摊位: 广场内三个空置摊位（避开 fountain (32,20)、well (28,22)
+    # 与各建筑 door；open/close/capacity 与 gameplay.STALL_* 配置一致）。
+    "stall_plaza_1": (30, 19),
+    "stall_plaza_2": (33, 19),
+    "stall_plaza_3": (30, 22),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -181,6 +186,20 @@ LOCATIONS: dict[str, dict] = {
     "flower_garden": {
         "name": "晨露花圃", "location_type": "farm", "capacity": 8,
         "open_hour": 6, "close_hour": 18,
+    },
+    # M18: 广场空摊位（STALL_CAPACITY=4 / STALL_OPEN_HOUR=6 /
+    # STALL_CLOSE_HOUR=22 的镜像值，脚本内硬编码并指向 gameplay 配置）。
+    "stall_plaza_1": {
+        "name": "广场摊位一", "location_type": "stall", "capacity": 4,
+        "open_hour": 6, "close_hour": 22,
+    },
+    "stall_plaza_2": {
+        "name": "广场摊位二", "location_type": "stall", "capacity": 4,
+        "open_hour": 6, "close_hour": 22,
+    },
+    "stall_plaza_3": {
+        "name": "广场摊位三", "location_type": "stall", "capacity": 4,
+        "open_hour": 6, "close_hour": 22,
     },
 }
 
@@ -436,6 +455,13 @@ def build_layers() -> dict:
         for c in range(W):
             if collision[r][c]:
                 navigation[r][c] = 0
+
+    # (11,6) bridge: spawn_limujiang (12,6) corridor's only exit used to be
+    # the chenyu_home anchor (not walkable) — every move was MSG_NO_PATH.
+    # The nav marker here bridges it to the main road network (previously a
+    # hand patch on the tmj, now generated so re-exports stay reproducible).
+    navigation[6][11] = MARKER
+    ground[6][11] = gid(DIRT[0])
 
     return {
         "ground": ground, "ground_detail": detail, "buildings": buildings,

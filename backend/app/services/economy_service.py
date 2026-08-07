@@ -317,7 +317,7 @@ class EconomyService:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
                 return False, None, MSG_BUSY  # R1: move 独占, work exclusive
-            found = self._find_product(session, world_id, item_id)
+            found = self._find_product(session, world_id, item_id, agent.location_id)
             if found is None:
                 return False, None, MSG_PRODUCT_MISSING
             product, store = found
@@ -325,7 +325,7 @@ class EconomyService:
                 return False, None, MSG_NOT_AT_STORE
             if not self._store_open(session, world_id, store, world.world_time):
                 return False, None, MSG_STORE_CLOSED  # R8
-            if not store.company_id:
+            if not store.company_id and not store.owner_agent_id:
                 # A4: unbound stores would destroy money (agent pays, nobody
                 # receives) — reject before any balance/stock mutation.
                 return False, None, MSG_STORE_UNBOUND
@@ -404,6 +404,57 @@ class EconomyService:
                     },
                     trace_id,
                 )
+            elif store.owner_agent_id:
+                # M18 R41: personal-store proceeds go straight to the owner's
+                # balance (parallel path to R33's company settlement).
+                owner = session.get(
+                    Agent,
+                    {"world_id": world_id, "agent_id": store.owner_agent_id},
+                )
+                if owner is not None:
+                    owner.money += total
+                    session.add(
+                        Transaction(
+                            world_id=world_id,
+                            agent_id=owner.agent_id,
+                            type="sale_income",
+                            amount=total,
+                            balance_after=owner.money,
+                            item_id=item_id,
+                            quantity=quantity,
+                            reason=f"店铺售出 {item_name}×{quantity}",
+                            world_time=world.world_time,
+                            trace_id=trace_id or "",
+                        )
+                    )
+                    runtime.event_bus.publish(
+                        session,
+                        world.world_time,
+                        "store_sale_completed",
+                        {
+                            "store_id": store.store_id,
+                            "owner_agent_id": owner.agent_id,
+                            "buyer_agent_id": agent_id,
+                            "item_id": item_id,
+                            "item_name": item_name,
+                            "quantity": quantity,
+                            "unit_price": product.sell_price,
+                            "total": total,
+                        },
+                        trace_id,
+                    )
+                    runtime.event_bus.publish(
+                        session,
+                        world.world_time,
+                        "money_changed",
+                        {
+                            "agent_id": owner.agent_id,
+                            "amount": total,
+                            "balance": owner.money,
+                            "reason": f"店铺售出 {item_name}×{quantity}",
+                        },
+                        trace_id,
+                    )
             session.add(
                 Transaction(
                     world_id=world_id,
@@ -429,6 +480,9 @@ class EconomyService:
                     "quantity": quantity,
                     "unit_price": product.sell_price,
                     "total": total,
+                    # M18: the selling store — lets the stock hook credit the
+                    # right listing when the same item sells at several shops.
+                    "store_id": store.store_id,
                 },
                 trace_id,
             )
@@ -492,7 +546,7 @@ class EconomyService:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
                 return False, None, MSG_BUSY
-            found = self._find_product(session, world_id, item_id)
+            found = self._find_product(session, world_id, item_id, agent.location_id)
             if found is None:
                 return False, None, MSG_PRODUCT_MISSING
             product, store = found
@@ -731,9 +785,37 @@ class EconomyService:
     # ------------------------------------------------------------------ #
 
     def _find_product(
-            self, session: Session, world_id: str, item_id: str
+            self, session: Session, world_id: str, item_id: str,
+            location_id: str | None = None,
     ) -> tuple[StoreProduct, Store] | None:
-        """The (product, store) pair selling/buying ``item_id`` in this world."""
+        """The (product, store) pair selling/buying ``item_id`` in this world.
+
+        When ``location_id`` is given, prefer the store covering that
+        location (M18: a personal shop and the village store may sell the
+        same item at different prices — the agent buys from the shop it is
+        standing in). Falls back to the unfiltered lookup for callers that
+        have no location context.
+        """
+        if location_id:
+            product = session.scalars(
+                select(StoreProduct)
+                .join(
+                    Store,
+                    (Store.world_id == StoreProduct.world_id)
+                    & (Store.store_id == StoreProduct.store_id),
+                )
+                .where(
+                    StoreProduct.world_id == world_id,
+                    StoreProduct.item_id == item_id,
+                    Store.location_id == location_id,
+                )
+            ).first()
+            if product is not None:
+                store = session.get(
+                    Store, {"world_id": world_id, "store_id": product.store_id}
+                )
+                if store is not None:
+                    return product, store
         product = session.scalars(
             select(StoreProduct).where(
                 StoreProduct.world_id == world_id, StoreProduct.item_id == item_id

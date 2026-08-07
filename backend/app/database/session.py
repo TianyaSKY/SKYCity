@@ -4,6 +4,7 @@ from collections.abc import Generator
 
 from loguru import logger
 from sqlalchemy import create_engine, text as _text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import get_settings
@@ -55,6 +56,29 @@ def initialize_database() -> None:
             conn.commit()
         except Exception:  # noqa: BLE001 - 存量脏数据时跳过，UoW 仍是主防线
             logger.exception("active-contract unique index creation failed")
+        # M18: existing databases pre-date the personal-store columns;
+        # create_all never alters old tables, so backfill them here
+        # (best-effort — a fresh DB already has the columns via the model).
+        for alter in (
+            "ALTER TABLE stores ADD COLUMN owner_agent_id VARCHAR(64)",
+            "ALTER TABLE stores ADD COLUMN name VARCHAR(128)",
+        ):
+            try:
+                conn.execute(_text(alter))
+                conn.commit()
+            except OperationalError:
+                conn.rollback()  # column already exists (fresh DB) — fine
+        # M18 R39.4: one store per location for personal shops (the unique
+        # index is the last line of defence against concurrent stall grabs).
+        try:
+            conn.execute(_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_location_personal "
+                "ON stores (world_id, location_id) "
+                "WHERE owner_agent_id IS NOT NULL"
+            ))
+            conn.commit()
+        except Exception:  # noqa: BLE001 - 存量脏数据时跳过，服务层校验仍是主防线
+            logger.exception("personal-store location unique index creation failed")
 
 
 def get_db() -> Generator[Session, None, None]:

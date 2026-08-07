@@ -3,7 +3,7 @@
 > 本文件是 **程序实现契约**，不是提示词建议。引擎与 Service 层必须逐条实现，
 > 不允许把规则交给 LLM 临场发挥。修改规则需同步修改本文件与对应测试。
 
-版本：1.0.0
+版本：1.1.0（M18 追加 R39–R44 创业与个人商店）
 
 ## 总则
 
@@ -351,3 +351,105 @@
   （`stock + qty <= stock_cap`），无资金转移。
 - 任一条件失败整单回滚；发布 `company_store_stocked` 与仓库侧
   `company_inventory_changed`。
+
+## 创业与个人商店（M18，R39–R44）
+
+个人店 = 居民自主创建、直接归属个人的商店（`stores.owner_agent_id` 非空、
+`company_id` 为空），与种子/企业商店（R33/R38）并行。个人店资金即店主
+个人余额，R21 企业账户独立性规则不适用。
+
+### R39 开店（open_shop）
+
+- `open_shop(location, products)` 是即时行动：发起者要求空闲（R1）。
+- `location` 两种选址模式：
+  - **摊位模式** `{stall_id}`：地图预置摊位（`location_type=stall`，见
+    map-specification），发起者当前位于该地点（`agent.location_id == stall_id`）。
+  - **荒地模式** `{col, row}`：任意可行走空地，发起者距目标格曼哈顿距离
+    ≤ 3（同 R9/R23.1）。
+- `products` 为商品线列表 `[{item_id, price}]`，最多 `STALL_MAX_PRODUCTS`（当前 3）种。
+- 前置校验（全部通过才可开店，失败返回具体原因）：
+  1. 世界未暂停、智能体存在、空闲（R1）。
+  2. 选址合法：摊位模式要求位于摊位地点；荒地模式要求目标格**可行走且
+     未被占用**（同 R22.3：有 navigation 标记、无 collision、无
+     `tile_structures`、无作物、非 location 锚点格、非 spawn 格）。
+  3. 荒地模式**路径可达**：目标格与全部 location 锚点 + spawn 点处于同一
+     `effective_walkable` 连通分量（BFS，同 R22.4 数据源）。荒地店本身
+     **不挡路**（不进 effective_walkable 减集，开店不改变连通性），校验
+     只确认「从道路网络能走到店」；不可达返回 `会堵住村庄`（复用拒绝文案）。
+  4. 地点空闲：`stores` 表 `(world_id, location_id)` 部分唯一索引保证一个
+     摊位/地点只能开一家店（含并发抢摊，同 R4 的事务模式）。
+  5. 资本门槛：`agent.money >= OPEN_SHOP_CAPITAL`（当前 150，见 gameplay.py）。
+  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42）。
+- 一个居民可开**多家**个人店（无数量上限）：每家店独立货架、独立结算、
+  独立定价，收摊一家不影响其他家；扩张受地点与资本天然约束。
+- 成功（同一事务）：荒地模式先创建运行时 `WorldLocation`
+  （`location_id=stall_<hex>` 生成、`location_type=stall`、锚点=目标格、
+  营业时间与容量取 gameplay.py 的 `STALL_OPEN_HOUR` / `STALL_CLOSE_HOUR` /
+  `STALL_CAPACITY` 配置；摊位模式复用地图地点行）；再创建 `Store`
+  （`owner_agent_id=发起者`、`company_id=NULL`、`name=发起者姓名+首商品名`
+  派生）与每个商品的 `StoreProduct`（`sell_price=定价`、`buy_price=0`、
+  `restock_daily=0`、`stock=min(持有量, STALL_INITIAL_STOCK)`、
+  `stock_cap=STALL_STOCK_CAP`）；首单货在同一事务内从背包扣除进货架。
+- 荒地店锚点加入 R22.4 连通性不变式的锚点集合：此后放置 blocking 建筑
+  不得切断新店（`会堵住村庄` 拒绝条件扩展）。
+- 发布 `store_opened`；商店与运行时地点进入快照（R44）。
+
+### R40 摊位营业
+
+- 营业时间随店铺地点 `[open_hour, close_hour)`（R8 复用）：地图摊位用
+  地点配置（06:00–22:00），荒地店用运行时地点的配置默认值
+  （`STALL_OPEN_HOUR`–`STALL_CLOSE_HOUR`，当前 06:00–22:00）；关店时购买
+  被拒（`商店未开门`）。
+- 售货**无人值守**：顾客位于摊位地点即可购买（`agent.location_id ==
+  store.location_id`），不要求店主在场或空闲；店主可离开摊位继续做别的事。
+- 个人店**只卖不收**：`buy_price=0`，居民 `sell_item` 到个人店返回
+  `商店不收购该物品`（复用既有 `buy_price <= 0` 校验，无新分支）。
+- **无魔法补货**：R15 每日自动补货不适用于个人店（`restock_daily=0`）；
+  货架只增不减路径为店主本人 `stock_shop`（R41）。
+- M12 每日促销**不适用于个人店**（无促销、无基准价恢复流程）。
+
+### R41 店主经营
+
+- `stock_shop(item_id, quantity)`：仅店主本人、空闲（R1）；同一事务内背包
+  条件扣减、货架条件增加（`stock + qty <= stock_cap`），任一失败整单回滚；
+  发布 `store_stocked`。
+- `adjust_price(item_id, new_price)`：仅店主本人、空闲（R1）；价格区间校验
+  同 R42；即时生效并同步更新 `sell_price` 与 `base_sell_price`；发布
+  `store_price_changed`（promo=false）。
+- 售出结算（R33 的并行路径）：顾客 `buy_item` 命中个人店时同一事务内——
+  顾客扣款（`Transaction` type=`expense`）、店主入账（`Transaction`
+  type=`sale_income`，与顾客流水同 `trace_id`）、货架减货、顾客得货；
+  发布 `item_purchased` + `store_sale_completed` + 店主 `money_changed`。
+  不赊账（R7）；并发抢最后一单同 R4（恰一单成功）。
+- 个人店售出计入 R18.2 经营事件（股票 +1）。
+
+### R42 定价
+
+- 个人店价格合法区间：`1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`
+  （当前 `PRICE_MAX_MULT=2.0`，base_price 为 items.json 基准价，见
+  gameplay.py）。
+- 越界拒绝（开店与调价共用同一校验）；v1 无动态市场价格，价格不随
+  供需自动波动。
+
+### R43 收摊与上帝干预
+
+- `close_shop` 仅店主本人、空闲（R1）：货架全部退回店主背包、删除
+  `Store` 与 `StoreProduct` 行、摊位释放；发布 `store_closed`
+  （reason=自主收摊）。
+- 上帝 `close_store`（R13 管道）：可强制收摊，货架货物退回店主背包，
+  reason=上帝干预；店铺不可被其他逻辑删除。
+- 店主余额与商店无独立账户（个人店资金即店主个人余额）。
+
+### R44 存档与快照（M18 扩展）
+
+- 存档（R17）：`stores`/`store_products` 已覆盖；新增 `owner_agent_id`/`name`
+  列随表迁移；恢复后地点占用、货架库存、所有权不变，个人店不重复创建。
+- 存档新增 `runtime_locations` 段：荒地店创建的运行时地点**不随地图重建**
+  （地图只记版本号，R17），随存档保存；恢复顺序为「先按地图版本重建 map
+  地点 → 再插入运行时地点行」（location_id 为 `stall_<hex>`，与 map id
+  不冲突）。
+- 快照：`world_snapshot` 载荷扩展 `stores` 列表
+  （store_id/name/location_id/owner_agent_id/company_id/products）；运行时
+  地点随既有 `locations` 列表自然带出（快照查全表，无需新段）。
+- M16 静态数据补种只针对 `world_data/stores/` 种子商店与 map 地点
+  （存在性门控），不得覆盖/删除个人店与运行时地点行。

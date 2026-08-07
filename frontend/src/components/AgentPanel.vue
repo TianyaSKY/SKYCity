@@ -277,6 +277,22 @@ function setStockPrice(): void {
     });
 }
 
+/** M18: personal shops (owner_agent_id set) the god may force-close. */
+const personalStores = computed(() =>
+    store.stores.filter((s) => s.owner_agent_id != null),
+);
+const closeStoreTarget = ref('');
+
+function closeStore(): void {
+    if (!closeStoreTarget.value) return;
+    void runGodAction({
+        command_type: 'close_store',
+        target_id: closeStoreTarget.value,
+        parameters: {},
+        reason: '玩家干预',
+    });
+}
+
 function teleportLocations(): WorldLocation[] {
     return store.locations;
 }
@@ -488,6 +504,16 @@ function teleportLocations(): WorldLocation[] {
                     </select>
                     <input v-model.number="stockPrice" :disabled="godPending" class="god-qty" min="1" type="number"/>
                     <button :disabled="godPending || !stockTarget" class="god-btn" @click="setStockPrice">调价</button>
+                </div>
+                <div v-if="personalStores.length" class="god-row">
+                    <select v-model="closeStoreTarget" :disabled="godPending" class="god-select">
+                        <option v-for="s in personalStores" :key="s.store_id" :value="s.store_id">
+                            {{ s.name ?? s.store_id }}
+                        </option>
+                    </select>
+                    <button :disabled="godPending || !closeStoreTarget" class="god-btn" @click="closeStore">
+                        强制收摊
+                    </button>
                 </div>
             </div>
 

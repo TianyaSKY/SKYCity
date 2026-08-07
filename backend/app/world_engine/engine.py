@@ -69,7 +69,14 @@ from app.database.models.worlds import World
 from app.domain.agent import AgentActionBuild, AgentActionMove, AgentActionWait, AgentActionWork, AgentSnapshot
 from app.domain.event import WorldEventEnvelope
 from app.domain.location import LocationSnapshot
-from app.domain.world import CropSnapshot, StructureSnapshot, WorldSnapshot, WorldSnapshotPayload
+from app.domain.world import (
+    CropSnapshot,
+    StoreProductSnapshot,
+    StoreSnapshot,
+    StructureSnapshot,
+    WorldSnapshot,
+    WorldSnapshotPayload,
+)
 from app.services.memory_service import MemoryRecorder, MemoryService
 from app.services.relationship_service import RelationshipService
 from app.services.seed_loader import (
@@ -156,6 +163,9 @@ class WorldEngine:
         # CropService (M15) is wired after construction; the plant/harvest
         # tools and the "crop_grow" scheduler handler reach it here.
         self.crop_service: Any = None
+        # ShopService (M18) is wired after construction; the open_shop/
+        # stock_shop/adjust_price/close_shop tools reach it here.
+        self.shop_service: Any = None
         # M14: static blueprint recipes (R22) — loaded once from world_data.
         self.blueprints: dict[str, BlueprintDef] = {
             blueprint.blueprint_id: blueprint
@@ -1256,8 +1266,9 @@ class WorldEngine:
             world: World,
             world_time: int,
     ) -> None:
-        """R15: at a store's daily open hour, restock toward stock_cap."""
-        # Open hours live on the location the store covers (R8).
+        # R15: at a store's daily open hour, restock toward stock_cap. M18
+        # R40: personal shops (owner_agent_id set) have no magic restock and
+        # no promo rolls — their shelf only changes via the owner's tools.
         stores = session.scalars(
             select(Store)
             .join(
@@ -1267,6 +1278,7 @@ class WorldEngine:
             )
             .where(
                 Store.world_id == world.world_id,
+                Store.owner_agent_id.is_(None),
                 WorldLocation.open_hour * 60 == world_time % 1440,
             )
         ).all()
@@ -1375,6 +1387,18 @@ class WorldEngine:
                 .where(Crop.world_id == world_id)
                 .order_by(Crop.col, Crop.row)
             ).all()
+            stores = session.scalars(
+                select(Store)
+                .where(Store.world_id == world_id)
+                .order_by(Store.store_id)
+            ).all()
+            products_by_store: dict[str, list[Any]] = {}
+            for product in session.scalars(
+                    select(StoreProduct)
+                    .where(StoreProduct.world_id == world_id)
+                    .order_by(StoreProduct.store_id, StoreProduct.item_id)
+            ):
+                products_by_store.setdefault(product.store_id, []).append(product)
             world_time = world.world_time
             payload = WorldSnapshotPayload(
                 world=WorldSnapshot(
@@ -1409,6 +1433,26 @@ class WorldEngine:
                         next_stage_at=row.next_stage_at,
                     )
                     for row in crops
+                ],
+                stores=[
+                    StoreSnapshot(
+                        store_id=row.store_id,
+                        name=row.name,
+                        location_id=row.location_id,
+                        owner_agent_id=row.owner_agent_id,
+                        company_id=row.company_id,
+                        products=[
+                            StoreProductSnapshot(
+                                item_id=product.item_id,
+                                sell_price=product.sell_price,
+                                buy_price=product.buy_price,
+                                stock=product.stock,
+                                stock_cap=product.stock_cap,
+                            )
+                            for product in products_by_store.get(row.store_id, [])
+                        ],
+                    )
+                    for row in stores
                 ],
                 latest_sequence=runtime.event_bus.sequence,
             )

@@ -28,8 +28,25 @@ const DEFAULT_AGENT_COLOR = '#9ee6b0';
 const store = useWorldStore();
 const host = ref<HTMLElement | null>(null);
 
-/** Static world-space anchor (px) per location for the label overlay. */
+/** World-space anchor (px) per location for the label overlay: the static
+ * map locations plus any M18 runtime stall locations (wild-cell shops). */
 const locationAnchors = ref<{ location_id: string; x: number; y: number }[]>([]);
+
+function rebuildLocationAnchors(): void {
+    if (!worldConfig) return;
+    const tileSize = worldConfig.tileSize;
+    // Static map locations first, then store.locations (which also carries
+    // them) — dedupe keeps the first occurrence, so map anchors win and any
+    // M18 runtime stall location is picked up automatically.
+    const all = [...worldConfig.locations, ...store.locations].filter(
+        (loc, index, list) => list.findIndex((l) => l.location_id === loc.location_id) === index,
+    );
+    locationAnchors.value = all.map((loc) => ({
+        location_id: loc.location_id,
+        x: (loc.col + 0.5) * tileSize,
+        y: loc.row * tileSize - 2,
+    }));
+}
 
 let renderer: WorldRenderer | null = null;
 let camera: CameraController | null = null;
@@ -52,11 +69,7 @@ onMounted(async () => {
         worldConfig = bundle.config;
         renderer.renderWorld(bundle.config, bundle.texture);
         // Labels sit above each building's top edge, centered on its origin tile.
-        locationAnchors.value = bundle.config.locations.map((loc) => ({
-            location_id: loc.location_id,
-            x: (loc.col + 0.5) * bundle.config.tileSize,
-            y: loc.row * bundle.config.tileSize - 2,
-        }));
+        rebuildLocationAnchors();
 
         camera = new CameraController(renderer.app, renderer.world);
         camera.attach();
@@ -137,6 +150,12 @@ watch(
         agentLayer?.sync(agents);
         applyHighlights();
     },
+    {deep: true},
+);
+
+watch(
+    () => store.locations,
+    () => rebuildLocationAnchors(),
     {deep: true},
 );
 
@@ -231,7 +250,12 @@ function handleClick(e: MouseEvent): void {
     }
     // Otherwise keep the location click behavior (deselect the agent).
     store.selectAgent(null);
-    const loc = worldConfig.locations.find((l) => l.col === tile.col && l.row === tile.row) ?? null;
+    // Static map locations first; M18 runtime stall locations (wild-cell
+    // shops) only exist in store.locations, so fall back to them.
+    const loc =
+        worldConfig.locations.find((l) => l.col === tile.col && l.row === tile.row) ??
+        store.locations.find((l) => l.col === tile.col && l.row === tile.row) ??
+        null;
     store.selectLocation(loc);
 }
 

@@ -25,6 +25,12 @@ class Store(Base):
     location_id: Mapped[str] = mapped_column(String(64), nullable=False)
     # M13: owning company (nullable for pre-company worlds / casual shops).
     company_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # M18: personal shop owner (seed/company stores keep NULL). A store with
+    # an owner is a resident-run stall (R39): no magic restock, no promos,
+    # sale proceeds go straight to the owner's balance.
+    owner_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # M18: display name (NULL falls back to store_id in the UI/observation).
+    name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Store(world_id={self.world_id!r}, store_id={self.store_id!r})"

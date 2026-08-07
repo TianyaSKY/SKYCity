@@ -34,6 +34,7 @@ from app.database.models.llm_runs import LLMRun
 from app.database.models.locations import WorldLocation
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.stores import Store, StoreProduct
+from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.config.gameplay import (
     HOTEL_NIGHTLY_FEE,
@@ -47,6 +48,7 @@ from app.config.gameplay import (
     SLEEP_MAX_MINUTES,
     SLEEP_MIN_MINUTES,
     SLEEP_MOOD_PER_HOUR,
+    STALL_MAX_DISTANCE,
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
 )
@@ -115,6 +117,7 @@ def build_observation(
         session_factory: sessionmaker[Session],
         memory_service: Any = None,
         home_id: str | None = None,
+        engine: Any = None,
 ) -> str:
     """Compose the observation text for one agent decision.
 
@@ -124,6 +127,10 @@ def build_observation(
 
     ``home_id`` (R14 sleep steering): the agent's home location id from its
     character card, or None for homeless agents (sleeping requires the hotel).
+
+    ``engine`` (M18): the WorldEngine singleton, used for the 可开店位置
+    section's walkability/reachability checks; when None (direct test calls
+    without a wired shop service) that section only lists free stalls.
     """
     session = session_factory()
     try:
@@ -262,6 +269,44 @@ def build_observation(
             mark = "（当前位置）" if loc.location_id == agent.location_id else ""
             lines.append(f"- {loc.name}({loc.location_id}): {open_state}{mark}")
 
+        # M18 R39: where this agent could open a personal shop — free map
+        # stalls plus nearby wild cells that are walkable and reachable.
+        lines.append("【可开店位置】")
+        open_spots: list[str] = []
+        for loc in locations:
+            if loc.location_type != "stall":
+                continue
+            if (
+                session.scalar(
+                    select(Store).where(
+                        Store.world_id == world_id,
+                        Store.location_id == loc.location_id,
+                    )
+                )
+                is not None
+            ):
+                continue  # already taken
+            open_spots.append(
+                f"- 摊位 {loc.name}({loc.location_id}): 营业 {loc.open_hour}~{loc.close_hour}，空置可开店"
+            )
+        shop = getattr(engine, "shop_service", None) if engine is not None else None
+        if shop is not None:
+            near: list[str] = []
+            for dc in range(-STALL_MAX_DISTANCE, STALL_MAX_DISTANCE + 1):
+                for dr in range(-STALL_MAX_DISTANCE, STALL_MAX_DISTANCE + 1):
+                    if abs(dc) + abs(dr) > STALL_MAX_DISTANCE:
+                        continue
+                    col, row = agent.col + dc, agent.row + dr
+                    if shop._cell_available(session, world_id, col, row) and shop._reachable(
+                            session, world_id, col, row
+                    ):
+                        near.append(f"- 空地 ({col},{row}): 可开店")
+            open_spots.extend(near[:8])
+        if open_spots:
+            lines.extend(open_spots)
+        else:
+            lines.append("（暂无空摊位或可达空地）")
+
         same_location = [a for a in others if a.location_id == agent.location_id]
         lines.append("【可见人物】")
         if same_location:
@@ -292,6 +337,16 @@ def build_observation(
             lines.append(
                 "- give_item(target_agent_id, item_id, quantity=1, reason): 把背包里的物品送给【可见人物】里的智能体"
             )
+
+        # M18: personal-shop tools are town-wide (like sell_item), not tied
+        # to other agents being around.
+        lines.append(
+            "- open_shop(location, products, reason): 在空摊位或附近可达空地开店"
+            "（资本 ≥150 金币，商品从背包上架，≤3 种，价格 1~2 倍基准价）"
+        )
+        lines.append("- stock_shop(store_id, item_id, quantity=1, reason): 给自己店铺的货架补货（从背包上架）")
+        lines.append("- adjust_price(store_id, item_id, new_price, reason): 调整自己店铺的售价")
+        lines.append("- close_shop(store_id, reason): 收掉自己的店铺，货架货物退回背包")
 
         # M5: shop products at the current store (up to 6) + jobs offered here.
         if agent.location_id is not None:
@@ -659,6 +714,46 @@ def build_observation(
                 "- stock_store(company_id, store_id, item_id, reason, quantity=1): "
                 "把本企业仓库货物上架到自有商店货架（仅企业经理，需货架有空间）"
             )
+
+        # M18 R41: the agent's own personal shops (owner view) — products
+        # and cumulative sales (from the sale_income ledger).
+        my_stores = session.scalars(
+            select(Store)
+            .where(
+                Store.world_id == world_id,
+                Store.owner_agent_id == agent.agent_id,
+            )
+            .order_by(Store.store_id)
+        ).all()
+        if my_stores:
+            total_sales = (
+                session.scalar(
+                    select(func.sum(Transaction.amount)).where(
+                        Transaction.world_id == world_id,
+                        Transaction.agent_id == agent.agent_id,
+                        Transaction.type == "sale_income",
+                    )
+                )
+                or 0
+            )
+            lines.append("【店铺经营摘要】")
+            for store in my_stores:
+                store_name = store.name or store.store_id
+                lines.append(f"- {store_name}({store.store_id}): 累计销售额 {total_sales}")
+                for product in session.scalars(
+                    select(StoreProduct)
+                    .where(
+                        StoreProduct.world_id == world_id,
+                        StoreProduct.store_id == store.store_id,
+                    )
+                    .order_by(StoreProduct.item_id)
+                ).all():
+                    lines.append(
+                        f"  - {item_names.get(product.item_id, product.item_id)} "
+                        f"{product.sell_price}金币（库存{product.stock}/{product.stock_cap}）"
+                    )
+        else:
+            lines.append("（暂无店铺）")
 
         # M13: employee card (R27/R31): own contract + today's shift.
         contract = session.scalar(

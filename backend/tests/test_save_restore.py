@@ -23,11 +23,13 @@ from app.config.settings import get_settings
 from app.database.models.agents import Agent
 from app.database.models.inventories import Inventory
 from app.database.models.llm_runs import LLMRun
+from app.database.models.locations import WorldLocation
 from app.database.models.memories import Memory
 from app.database.models.relationships import Relationship
 from app.database.models.saves import Save
 from app.database.models.scheduled_actions import ScheduledAction
-from app.database.models.stores import StoreProduct
+from app.database.models.stocks import Stock
+from app.database.models.stores import Store, StoreProduct
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.database.session import SessionLocal
@@ -38,6 +40,8 @@ from app.services.conversation_service import ConversationService
 from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
+from app.services.shop_service import ShopService
+from app.services.stock_service import StockService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
 from tests.test_world_engine import advance_minutes
@@ -67,6 +71,8 @@ def make_engine(world_config: ParsedWorldConfig) -> WorldEngine:
     )
     eng.action_service = ActionExecutionService(eng, SessionLocal)
     eng.economy_service = EconomyService(eng, SessionLocal)
+    eng.stock_service = StockService(eng, SessionLocal)
+    eng.shop_service = ShopService(eng, SessionLocal)
     eng.decision_service = DecisionService(
         eng, SessionLocal, provider=FakeDecisionProvider()
     )
@@ -403,3 +409,103 @@ def test_restore_missing_save_404(client: TestClient) -> None:
     # Saving an unknown world also 404s.
     assert client.post("/api/worlds/world_999/save").status_code == 404
     assert client.get("/api/worlds/world_999/replay").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# M18: personal-shop roundtrip (R44)
+# --------------------------------------------------------------------------- #
+
+
+def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
+    """荒地个人店随存档保存/恢复：owner/name、运行时地点、上市行、货架
+    全部还原；恢复后的世界仍可购买与补货。"""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("个人店存档")
+    world_id = runtime.world_id
+
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        agent.money = 200
+        agent.location_id = None
+        agent.col, agent.row = 31, 20
+        session.add(
+            Inventory(
+                world_id=world_id, agent_id="agent_linxia",
+                item_id="wheat", quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    ok, envelope, reason = eng.shop_service.open_shop(
+        world_id, "agent_linxia", {"col": 31, "row": 21},
+        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+    )
+    assert ok is True, reason
+    store_id = envelope.payload["store_id"]
+    location_id = envelope.payload["location_id"]
+    ok, _, reason = eng.shop_service.stock_shop(
+        world_id, "agent_linxia", store_id, "wheat", quantity=3, reason="补货"
+    )
+    assert ok is True, reason
+
+    result = eng.save_service.save(world_id)
+    restored = eng.save_service.restore(result.save_id)
+    new_id = restored.world_id
+    assert new_id != world_id
+
+    session = SessionLocal()
+    try:
+        store = session.get(Store, {"world_id": new_id, "store_id": store_id})
+        assert store is not None
+        assert store.owner_agent_id == "agent_linxia"
+        assert store.name == "林夏的小麦摊"
+        location = session.get(
+            WorldLocation, {"world_id": new_id, "location_id": location_id}
+        )
+        assert location is not None
+        assert (location.col, location.row) == (31, 21)
+        assert location.location_type == "stall"
+        listing = session.scalars(
+            select(Stock).where(
+                Stock.world_id == new_id,
+                Stock.company_id == store_id,
+                Stock.source == "store",
+            )
+        ).first()
+        assert listing is not None
+        product = session.get(
+            StoreProduct,
+            {"world_id": new_id, "store_id": store_id, "item_id": "wheat"},
+        )
+        assert product is not None
+        assert product.stock == 8  # 开店 5 + 补货 3
+        # 原世界不受恢复影响
+        assert session.get(
+            Store, {"world_id": world_id, "store_id": store_id}
+        ) is not None
+    finally:
+        session.close()
+
+    # 恢复后的世界：同一地点仍可购买与补货
+    session = SessionLocal()
+    try:
+        buyer = session.get(
+            Agent, {"world_id": new_id, "agent_id": "agent_zhangming"}
+        )
+        buyer.location_id = location_id
+        buyer.col, buyer.row = 31, 21
+        session.commit()
+    finally:
+        session.close()
+    ok, _, reason = eng.economy_service.buy(
+        new_id, "agent_zhangming", "wheat", quantity=1, reason="买小麦"
+    )
+    assert ok is True, reason
+    ok, _, reason = eng.shop_service.stock_shop(
+        new_id, "agent_linxia", store_id, "wheat", quantity=2, reason="补货"
+    )
+    assert ok is True, reason
+    eng._runtimes.clear()

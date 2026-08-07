@@ -248,6 +248,47 @@ do_plan.md 第九节：M0 → M1 → M2 → ... → M9。
 
 ---
 
+## 里程碑 18：创业与个人商店（M18）
+
+成果：居民自主开店经营——攒钱 → 摆摊 → 定价 → 售货盈利 → 补货/调价 → 收摊，全程 LLM 决策、引擎记账。
+
+契约：`docs/world-rules.md` R39–R44（创业与个人商店）、`docs/event-protocol.md` §3（M18 事件）。
+
+- [ ] T18-1 契约落地：world-rules R39–R44 + event-protocol `store_opened`/`store_closed`/
+  `store_stocked`/`store_sale_completed` + snapshot `stores` 扩展
+- [ ] T18-2 地图摊位：`tools/build_map.py` 在广场新增 3 个 `stall_xx` 地点
+  （location_type=stall、open 06:00–22:00、capacity 4）+ 摊贩招牌瓦片，重导出 tmj
+- [ ] T18-3 迁移：`stores` 表新增 `owner_agent_id`/`name` 列（可空）+ 部分唯一索引
+  `(world_id, location_id)`（仅个人店行；一人可开多店，无 per-agent 索引）
+- [ ] T18-4 配置：`OPEN_SHOP_CAPITAL=150` / `STALL_STOCK_CAP=20` / `STALL_INITIAL_STOCK=5` /
+  `STALL_MAX_PRODUCTS=3` / `PRICE_MAX_MULT=2.0` / `STALL_OPEN_HOUR=6` /
+  `STALL_CLOSE_HOUR=22` / `STALL_CAPACITY=4`（gameplay.py）
+- [ ] T18-5 工具 `open_shop(location, products)`：双模式选址——摊位模式
+  `{stall_id}`（须位于该地点）/ 荒地模式 `{col, row}`（距离 ≤ 3、R22.3 占用
+  谓词、effective_walkable 连通分量可达 BFS）；荒地模式同事务创建运行时
+  `WorldLocation`（`stall_<hex>`、配置营业时间/容量）；其余校验资本/持货/
+  定价 → 建店 + 首单上架 → `store_opened`（tools/entrepreneurship.py；
+  同店主可开多家；荒地锚点入 R22.4 锚点集）
+- [ ] T18-6 售出结算：`buy_item` 增加 owner 分支——顾客 expense / 店主 sale_income 双流水
+  （同 trace_id）+ `store_sale_completed` + 店主 `money_changed` + 股价经营计数（R18.2）
+- [ ] T18-7 工具 `stock_shop` / `adjust_price` / `close_shop`：背包↔货架事务、定价区间
+  校验、收摊退货与地点释放（荒地店同时删除运行时地点行并移出 R22.4 锚点集）
+- [ ] T18-8 上帝命令：`close_store`（强制收摊，货退回店主背包，R13 管道）
+- [ ] T18-9 快照与存档：snapshot 含 stores（运行时地点随 locations 带出）；
+  存档新增 `runtime_locations` 段，恢复顺序为 map 地点 → 运行时地点；
+  店/货/所有权/地点恢复后不变；补种不覆盖个人店与运行时地点（R44）
+- [ ] T18-10 前端：摊位占用与店主展示、货架信息、`store_opened`/`store_sale_completed`
+  事件流
+- [ ] T18-11 LLM：注册 4 个工具 + 观察含可开店位置（空摊位 + 距离 ≤ 3 的可达
+  空地）与店铺经营摘要（库存/售价/累计销售额）+ 提示词示例（如花匠开鲜花摊）
+- [ ] T18-12 测试与验收：资本不足/地点被占拒绝；同店主开第二家店成功（多店并存、
+  独立货架与结算）；荒地可达开店成功、不可达（孤岛/围死角）拒绝、荒地店不挡路且
+  后续 blocking 建筑不得切断新店（R22.4 锚点集扩展）；买→店主入账+双流水+并发抢单；
+  上架超上限回滚；越界定价拒绝；收摊退货+地点释放且不影响其他店；存档恢复
+  （荒地店+运行时地点仍在）；fake provider 自主链路（攒钱→开店→售货→补货→收摊）
+
+---
+
 ## 建议执行顺序（竖切而非横铺）
 
 ```
@@ -256,6 +297,7 @@ do_plan.md 第九节：M0 → M1 → M2 → ... → M9。
 6. M4 第二个智能体 + talk  →  7. M5 经济闭环
 8. M6 记忆关系  →  9. M7 上帝界面  →  10. M8 稳定性  →  11. M9 测试存档
 12. M14 建造系统（T14-1 → T14-9 竖切） →  13. M15 作物种植（T15-1 → T15-10 竖切）
+14. M18 创业与个人商店（T18-1 → T18-12 竖切）
 ```
 
 优先打通第一条纵向链路（地图→状态→移动→WS→LLM→工具→验证→动画），再横向扩展。

@@ -42,6 +42,11 @@ ALL_TOOLS = {
     "resume_recruitment",
     "purchase_company_goods",
     "stock_store",
+    # M18: personal shops.
+    "open_shop",
+    "stock_shop",
+    "adjust_price",
+    "close_shop",
 }
 
 

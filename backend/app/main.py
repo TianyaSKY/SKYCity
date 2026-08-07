@@ -27,6 +27,7 @@ from app.services.crop_service import CropService
 from app.services.economy_service import EconomyService
 from app.services.god_action_service import GodActionService
 from app.services.save_service import SaveService
+from app.services.shop_service import ShopService
 from app.services.stock_service import StockService
 from app.services.transfer_service import TransferService
 from app.services.world_config_loader import WorldConfigError, load_world_config
@@ -92,6 +93,8 @@ async def lifespan(app: FastAPI):
     engine.build_service = build_service
     crop_service = CropService(engine, SessionLocal)
     engine.crop_service = crop_service
+    shop_service = ShopService(engine, SessionLocal)
+    engine.shop_service = shop_service
     save_service = SaveService(engine, SessionLocal)
     engine.save_service = save_service
     company_employment_service = CompanyEmploymentService(
@@ -110,6 +113,7 @@ async def lifespan(app: FastAPI):
     app.state.transfer_service = transfer_service
     app.state.build_service = build_service
     app.state.crop_service = crop_service
+    app.state.shop_service = shop_service
     app.state.save_service = save_service
     app.state.company_employment_service = company_employment_service
 

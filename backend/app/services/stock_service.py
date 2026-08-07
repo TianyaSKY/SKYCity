@@ -105,20 +105,34 @@ class StockService:
         payload = envelope.payload or {}
         stock: Stock | None = None
         if envelope.type == "item_purchased":
-            product = session.scalars(
-                select(StoreProduct).where(
-                    StoreProduct.world_id == world_id,
-                    StoreProduct.item_id == payload.get("item_id"),
-                )
-            ).first()
-            if product is not None:
+            # M18: the payload carries the selling store, so a personal shop
+            # next to the village store credits the right listing. The old
+            # first-product path stays as a fallback for legacy events and
+            # directly-published test envelopes without store_id.
+            store_id = payload.get("store_id")
+            if store_id:
                 stock = session.scalars(
                     select(Stock).where(
                         Stock.world_id == world_id,
                         Stock.source == "store",
-                        Stock.company_id == product.store_id,
+                        Stock.company_id == store_id,
                     )
                 ).first()
+            if stock is None:
+                product = session.scalars(
+                    select(StoreProduct).where(
+                        StoreProduct.world_id == world_id,
+                        StoreProduct.item_id == payload.get("item_id"),
+                    )
+                ).first()
+                if product is not None:
+                    stock = session.scalars(
+                        select(Stock).where(
+                            Stock.world_id == world_id,
+                            Stock.source == "store",
+                            Stock.company_id == product.store_id,
+                        )
+                    ).first()
         elif envelope.type == "work_completed":
             stock = session.scalars(
                 select(Stock).where(

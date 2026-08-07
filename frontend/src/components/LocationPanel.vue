@@ -27,9 +27,17 @@ function typeLabel(locationType: string): string {
         house: '住宅',
         hotel: '旅店',
         workshop: '工坊',
+        stall: '摊位', // M18
     };
     return labels[locationType] ?? locationType;
 }
+
+/** Personal shops (M18) at the selected location, if any. */
+const storesHere = computed(() => {
+    const loc = store.selectedLocation;
+    if (!loc) return [];
+    return store.stores.filter((s) => s.location_id === loc.location_id);
+});
 
 /** Whether the selected location is open right now (snapshot flag or hours). */
 const isOpenNow = computed(() => {
@@ -87,6 +95,24 @@ const occupancyText = computed(() => {
           </span>
                 </div>
                 <p v-else class="sec-empty">无人</p>
+
+                <template v-if="storesHere.length">
+                    <div class="section-title">店主</div>
+                    <div v-for="shop in storesHere" :key="shop.store_id" class="shop-card">
+                        <div class="shop-head">
+                            <span class="shop-name">{{ shop.name ?? shop.store_id }}</span>
+                            <span class="shop-owner">店主：{{ shop.owner_agent_id ?? '—' }}</span>
+                        </div>
+                        <ul v-if="shop.products.length" class="sec-list">
+                            <li v-for="pr in shop.products" :key="pr.item_id" class="product-row">
+                                <span class="p-name">{{ pr.item_id }}</span>
+                                <span class="p-price">售{{ pr.sell_price }}</span>
+                                <span :class="{ low: pr.stock <= 0 }" class="p-stock">×{{ pr.stock }}</span>
+                            </li>
+                        </ul>
+                        <p v-else class="sec-empty">暂无商品</p>
+                    </div>
+                </template>
 
                 <template v-if="store.locationDetail.products.length">
                     <div class="section-title">商品</div>
@@ -194,6 +220,30 @@ dd {
 .sec-loading {
     margin: 2px 0;
     opacity: 0.55;
+}
+
+.shop-card {
+    margin: 6px 0;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(255, 224, 130, 0.08);
+    border: 1px solid rgba(255, 224, 130, 0.25);
+}
+
+.shop-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 3px;
+}
+
+.shop-name {
+    color: #ffe082;
+    font-weight: 600;
+}
+
+.shop-owner {
+    opacity: 0.7;
 }
 
 .sec-list {

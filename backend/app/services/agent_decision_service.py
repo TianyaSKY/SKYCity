@@ -239,6 +239,7 @@ class DecisionService:
             self._session_factory,
             memory_service=self.engine.memory_service,
             home_id=self.engine.home_location_id(agent_id),
+            engine=self.engine,
         )
 
         # M8: observation cache (T8-5) + world daily budget (T8) gates run
@@ -635,6 +636,49 @@ class DecisionService:
                 world_id,
                 agent_id,
                 arguments.get("item_id"),
+                reason=arguments.get("reason"),
+                trace_id=trace_id,
+            )
+        # M18 personal-shop tools through the shop rule gate (R39-R43).
+        if result.tool_name in ("open_shop", "stock_shop", "adjust_price", "close_shop"):
+            shop_service = self.engine.shop_service
+            if shop_service is None:
+                return False, None, "店铺服务未初始化"
+            if result.tool_name == "open_shop":
+                return shop_service.open_shop(
+                    world_id,
+                    agent_id,
+                    arguments.get("location"),
+                    arguments.get("products"),
+                    reason=arguments.get("reason"),
+                    trace_id=trace_id,
+                )
+            if result.tool_name == "stock_shop":
+                quantity = arguments.get("quantity")
+                quantity = 1 if quantity is None else max(1, min(int(quantity), 99))
+                return shop_service.stock_shop(
+                    world_id,
+                    agent_id,
+                    arguments.get("store_id"),
+                    arguments.get("item_id"),
+                    quantity=quantity,
+                    reason=arguments.get("reason"),
+                    trace_id=trace_id,
+                )
+            if result.tool_name == "adjust_price":
+                return shop_service.adjust_price(
+                    world_id,
+                    agent_id,
+                    arguments.get("store_id"),
+                    arguments.get("item_id"),
+                    arguments.get("new_price"),
+                    reason=arguments.get("reason"),
+                    trace_id=trace_id,
+                )
+            return shop_service.close_shop(
+                world_id,
+                agent_id,
+                arguments.get("store_id"),
                 reason=arguments.get("reason"),
                 trace_id=trace_id,
             )

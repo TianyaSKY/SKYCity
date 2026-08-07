@@ -397,6 +397,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
         "quantity": 1,
         "unit_price": 12,
         "total": 12,
+        "store_id": "village_shop",  # M18: the selling store
     }
 
     row = agent_row(engine, world_id, "agent_linxia")

@@ -131,6 +131,7 @@ function baseSnapshot(): WorldSnapshotPayload {
         locations: [LOCATION_SHOP, LOCATION_HOUSE],
         structures: [],
         crops: [],
+        stores: [],
         latest_sequence: 0,
     };
 }
@@ -189,7 +190,8 @@ describe('applySnapshot', () => {
             locations: [LOCATION_SHOP],
             structures: [],
             crops: [],
-            latest_sequence: 100,
+            stores: [],
+        latest_sequence: 100,
         });
 
         expect(store.worldId).toBe('world_fresh');
@@ -223,7 +225,8 @@ describe('applySnapshot', () => {
             },
             agents: [AGENT_LINXIA],
             locations: [LOCATION_SHOP],
-            latest_sequence: 0,
+            stores: [],
+        latest_sequence: 0,
             structures: [
                 {
                     col: 5,
@@ -276,7 +279,8 @@ describe('applySnapshot', () => {
             },
             agents: [AGENT_LINXIA],
             locations: [LOCATION_SHOP],
-            latest_sequence: 0,
+            stores: [],
+        latest_sequence: 0,
             structures: [],
             crops: [
                 {
