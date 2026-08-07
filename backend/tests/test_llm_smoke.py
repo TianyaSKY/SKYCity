@@ -123,7 +123,7 @@ def test_llm_move_destination_is_visible_location(
     runtime = eng.create_world("冒烟世界", autonomous=False)
     world_id = runtime.world_id
     ids = location_ids(world_config)
-    assert len(ids) == 9
+    assert len(ids) == 14
 
     observation = (
         "【世界现状】第1天 上午 10:00 天气: 晴朗\n"

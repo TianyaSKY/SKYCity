@@ -82,6 +82,9 @@ def test_seed_apply_review_shift_and_payroll(system) -> None:
         "company_morning_farm",
         "company_village_shop",
         "company_village_bakery",
+        "company_village_hotel",
+        "company_carpenter_shop",
+        "company_flower_garden",
     }
 
     openings = service.list_openings(runtime.world_id)
@@ -160,7 +163,8 @@ def test_seed_contract_and_queries(system) -> None:
 
     companies = {row["company_id"]: row for row in service.list_companies(world_id)}
     assert set(companies) == {
-        "company_morning_farm", "company_village_shop", "company_village_bakery"
+        "company_morning_farm", "company_village_shop", "company_village_bakery",
+        "company_village_hotel", "company_carpenter_shop", "company_flower_garden",
     }
     assert companies["company_morning_farm"]["money"] == 800
     assert companies["company_morning_farm"]["status"] == "active"
@@ -183,7 +187,7 @@ def test_seed_contract_and_queries(system) -> None:
     assert attendant["capacity"] == 1
 
     openings = service.list_openings(world_id)
-    assert len(openings) == 3
+    assert len(openings) == 6
     farm_opening = next(o for o in openings if o["company_id"] == "company_morning_farm")
     assert farm_opening["vacancies"] == 2
 
@@ -214,6 +218,9 @@ def test_company_query_endpoints(client: TestClient) -> None:
             "company_morning_farm",
             "company_village_shop",
             "company_village_bakery",
+            "company_village_hotel",
+            "company_carpenter_shop",
+            "company_flower_garden",
         }
         detail = client.get(f"/api/worlds/{world_id}/companies/company_morning_farm").json()
         assert detail["money"] == 800 and detail["open_vacancies"] == 2
@@ -266,7 +273,10 @@ def test_review_permissions_and_reviewed_once(system) -> None:
     runtime = engine.create_world("审核权限测试")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
-    opening = service.list_openings(runtime.world_id)[0]
+    opening = next(
+        o for o in service.list_openings(runtime.world_id)
+        if o["company_id"] == "company_morning_farm"
+    )
 
     application = service.apply(runtime.world_id, opening["opening_id"], "agent_linxia", "求职")
     # 非经理不能审核（agent_wangfang 是商店经理，不是农场经理）
@@ -345,7 +355,10 @@ def test_application_boosts_manager_decision(system) -> None:
     runtime = engine.create_world("经理提升测试", autonomous=True)
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
-    opening = service.list_openings(runtime.world_id)[0]
+    opening = next(
+        o for o in service.list_openings(runtime.world_id)
+        if o["company_id"] == "company_morning_farm"
+    )
     service.apply(runtime.world_id, opening["opening_id"], "agent_linxia", "求职")
     manager_id = "agent_zhangming"
     session = SessionLocal()
@@ -371,7 +384,10 @@ def test_observation_shows_board_and_manager_desk(system) -> None:
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    opening = service.list_openings(world_id)[0]
+    opening = next(
+        o for o in service.list_openings(world_id)
+        if o["company_id"] == "company_morning_farm"
+    )
     service.apply(world_id, opening["opening_id"], "agent_linxia", "希望获得稳定收入")
 
     resident_view = build_observation(world_id, "agent_linxia", SessionLocal)
@@ -1297,10 +1313,13 @@ def test_restore_v1_save_migrates(system) -> None:
         "company_morning_farm",
         "company_village_shop",
         "company_village_bakery",
+        "company_village_hotel",
+        "company_carpenter_shop",
+        "company_flower_garden",
     }
-    assert companies[0]["money"] in {800, 1000}
+    assert companies[0]["money"] in {300, 800, 1000}
     openings = service.list_openings(new_world_id)
-    assert len(openings) == 3
+    assert len(openings) == 6
     session = SessionLocal()
     try:
         store = session.scalar(
@@ -1335,7 +1354,7 @@ def test_first_version_acceptance_script(system) -> None:
     assert farm_worker["capacity"] == 2
     shop_attendant = service.list_positions(world_id, "company_village_shop")[0]
     assert shop_attendant["capacity"] == 1
-    assert len(service.list_openings(world_id)) == 3
+    assert len(service.list_openings(world_id)) == 6
 
     # 4-6. 居民申请 → 经理录用 → 正式职业 + 下一班次
     farm_opening = next(
@@ -1528,7 +1547,7 @@ def _hire(system, world_id: str, company_id: str, applicant: str, manager: str) 
 
 
 def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
-    """M16 种子：3 家企业 3 个岗位；正式岗位绑定生产配方；面包坊经理为 agent_touzi."""
+    """M16 种子：6 家企业 6 个岗位；正式岗位绑定生产配方；面包坊经理为 agent_touzi."""
     engine, service = system
     runtime = engine.create_world("M16种子测试")
     service.register_runtime(runtime)
@@ -1541,6 +1560,7 @@ def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
         ).all()
         assert {row.company_id for row in companies} == {
             "company_morning_farm", "company_village_shop", "company_village_bakery",
+            "company_village_hotel", "company_carpenter_shop", "company_flower_garden",
         }
         bakery = next(
             row for row in companies if row.company_id == "company_village_bakery"
@@ -1551,6 +1571,7 @@ def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
         ).all()
         assert {row.position_id for row in positions} == {
             "position_farm_worker", "position_shop_attendant", "position_baker",
+            "position_hotel_attendant", "position_carpenter", "position_gardener",
         }
         farm = next(
             row for row in positions if row.position_id == "position_farm_worker"

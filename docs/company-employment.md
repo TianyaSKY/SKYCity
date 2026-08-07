@@ -152,6 +152,9 @@ Transaction:        type=work_wage,     amount=+90
 | 晨露农场（farm）     | `village_farm`   | 农场工人（`job_farm_production`）      | 2    | 08:00–12:00 | 60       | 800      |
 | 村庄杂货店（retail） | `village_shop`   | 商店店员（`job_shop_attendant`）       | 1    | 09:00–17:00 | 90       | 1000     |
 | 晨露面包坊（workshop）| `village_bakery` | 面包师（`job_bakery_bake`）            | 1    | 13:00–17:00 | 60       | 300      |
+| 小镇旅店（hotel）    | `village_hotel`  | 客房服务员（`job_hotel_service`）      | 1    | 12:00–16:00 | 80       | 400      |
+| 巧木工坊（workshop） | `carpenter_shop` | 木工师傅（`job_carpentry`）            | 1    | 10:00–14:00 | 60       | 300      |
+| 晨露花圃（farm）     | `flower_garden`  | 花匠（`job_flower_gardening`）         | 1    | 08:00–12:00 | 60       | 300      |
 
 - 种子文件：`world_data/companies/companies.json`（企业 + 岗位 + 工作日 + 采购规则）。
 - 播种幂等：`ensure_seeded` 只创建缺失的企业/岗位/招聘，可重复调用。
@@ -161,6 +164,11 @@ Transaction:        type=work_wage,     amount=+90
   配方与 `formal_only` 标记在 `world_data/jobs/jobs.json`，采购规则在
   `world_data/companies/companies.json` 的 `procurement` 列表；面包不再自动补货
   （`restock_daily = 0`）。
+- **M17 延伸链（新经理企业）**：巧木工坊班次产出 1 耙子/班 → 杂货店按 18 金币/件采购并上架
+  （零售 35）；晨露花圃班次产出 5 鲜花/班 → 杂货店按 6 金币/件采购并上架（零售 12）。
+  旅店为纯服务企业，无产物。三家新企业经理：周婶（agent_zhoushen）、李木匠（agent_limujiang）、
+  孙婶（agent_sunshen），角色卡与地图（建筑/小路/出生点）由 `tools/build_map.py` 从
+  `world_data/identities/` 派生。
 
 ## 5. 流程规则
 

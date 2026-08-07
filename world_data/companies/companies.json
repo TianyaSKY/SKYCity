@@ -43,6 +43,18 @@
           "seller_company_id": "company_village_bakery",
           "unit_price": 6,
           "max_quantity_per_order": 99
+        },
+        {
+          "item_id": "tool_rake",
+          "seller_company_id": "company_carpenter_shop",
+          "unit_price": 18,
+          "max_quantity_per_order": 99
+        },
+        {
+          "item_id": "flower",
+          "seller_company_id": "company_flower_garden",
+          "unit_price": 6,
+          "max_quantity_per_order": 99
         }
       ],
       "positions": [
@@ -92,6 +104,93 @@
           "wage_per_shift": 60,
           "shift_start_minute": 780,
           "shift_end_minute": 1020,
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "company_id": "company_village_hotel",
+      "name": "小镇旅店",
+      "company_type": "hotel",
+      "location_id": "village_hotel",
+      "initial_money": 400,
+      "manager_agent_id": "agent_zhoushen",
+      "positions": [
+        {
+          "position_id": "position_hotel_attendant",
+          "job_id": "job_hotel_service",
+          "title": "客房服务员",
+          "description": "在小镇旅店整理客房、接待住客，保证旅客住得舒心",
+          "capacity": 1,
+          "wage_per_shift": 80,
+          "shift_start_minute": 720,
+          "shift_end_minute": 960,
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "company_id": "company_carpenter_shop",
+      "name": "巧木工坊",
+      "company_type": "workshop",
+      "location_id": "carpenter_shop",
+      "initial_money": 300,
+      "manager_agent_id": "agent_limujiang",
+      "positions": [
+        {
+          "position_id": "position_carpenter",
+          "job_id": "job_carpentry",
+          "title": "木工师傅",
+          "description": "在巧木工坊打造耙子等农具，供村庄杂货店售卖",
+          "capacity": 1,
+          "wage_per_shift": 60,
+          "shift_start_minute": 600,
+          "shift_end_minute": 840,
+          "working_days": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
+        }
+      ]
+    },
+    {
+      "company_id": "company_flower_garden",
+      "name": "晨露花圃",
+      "company_type": "farm",
+      "location_id": "flower_garden",
+      "initial_money": 300,
+      "manager_agent_id": "agent_sunshen",
+      "positions": [
+        {
+          "position_id": "position_gardener",
+          "job_id": "job_flower_gardening",
+          "title": "花匠",
+          "description": "在晨露花圃照料鲜花，供应村庄杂货店售卖",
+          "capacity": 1,
+          "wage_per_shift": 60,
+          "shift_start_minute": 480,
+          "shift_end_minute": 720,
           "working_days": [
             0,
             1,

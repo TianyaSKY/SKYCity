@@ -64,10 +64,16 @@ cell_walkable(col, row) =
 | `village_farm`   | farm   | 6-18 | 12   |
 | `town_hall`      | office | 9-17 | 10   |
 | `village_hotel`  | hotel  | 0-24 | 10   |
+| `village_bakery` | workshop | 6-18 | 6  |
+| `carpenter_shop` | workshop | 6-18 | 6  |
+| `flower_garden`  | farm   | 6-18 | 8    |
 | `linxia_home`    | house  | 0-24 | 4    |
 | `zhangming_home` | house  | 0-24 | 4    |
 | `chenyu_home`    | house  | 0-24 | 4    |
 | `wangfang_home`  | house  | 0-24 | 4    |
+| `zhoushen_home`  | house  | 0-24 | 4    |
+| `limujiang_home` | house  | 0-24 | 4    |
+| `sunshen_home`   | house  | 0-24 | 4    |
 
 > `hotel`（小镇旅店）与 `house`/`plaza` 一样全天开放（R8）；无家智能体的
 > 睡觉地点（R14），入住收取每晚 85 金币房费（`HOTEL_NIGHTLY_FEE`，见 `backend/app/config/gameplay.py`）。
@@ -83,6 +89,10 @@ cell_walkable(col, row) =
 | `well`           | well          | village_plaza |
 | `fountain`       | fountain      | village_plaza |
 | `town_hall_desk` | service_desk  | town_hall     |
+| `bakery_oven`    | workshop_station | village_bakery |
+| `hotel_counter`  | service_desk  | village_hotel |
+| `carpenter_bench`| workshop_station | carpenter_shop |
+| `garden_bed`     | farm_field    | flower_garden |
 
 ## 5. `spawn_points` 对象层
 
@@ -98,6 +108,9 @@ cell_walkable(col, row) =
 | spawn_wangfang  | agent_wangfang  | (48, 35) |
 | spawn_laozhang  | agent_laozhang  | (30, 9)  |
 | spawn_touzi     | agent_touzi     | (33, 20) |
+| spawn_zhoushen  | agent_zhoushen  | (35, 6)  |
+| spawn_limujiang | agent_limujiang | (12, 6)  |
+| spawn_sunshen   | agent_sunshen   | (4, 11)  |
 
 角色卡 `home` 字段（location_id/name/col/row）同样由生成脚本派生为 `buildings` 瓦片与 `locations` 对象——新增智能体时无需手工编辑地图。
 

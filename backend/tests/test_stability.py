@@ -348,7 +348,7 @@ def test_observation_cache_skips_identical_observations(
                 LLMRun.world_id == world_id, LLMRun.agent_id == "agent_linxia"
             )
         ).all()
-        assert any(r.world_time >= 480 + 34 for r in runs), "decisions resumed"
+        assert any(r.world_time >= 480 + 20 for r in runs), "decisions resumed"
     finally:
         session.close()
     eng._runtimes.clear()

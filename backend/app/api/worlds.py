@@ -33,7 +33,7 @@ def _engine(request: Request) -> WorldEngine:
 
 @router.post("", response_model=CreateWorldResponse, status_code=201)
 async def create_world(request: Request, body: CreateWorldRequest | None = None) -> CreateWorldResponse:
-    """Create a new world: 5 agents seeded from spawns + identity cards, 8 locations."""
+    """Create a new world: agents seeded from identity cards, locations from the map."""
     runtime = _engine(request).create_world(
         body.name if body else None,
         autonomous=body.autonomous if body else False,

@@ -483,7 +483,7 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
     for agent_id in (
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang",
-            "agent_touzi",
+            "agent_touzi", "agent_zhoushen", "agent_limujiang", "agent_sunshen",
     ):
         memories = memories_for(world_id, agent_id)
         semantic = [m for m in memories if m.memory_type == "semantic"]
@@ -493,11 +493,11 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
         assert semantic[0].text == REFLECTION_SUMMARY_ZERO
 
     events = [e for e in eng.events_after(world_id, 0) if e.type == "daily_reflection"]
-    assert len(events) == 6, "one reflection per agent on day 1"
+    assert len(events) == 9, "one reflection per agent on day 1"
     assert {e.payload["agent_id"] for e in events} == {
         "agent_linxia", "agent_zhangming", "agent_chenyu",
         "agent_wangfang", "agent_laozhang",
-        "agent_touzi",
+        "agent_touzi", "agent_zhoushen", "agent_limujiang", "agent_sunshen",
     }
     assert all(e.payload["summary"] == REFLECTION_SUMMARY_ZERO for e in events)
 
@@ -505,11 +505,11 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
     advance_minutes(eng, world_id, 1440)
     assert world_time(world_id) == 2850
     events = [e for e in eng.events_after(world_id, 0) if e.type == "daily_reflection"]
-    assert len(events) == 12  # 6 agents x 2 days
+    assert len(events) == 18  # 9 agents x 2 days
     for agent_id in (
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang",
-            "agent_touzi",
+            "agent_touzi", "agent_zhoushen", "agent_limujiang", "agent_sunshen",
     ):
         # Only semantic memories: the day-2 midnight crossing also records an
         # episodic upkeep money_changed memory (M12 upkeep -120 >= threshold).

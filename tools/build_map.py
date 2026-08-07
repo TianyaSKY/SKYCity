@@ -105,6 +105,12 @@ WANGFANG_ROAD_COLS = list(range(38, 48))
 LINXIA_PATH_COLS = [17]  # rows 22..26
 CHENYU_PATH_ROW = 19  # cols 12..16
 ZHANGMING_PATH_COLS = [40]  # rows 11..12
+# M17 spurs: connect the new company buildings and manager homes to the roads.
+ZHOUSHEN_PATH_COLS = [35]  # rows 6..12 -> shop road (row 12)
+CARPENTER_PATH_COLS = [10]  # rows 6..21 -> main road (row 21)
+LIMUJIANG_PATH_COLS = [12]  # rows 6..21 -> main road
+SUNSHEN_PATH_COLS = [4]  # rows 11..21 -> main road (row 21)
+GARDEN_PATH_COLS = [6]  # rows 15..21 -> main road
 PLAZA = ((28, 18), (36, 23))  # inclusive corners (col,row)
 POND_CELLS = [(6, 32), (7, 32), (6, 33), (7, 33)]
 FIELD = ((43, 26), (51, 31))  # crop field corners
@@ -126,6 +132,10 @@ BUILDINGS: dict[str, tuple[int, int, int]] = {
     "village_hotel": (37, 20, HOUSE_SHOP),
     # 晨露面包坊: on the vertical road (same door pattern as village_shop).
     "village_bakery": (30, 12, HOUSE_SHOP),
+    # 巧木工坊: northwest corner, door at (10, 6).
+    "carpenter_shop": (10, 5, HOUSE_SMALL),
+    # 晨露花圃: southwest meadow, door at (6, 15).
+    "flower_garden": (6, 14, BARN),
 }
 
 LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
@@ -135,6 +145,8 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "town_hall": (29, 8),
     "village_hotel": (37, 20),
     "village_bakery": (30, 12),
+    "carpenter_shop": (10, 5),
+    "flower_garden": (6, 14),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -162,6 +174,14 @@ LOCATIONS: dict[str, dict] = {
         "name": "晨露面包坊", "location_type": "workshop", "capacity": 6,
         "open_hour": 6, "close_hour": 18,
     },
+    "carpenter_shop": {
+        "name": "巧木工坊", "location_type": "workshop", "capacity": 6,
+        "open_hour": 6, "close_hour": 18,
+    },
+    "flower_garden": {
+        "name": "晨露花圃", "location_type": "farm", "capacity": 8,
+        "open_hour": 6, "close_hour": 18,
+    },
 }
 
 # House sprite per home location (art choice, not agent data). New homes not
@@ -171,6 +191,9 @@ HOME_TILES: dict[str, int] = {
     "zhangming_home": HOUSE_FRONTS[1],
     "chenyu_home": HOUSE_FRONTS[2],
     "wangfang_home": HOUSE_FRONTS[3],
+    "zhoushen_home": HOUSE_FRONTS[1],
+    "limujiang_home": HOUSE_FRONTS[2],
+    "sunshen_home": HOUSE_FRONTS[3],
 }
 
 
@@ -230,6 +253,12 @@ INTERACTABLES: dict[str, dict] = {
                        "col": 28, "row": 9},
     "bakery_oven": {"object_type": "workshop_station", "location_id": "village_bakery",
                     "col": 30, "row": 13},
+    "hotel_counter": {"object_type": "service_desk", "location_id": "village_hotel",
+                      "col": 37, "row": 21},
+    "carpenter_bench": {"object_type": "workshop_station", "location_id": "carpenter_shop",
+                        "col": 10, "row": 6},
+    "garden_bed": {"object_type": "farm_field", "location_id": "flower_garden",
+                   "col": 6, "row": 15},
 }
 
 
@@ -253,6 +282,16 @@ def is_road(c: int, r: int) -> bool:
     if r == CHENYU_PATH_ROW and 12 <= c <= 16:
         return True
     if c in ZHANGMING_PATH_COLS and 11 <= r <= 12:
+        return True
+    if c in ZHOUSHEN_PATH_COLS and 6 <= r <= 12:
+        return True
+    if c in CARPENTER_PATH_COLS and 6 <= r <= 21:
+        return True
+    if c in LIMUJIANG_PATH_COLS and 6 <= r <= 21:
+        return True
+    if c in SUNSHEN_PATH_COLS and 11 <= r <= 21:
+        return True
+    if c in GARDEN_PATH_COLS and 15 <= r <= 21:
         return True
     return False
 
@@ -319,6 +358,10 @@ def build_layers() -> dict:
             decor[r][c] = gid(FENCE_GATE if (c, r) in FENCE_GATE_CELLS else FENCE)
 
     # --- trees & bushes ---------------------------------------------------
+    # Deterministic per-cell hash (stable under map edits): a new building
+    # only clears the cells it occupies; it never reshuffles the tree layout.
+    # Door cells (directly south of every building) are carved afterwards so
+    # each building keeps a walkable entrance.
     tree_cells = set()
     occupied = set()
     for bid, (c, r, _t) in BUILDINGS.items():
@@ -326,23 +369,25 @@ def build_layers() -> dict:
     for (c, r) in POND_CELLS:
         occupied.add((c, r))
     occupied.update((32, 20), (28, 22))
+    door_cells = {(c, r + 1) for _bid, (c, r, _t) in BUILDINGS.items()}
 
-    candidates = []
     for r in range(2, H - 2):
         for c in range(2, W - 2):
             if (c, r) in occupied or is_road(c, r) or in_plaza(c, r) or in_field(c, r):
                 continue
             if r in (FENCE_TOP_ROW, FENCE_BOTTOM_ROW) and 42 <= c <= 52:
                 continue
-            candidates.append((c, r))
-    rng.shuffle(candidates)
-    for c, r in candidates[:70]:
-        if rng.random() < 0.5:
-            tile = rng.choice(TREES)
-        else:
-            tile = rng.choice(BUSHES)
-        decor[r][c] = gid(tile)
-        tree_cells.add((c, r))
+            h = ((c * 73856093) ^ (r * 19349663) ^ SEED) & 0xFFFFFFFF
+            h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+            if h % 1000 < 33:  # ~3.3% density (≈70 trees over the map)
+                tile = TREES[(c + r) % len(TREES)] if (c ^ r) % 2 else BUSHES[(c + r) % len(BUSHES)]
+                decor[r][c] = gid(tile)
+                tree_cells.add((c, r))
+    # keep every building entrance tree-free
+    for c, r in door_cells:
+        if (c, r) in tree_cells:
+            decor[r][c] = 0
+            tree_cells.discard((c, r))
     # bushes around plaza corners
     for c, r in [(27, 17), (37, 17), (27, 24), (36, 25)]:
         decor[r][c] = gid(rng.choice(BUSHES))
@@ -629,7 +674,7 @@ def main() -> None:
             f"角色卡 id 与文件名不一致: {card.get('id')!r} != {agent_id!r}"
         )
     int_layer = next(l for l in tmj["layers"] if l["name"] == "interactables")
-    assert len(int_layer["objects"]) == 6
+    assert len(int_layer["objects"]) == len(INTERACTABLES)
     collision = next(l for l in tmj["layers"] if l["name"] == "collision")
     nav = next(l for l in tmj["layers"] if l["name"] == "navigation")
     assert any(v > 0 for v in collision["data"]), "collision empty"

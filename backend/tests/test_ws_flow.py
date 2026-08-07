@@ -52,12 +52,12 @@ def test_snapshot_shape(client: TestClient) -> None:
     payload = client.get(f"/api/worlds/{data['world_id']}/snapshot").json()
     assert set(payload["world"]) >= {"world_id", "world_time", "speed", "paused", "weather", "day"}
     assert payload["world"]["day"] == 1
-    assert len(payload["agents"]) == 6
+    assert len(payload["agents"]) == 9
     for agent in payload["agents"]:
         assert set(agent) >= {
             "agent_id", "name", "col", "row", "location_id", "satiety", "energy", "money", "action",
         }
-    assert len(payload["locations"]) == 10
+    assert len(payload["locations"]) == 15
     assert payload["latest_sequence"] >= 0
 
 
@@ -205,7 +205,7 @@ def test_ws_snapshot_then_move_event(client: TestClient) -> None:
         snapshot = ws.receive_json()
         assert snapshot["type"] == "world_snapshot"
         assert snapshot["world_id"] == world_id
-        assert len(snapshot["payload"]["agents"]) == 6
+        assert len(snapshot["payload"]["agents"]) == 9
         assert snapshot["payload"]["latest_sequence"] == snapshot["sequence"]
 
         # Trigger a manual move over REST; the started event must stream over WS.

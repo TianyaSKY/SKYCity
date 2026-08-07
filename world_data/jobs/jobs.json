@@ -90,6 +90,54 @@
       "energy_cost_per_hour": 1,
       "products": [],
       "description": "在政务厅整理档案、登记公告"
+    },
+    {
+      "job_id": "job_hotel_service",
+      "name": "客房服务",
+      "location_id": "village_hotel",
+      "interactable_id": "hotel_counter",
+      "duration_minutes": 240,
+      "wage": 80,
+      "energy_cost_per_hour": 2,
+      "products": [],
+      "formal_only": true,
+      "description": "正式班次：在小镇旅店整理客房、接待住客"
+    },
+    {
+      "job_id": "job_carpentry",
+      "name": "木工制作",
+      "location_id": "carpenter_shop",
+      "interactable_id": "carpenter_bench",
+      "duration_minutes": 240,
+      "wage": 60,
+      "energy_cost_per_hour": 4,
+      "products": [
+        {
+          "item_id": "tool_rake",
+          "quantity": 1
+        }
+      ],
+      "inputs": [],
+      "formal_only": true,
+      "description": "正式班次：在巧木工坊打造耙子，产物进入工坊企业库存"
+    },
+    {
+      "job_id": "job_flower_gardening",
+      "name": "花卉种植",
+      "location_id": "flower_garden",
+      "interactable_id": "garden_bed",
+      "duration_minutes": 240,
+      "wage": 60,
+      "energy_cost_per_hour": 3,
+      "products": [
+        {
+          "item_id": "flower",
+          "quantity": 5
+        }
+      ],
+      "inputs": [],
+      "formal_only": true,
+      "description": "正式班次：在晨露花圃照料鲜花，产物进入花圃企业库存"
     }
   ]
 }

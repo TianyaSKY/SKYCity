@@ -65,7 +65,7 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
     session = SessionLocal()
     try:
         # initial decisions scheduled staggered
-        assert pending_decides(session, world_id) == 6
+        assert pending_decides(session, world_id) == 9
     finally:
         session.close()
 
@@ -84,6 +84,7 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
         assert set(by_agent) == {
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang", "agent_touzi",
+            "agent_zhoushen", "agent_limujiang", "agent_sunshen",
         }
         # linxia moved to the shop per script (first decision)
         linxia_runs = sorted(by_agent["agent_linxia"],
@@ -173,7 +174,7 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) == 6, "every agent degraded"
+        assert len(runs) == 9, "every agent degraded"
         assert all(r.success == 0 for r in runs)
         assert all(r.error_type for r in runs)
         # every agent fell back to a wait action (world kept ticking)
@@ -184,7 +185,7 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
             assert agent.action_type == "wait", f"{agent.agent_id} not degraded to wait"
             assert agent.consecutive_failures >= 1
         # next decisions still scheduled (recovery path)
-        assert pending_decides(session, world_id) >= 6
+        assert pending_decides(session, world_id) >= 9
     finally:
         session.close()
     eng._runtimes.clear()
@@ -245,10 +246,11 @@ def test_paused_autonomous_world_frozen(world_config: ParsedWorldConfig) -> None
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) >= 6, "resume re-armed decisions"
+        assert len(runs) >= 9, "resume re-armed decisions"
         assert {r.agent_id for r in runs} == {
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang", "agent_touzi",
+            "agent_zhoushen", "agent_limujiang", "agent_sunshen",
         }
     finally:
         session.close()

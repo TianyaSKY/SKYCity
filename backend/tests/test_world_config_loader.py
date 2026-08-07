@@ -76,10 +76,15 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "town_hall",
         "village_hotel",
         "village_bakery",
+        "carpenter_shop",
+        "flower_garden",
         "linxia_home",
         "zhangming_home",
         "chenyu_home",
         "wangfang_home",
+        "zhoushen_home",
+        "limujiang_home",
+        "sunshen_home",
     }
     # every location exposes the full property set
     for loc in world.locations:
@@ -89,7 +94,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
 
 
 def test_spawn_points(world: ParsedWorldConfig) -> None:
-    assert len(world.spawn_points) == 6
+    assert len(world.spawn_points) == 9
     by_id = {spawn.agent_id: spawn for spawn in world.spawn_points}
     for spawn in world.spawn_points:
         assert spawn.spawn_id and spawn.agent_id and spawn.direction
@@ -131,7 +136,7 @@ def test_card_id_mismatch_rejected(fake_world_data: Path) -> None:
 
 
 def test_interactables(world: ParsedWorldConfig) -> None:
-    assert len(world.interactables) == 6
+    assert len(world.interactables) == 9
     for obj in world.interactables:
         assert obj.object_id and obj.object_type
 
