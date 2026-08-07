@@ -14,6 +14,9 @@ export interface MoveAction {
     type: 'move';
     from: Cell;
     to: Cell;
+    /** Full waypoint list from -> ... -> to (BFS path, backend-computed).
+     * Absent in snapshots from pre-path saves; animators fall back to from/to. */
+    path?: Cell[];
     started_at: number;
     ends_at: number;
     reason?: string | null;

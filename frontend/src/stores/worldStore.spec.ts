@@ -408,6 +408,28 @@ describe('applyEvent event mapping', () => {
             agent_id: 'agent_linxia',
             from: [3, 4],
             to: [5, 5],
+            path: [[3, 4], [4, 4], [5, 5]],
+            ends_at: 602,
+            duration_minutes: 2,
+        }));
+        expect(store.agents[0].action).toEqual({
+            type: 'move',
+            from: [3, 4],
+            to: [5, 5],
+            path: [[3, 4], [4, 4], [5, 5]],
+            started_at: 600,
+            ends_at: 602,
+            reason: null,
+        });
+        expect(store.events[0].text).toBe('林夏 出发前往 村口商店');
+    });
+
+    it('agent_move_started: malformed path falls back to from/to only', () => {
+        store.applyEvent(env(1, 'agent_move_started', {
+            agent_id: 'agent_linxia',
+            from: [3, 4],
+            to: [5, 5],
+            path: [[3, 4], 'junk'],
             ends_at: 602,
             duration_minutes: 2,
         }));
@@ -419,7 +441,6 @@ describe('applyEvent event mapping', () => {
             ends_at: 602,
             reason: null,
         });
-        expect(store.events[0].text).toBe('林夏 出发前往 村口商店');
     });
 
     it('agent_move_completed: snaps agent to destination, clears action', () => {

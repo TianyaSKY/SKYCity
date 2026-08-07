@@ -26,6 +26,8 @@ from app.services.action_execution_service import (
     MSG_SLEEP_NEED_HOME,
     MSG_SLEEP_NEED_HOTEL,
     ActionExecutionService,
+    _line_clear,
+    _smooth_path,
     find_path,
 )
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
@@ -218,6 +220,34 @@ def test_bfs_no_path(world_config: ParsedWorldConfig) -> None:
     assert find_path((0, 0), (63, 39), world_config.walkable_cells) is None
 
 
+def test_bfs_path_string_pulled_on_open_grid() -> None:
+    """Uniform-cost BFS zigzags along a straight run; smoothing must pull the
+    waypoints into a single chord when every interior cell is walkable."""
+    walkable = {(c, r) for c in range(7) for r in range(-2, 3)}
+    zigzag = [(0, 0), (1, -1), (2, 0), (3, -1), (4, 0), (5, -1), (6, 0)]
+    assert _smooth_path(zigzag, walkable) == [(0, 0), (6, 0)]
+
+
+def test_bfs_smoothing_respects_obstacles() -> None:
+    """A chord must not be pulled when its rasterized line crosses a blocked
+    cell — the path keeps waypoints around the obstacle."""
+    walkable = {
+        (0, 0), (1, 0), (2, 0),
+        (2, 1),
+        (2, 2), (3, 2), (4, 2), (5, 2),
+    }
+    raw = [(0, 0), (1, 0), (2, 0), (2, 1), (3, 2), (4, 2), (5, 2)]
+    smoothed = _smooth_path(raw, walkable)
+    # (0,0)->(5,2) crosses (1,1)/(3,1) (not walkable), so no full pull;
+    # (0,0)->(2,1) and (2,1)->(4,2) rasterize through walkable cells, so
+    # the interior detour waypoints collapse. Every chord stays legal.
+    assert smoothed == [(0, 0), (2, 1), (4, 2), (5, 2)]
+    assert all(
+        _line_clear(smoothed[i], smoothed[i + 1], walkable)
+        for i in range(len(smoothed) - 1)
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Move lifecycle (R1/R6/R8/R15)
 # --------------------------------------------------------------------------- #
@@ -235,11 +265,19 @@ def test_move_to_shop_completes(engine: WorldEngine) -> None:
     assert envelope.payload["duration_minutes"] > 0
     assert envelope.payload["speed_multiplier"] == 1.0
 
-    # R6: duration = path steps * 2 * 1.0 (clear weather).
-    path_len = len(
+    # The full (string-pulled) waypoint list is shipped so the client can
+    # follow the path around obstacles; duration still derives from the raw
+    # BFS step count (R6: path steps * 2 * 1.0 in clear weather).
+    route = envelope.payload["path"]
+    assert route[0] == [18, 27]
+    assert route[-1] == [23, 12]
+    assert all(
+        tuple(cell) in engine.world_config.walkable_cells for cell in route[1:-1]
+    )
+    raw_len = len(
         find_path(LINXIA_SPAWN, SHOP_ANCHOR, engine.world_config.walkable_cells)
     )
-    assert envelope.payload["duration_minutes"] == (path_len - 1) * 2
+    assert envelope.payload["duration_minutes"] == (raw_len - 1) * 2
 
     advance_minutes(engine, runtime.world_id, envelope.payload["ends_at"] - 480 + 1)
 
@@ -270,6 +308,8 @@ def test_snapshot_serializes_inflight_move_action(engine: WorldEngine) -> None:
     assert action["type"] == "move"
     assert action["from"] == [18, 27]
     assert action["to"] == [23, 12]
+    assert action["path"][0] == [18, 27]
+    assert action["path"][-1] == [23, 12]
     assert action["reason"] == "在路上"
     assert "from_" not in action
 

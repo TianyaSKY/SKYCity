@@ -1335,6 +1335,7 @@ class WorldEngine:
                 type="move",
                 from_=list(data.get("from") or [agent.col, agent.row]),
                 to=list(data.get("to") or [agent.col, agent.row]),
+                path=data.get("path"),
                 started_at=agent.action_started_at or world_time,
                 ends_at=agent.action_ends_at or world_time,
                 reason=data.get("reason"),

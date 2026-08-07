@@ -57,6 +57,44 @@ MSG_HOTEL_UNAFFORDABLE = f"余额不足，付不起旅店房费（每晚 {HOTEL_
 Importance = "normal"
 
 
+def _line_clear(
+        a: tuple[int, int],
+        b: tuple[int, int],
+        walkable_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+) -> bool:
+    """True when the straight 8-directional run a->b visits only walkable
+    cells (endpoints excluded — they already sit on the path). Mirrors the
+    BFS step rule: a hop is legal iff its landing cell is walkable."""
+    steps = max(abs(b[0] - a[0]), abs(b[1] - a[1]))
+    if steps <= 1:
+        return True
+    for k in range(1, steps):
+        col = round(a[0] + (b[0] - a[0]) * k / steps)
+        row = round(a[1] + (b[1] - a[1]) * k / steps)
+        if (col, row) not in walkable_cells:
+            return False
+    return True
+
+
+def _smooth_path(
+        path: list[tuple[int, int]],
+        walkable_cells: set[tuple[int, int]] | frozenset[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Greedy string pulling: collapse BFS stair-steps into long straight
+    runs whenever the chord stays on walkable cells. Preserves start/goal."""
+    if len(path) <= 2:
+        return path
+    result: list[tuple[int, int]] = [path[0]]
+    i = 0
+    while i < len(path) - 1:
+        j = i + 1
+        while j + 1 < len(path) and _line_clear(path[i], path[j + 1], walkable_cells):
+            j += 1
+        result.append(path[j])
+        i = j
+    return result
+
+
 def find_path(
         start: tuple[int, int],
         goal: tuple[int, int],
@@ -293,6 +331,10 @@ class ActionExecutionService:
             path = find_path(start, goal, walkable)
             if path is None:
                 return False, None, MSG_NO_PATH
+            # R6 duration stays tied to the raw BFS step count (the game-time
+            # cost model); the emitted route is the string-pulled waypoint
+            # list so clients render clean lines instead of BFS stair-steps.
+            route = _smooth_path(path, walkable)
             steps = max(len(path) - 1, 0)
             multiplier = WEATHER_MULTIPLIERS.get(world.weather, 1.0)
             duration = int(steps * MINUTES_PER_STEP * multiplier)
@@ -300,7 +342,12 @@ class ActionExecutionService:
             agent.action_type = "move"
             agent.action_started_at = world.world_time
             agent.action_ends_at = ends_at
-            agent.action_data = {"from": list(start), "to": list(goal), "reason": reason}
+            agent.action_data = {
+                "from": list(start),
+                "to": list(goal),
+                "path": [list(cell) for cell in route],
+                "reason": reason,
+            }
             runtime.scheduler.schedule(
                 session,
                 agent_id,
@@ -316,6 +363,7 @@ class ActionExecutionService:
                     "agent_id": agent_id,
                     "from": list(start),
                     "to": list(goal),
+                    "path": [list(cell) for cell in route],
                     "duration_minutes": duration,
                     "speed_multiplier": multiplier,
                     "ends_at": ends_at,

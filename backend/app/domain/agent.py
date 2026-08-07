@@ -17,6 +17,10 @@ class AgentActionMove(BaseModel):
     type: Literal["move"]
     from_: list[int] = Field(alias="from")
     to: list[int]
+    # Full waypoint list (from -> ... -> to) so clients can follow the BFS
+    # path instead of interpolating a straight line. Optional for snapshots
+    # restored from pre-path saves; clients fall back to from/to.
+    path: list[list[int]] | None = None
     started_at: int
     ends_at: int
     reason: str | None = None

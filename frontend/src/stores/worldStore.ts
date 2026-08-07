@@ -1925,12 +1925,21 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                 if (!agent || !Array.isArray(p.from) || !Array.isArray(p.to)) return;
                 const from: Cell = [p.from[0] as number, p.from[1] as number];
                 const to: Cell = [p.to[0] as number, p.to[1] as number];
+                let path: Cell[] | undefined;
+                if (Array.isArray(p.path)) {
+                    path = (p.path as unknown[]).filter(
+                        (pt): pt is Cell =>
+                            Array.isArray(pt) && pt.length === 2 && typeof pt[0] === 'number' && typeof pt[1] === 'number',
+                    );
+                    if (path.length < 2) path = undefined;
+                }
                 const endsAt = typeof p.ends_at === 'number' ? p.ends_at : env.world_time + 1;
                 const duration = typeof p.duration_minutes === 'number' ? p.duration_minutes : Math.max(1, endsAt - env.world_time);
                 agent.action = {
                     type: 'move',
                     from,
                     to,
+                    ...(path ? {path} : {}),
                     started_at: endsAt - duration,
                     ends_at: endsAt,
                     reason: typeof p.reason === 'string' ? p.reason : null,

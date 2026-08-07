@@ -44,6 +44,7 @@ export class AgentLayer {
                 this.animator.setTween(agent.agent_id, {
                     from: agent.action.from,
                     to: agent.action.to,
+                    path: agent.action.path ?? [agent.action.from, agent.action.to],
                     startedAt: agent.action.started_at,
                     endsAt: agent.action.ends_at,
                 });

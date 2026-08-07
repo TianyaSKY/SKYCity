@@ -2,7 +2,10 @@
  * Movement animation math: tweens are expressed in GAME time (world_time
  * minutes), so progress is `(now - startedAt) / (endsAt - startedAt)` and
  * the same tween stretches/shrinks automatically when the world speed
- * changes. Positions are interpolated with smoothstep easing.
+ * changes. A move follows the backend BFS `path` waypoint list: each segment
+ * gets an equal share of the span (the backend charges MINUTES_PER_STEP per
+ * path step, uniform for all 8 directions). Positions are interpolated with
+ * smoothstep easing over the whole journey.
  */
 
 import type {Cell} from '../types/world';
@@ -10,6 +13,8 @@ import type {Cell} from '../types/world';
 export interface MoveTween {
     from: Cell;
     to: Cell;
+    /** Waypoints from == path[0] through to == path[path.length - 1]. */
+    path: Cell[];
     startedAt: number;
     endsAt: number;
 }
@@ -27,10 +32,19 @@ export function moveProgress(tween: MoveTween, now: number): number {
     return Math.min(1, Math.max(0, (now - tween.startedAt) / span));
 }
 
-/** Interpolated (col,row) for a tween at `now`, smoothstep-eased. */
+/** Interpolated (col,row) for a tween at `now`, smoothstep-eased.
+ * Follows `path` segment by segment; falls back to the from->to chord when
+ * the path is missing or degenerate. */
 export function computeMovePosition(tween: MoveTween, now: number): Cell {
     const t = smoothstep(moveProgress(tween, now));
-    return [tween.from[0] + (tween.to[0] - tween.from[0]) * t, tween.from[1] + (tween.to[1] - tween.from[1]) * t];
+    const path = tween.path.length >= 2 ? tween.path : [tween.from, tween.to];
+    const segments = path.length - 1;
+    if (segments <= 0) return path[0] ?? tween.to;
+    const seg = Math.min(segments - 1, Math.floor(t * segments));
+    const u = Math.min(1, t * segments - seg);
+    const a = path[seg];
+    const b = path[seg + 1];
+    return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
 }
 
 /** Registry of per-agent tweens used by the agent layer. */
