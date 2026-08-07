@@ -585,6 +585,26 @@ function teleportLocations(): WorldLocation[] {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.35) rgba(0, 0, 0, 0.25);
+}
+
+.agent-body::-webkit-scrollbar {
+    width: 10px;
+}
+
+.agent-body::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
+}
+
+.agent-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+}
+
+.agent-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.55);
 }
 
 .agent-empty {

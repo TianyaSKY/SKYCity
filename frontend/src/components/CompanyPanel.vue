@@ -436,6 +436,26 @@ watch(
     padding: 6px;
     overflow-y: auto;
     min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.35) rgba(0, 0, 0, 0.25);
+}
+
+.cp-list::-webkit-scrollbar {
+    width: 10px;
+}
+
+.cp-list::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
+}
+
+.cp-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+}
+
+.cp-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.55);
 }
 
 .cp-company {
@@ -539,6 +559,26 @@ watch(
     flex-direction: column;
     gap: 4px;
     min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.35) rgba(0, 0, 0, 0.25);
+}
+
+.cp-detail::-webkit-scrollbar {
+    width: 10px;
+}
+
+.cp-detail::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 5px;
+}
+
+.cp-detail::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.35);
+    border-radius: 5px;
+}
+
+.cp-detail::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.55);
 }
 
 .ov-row {
