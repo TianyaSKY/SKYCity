@@ -269,7 +269,7 @@ onBeforeUnmount(() => {
         <div v-draggable="'task-board'" class="hud hud-top-left" style="top: 44px">
             <TaskBoard/>
         </div>
-        <div v-draggable="'company'" class="hud hud-top-left" style="top: calc(44px + min(46vh, 460px) + 12px)">
+        <div v-draggable="'company'" class="hud hud-top-left hud-company" style="top: calc(44px + min(46vh, 460px) + 12px)">
             <CompanyPanel/>
         </div>
         <div v-draggable="'stock'" class="hud hud-top-right" style="top: 44px">
@@ -361,6 +361,11 @@ onBeforeUnmount(() => {
     right: 12px;
     bottom: 56px;
     max-width: 320px;
+}
+
+/* 公司面板从任务板下方延伸到视口底部，超高时面板内部滚动而不是被截出屏幕 */
+.hud-company {
+    bottom: 12px;
 }
 
 .tile-readout {

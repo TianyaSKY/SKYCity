@@ -340,7 +340,7 @@ watch(
 <style scoped>
 .company-panel {
     width: 300px;
-    max-height: min(60vh, 600px);
+    height: 100%;
     display: flex;
     flex-direction: column;
     border-radius: 10px;
