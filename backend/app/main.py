@@ -3,6 +3,7 @@
 import uuid
 from contextlib import asynccontextmanager
 
+from agents.tracing import set_tracing_disabled
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +33,14 @@ from app.services.world_config_loader import WorldConfigError, load_world_config
 from app.world_engine.engine import WorldEngine
 
 settings = get_settings()
+
+# The openai-agents SDK exports agent traces to the OpenAI platform by
+# default, keyed off os.environ["OPENAI_API_KEY"]. This backend talks to
+# third-party OpenAI-compatible endpoints (OPENAI_BASE_URL), so that export
+# is useless; and the key lives in .env via pydantic-settings, not in the
+# process environment, so the SDK would log "OPENAI_API_KEY is not set,
+# skipping trace export" on every export batch. Disable tracing explicitly.
+set_tracing_disabled(True)
 
 
 def _configure_logging(level: str) -> None:
