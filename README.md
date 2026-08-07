@@ -29,7 +29,11 @@ cd backend
 export PATH="$HOME/.local/bin:$PATH"   # 若 uv 不在 PATH
 uv sync                                 # 安装依赖（自动下载 Python）
 cp .env.example .env                    # 按需修改（可选）
-uv run uvicorn app.main:app --port 8000 # 首次启动自动建库
+```
+
+```bash
+cd backend
+uv run uvicorn app.main:app --port 8000
 ```
 
 ### 2. 前端（Vue 3 + Vite + PixiJS）

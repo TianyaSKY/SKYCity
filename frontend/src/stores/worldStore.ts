@@ -572,7 +572,8 @@ function eventText(
             const name = agentName(agents, p.agent_id);
             const item = itemLabel(p.item_id, p.item_name) || '作物';
             return `${name} 收获了${item}`;
-            // ---- M13 company & formal-work events ----
+        }
+        // ---- M13 company & formal-work events ----
         case
             'job_application_submitted'
         :
@@ -794,10 +795,10 @@ function eventText(
             return '';
         default:
             return `[${env.type}]`;
-        }
     }
+}
 
-    function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
+function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
         return locations.find((l) => l.col === cell[0] && l.row === cell[1])?.location_id ?? null;
     }
 
