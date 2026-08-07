@@ -164,7 +164,7 @@ VALID_WEATHERS = {"clear", "cloudy", "rain", "snow"}
 # --------------------------------------------------------------------------- #
 # 观察文本（LLM 提示词裁剪）
 # --------------------------------------------------------------------------- #
-OBSERVATION_MAX_CHARS = 2000
+OBSERVATION_MAX_CHARS = 50000
 OBSERVATION_MAX_UNREAD_MESSAGES = 3
 OBSERVATION_MAX_SHOP_PRODUCTS = 6
 
