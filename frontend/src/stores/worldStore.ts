@@ -1381,8 +1381,9 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                     case 'employment_started': {
                         const company = this.companies.find((c) => c.company_id === p.company_id);
                         if (company) {
-                            company.employee_count += 1;
-                            company.open_vacancies = Math.max(0, company.open_vacancies - 1);
+                            // D1: the backend payload carries authoritative counts; assign instead of ±1 drift.
+                            if (typeof p.employee_count === 'number') company.employee_count = p.employee_count;
+                            if (typeof p.open_vacancies === 'number') company.open_vacancies = p.open_vacancies;
                         }
                         if (this.selectedAgentId && p.agent_id === this.selectedAgentId) {
                             void this.fetchAgentEmployment(this.selectedAgentId);
@@ -1394,8 +1395,8 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                         const agentId = String(p.agent_id ?? '');
                         const company = this.companies.find((c) => c.company_id === p.company_id);
                         if (company) {
-                            company.employee_count = Math.max(0, company.employee_count - 1);
-                            company.open_vacancies += 1;
+                            if (typeof p.employee_count === 'number') company.employee_count = p.employee_count;
+                            if (typeof p.open_vacancies === 'number') company.open_vacancies = p.open_vacancies;
                         }
                         delete this.agentShifts[agentId];
                         if (this.selectedAgentId === agentId) {

@@ -85,13 +85,13 @@ function txLabel(type: string): string {
     return TX_LABELS[type] ?? type;
 }
 
-/** 今日收入: 本游戏日内的正额流水之和 (从已加载的流水缓存)。 */
+/** 今日收入: 本游戏日内的正额经营流水之和 (神谕注资不计入)。 */
 function todayIncome(companyId: string): number {
     const txs = details.value[companyId]?.transactions;
     if (!txs) return 0;
     const dayStart = Math.floor(store.worldTime / 1440) * 1440;
     return txs
-        .filter((t) => t.world_time >= dayStart && t.amount > 0)
+        .filter((t) => t.world_time >= dayStart && t.amount > 0 && t.type !== 'god_injection')
         .reduce((sum, t) => sum + t.amount, 0);
 }
 

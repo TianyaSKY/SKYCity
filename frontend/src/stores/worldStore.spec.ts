@@ -1328,7 +1328,7 @@ describe('applyEvent M13 company & employment events', () => {
         expect(store.events[0].text).toBe('林夏 撤回了对 晨露农场·农场工人 的求职申请');
     });
 
-    it('employment_started: 入职行 + 员工/空缺本地同步', () => {
+    it('employment_started: 入职行 + 权威计数赋值', () => {
         store.applyEvent(env(1, 'employment_started', {
             application_id: 'app_1',
             company_id: 'company_morning_farm',
@@ -1337,33 +1337,44 @@ describe('applyEvent M13 company & employment events', () => {
             manager_agent_id: 'agent_zhangming',
             employment_id: 'emp_1',
             reason: '录用',
+            employee_count: 3,
+            open_vacancies: 0,
         }));
         expect(store.events[0].text).toBe('林夏 入职 晨露农场，担任农场工人');
-        expect(store.companies[0].employee_count).toBe(2);
+        // D1: payload 赋值，而非本地 ±1（±1 会得到 2/0）
+        expect(store.companies[0].employee_count).toBe(3);
         expect(store.companies[0].open_vacancies).toBe(0);
     });
 
-    it('employment_resigned: 辞职行 + 员工/空缺回退', () => {
+    it('employment_resigned: 辞职行 + 权威计数赋值', () => {
         store.applyEvent(env(1, 'employment_resigned', {
             employment_id: 'emp_1',
             company_id: 'company_morning_farm',
             agent_id: 'agent_linxia',
             reason: '另谋高就',
+            employee_count: 0,
+            open_vacancies: 5,
         }));
         expect(store.events[0].text).toBe('林夏 从 晨露农场 辞职（另谋高就）');
+        // D1: payload 赋值（±1 会得到 0/2）
         expect(store.companies[0].employee_count).toBe(0);
-        expect(store.companies[0].open_vacancies).toBe(2);
+        expect(store.companies[0].open_vacancies).toBe(5);
     });
 
-    it('employment_terminated: 解雇行', () => {
+    it('employment_terminated: 解雇行 + 权威计数赋值', () => {
         store.applyEvent(env(1, 'employment_terminated', {
             employment_id: 'emp_1',
             company_id: 'company_morning_farm',
             agent_id: 'agent_linxia',
             manager_agent_id: 'agent_zhangming',
             reason: '违纪',
+            employee_count: 1,
+            open_vacancies: 4,
         }));
         expect(store.events[0].text).toBe('林夏 被 晨露农场 解雇（违纪）');
+        // D1: payload 赋值（±1 会得到 0/2）
+        expect(store.companies[0].employee_count).toBe(1);
+        expect(store.companies[0].open_vacancies).toBe(4);
     });
 
     it('shift_scheduled: 排班行 + 班次缓存', () => {
