@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections import deque
 
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.gameplay import (
@@ -25,6 +26,7 @@ from app.config.gameplay import (
     WEATHER_MULTIPLIERS,
 )
 from app.database.models.agents import Agent
+from app.database.models.companies import Company, CompanyTransaction
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.transactions import Transaction
@@ -512,6 +514,43 @@ class ActionExecutionService:
                     },
                     trace_id,
                 )
+                # M18: the night fee lands in the hotel company's treasury
+                # (mirrors the R33 shop-sale income path), so the hotel can
+                # pay staff and its manager sees a real revenue stream.
+                hotel = session.scalar(
+                    select(Company).where(
+                        Company.world_id == world_id,
+                        Company.location_id == HOTEL_LOCATION_ID,
+                    )
+                )
+                if hotel is not None:
+                    hotel.money += fee
+                    session.add(
+                        CompanyTransaction(
+                            world_id=world_id,
+                            company_id=hotel.company_id,
+                            type="hotel_income",
+                            amount=fee,
+                            balance_after=hotel.money,
+                            related_agent_id=agent_id,
+                            reference_type="sleep",
+                            reason="旅店住宿费",
+                            world_time=world.world_time,
+                            trace_id=trace_id or "",
+                        )
+                    )
+                    runtime.event_bus.publish(
+                        session,
+                        world.world_time,
+                        "company_money_changed",
+                        {
+                            "company_id": hotel.company_id,
+                            "amount": fee,
+                            "balance": hotel.money,
+                            "reason": "旅店住宿费",
+                        },
+                        trace_id,
+                    )
             runtime.scheduler.schedule(
                 session, agent_id, "sleep_completed", ends_at, {"reason": reason}
             )

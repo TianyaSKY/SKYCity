@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config.settings import get_settings
+from app.config.gameplay import HOTEL_NIGHTLY_FEE
 from app.database.models.agents import Agent
 from app.database.models.companies import (
     Company,
@@ -2553,3 +2554,57 @@ def test_observation_shows_manager_profit_share(system) -> None:
     observation = build_observation(runtime.world_id, "agent_zhangming", SessionLocal)
     assert "经理分成" in observation
     assert "20%" in observation
+
+
+def test_hotel_sleep_credits_hotel_company(system) -> None:
+    """M18: the homeless night fee lands in the hotel company's treasury with
+    a company ledger row and a company_money_changed event — the hotel can
+    pay staff and its manager sees real revenue."""
+    engine, service = system
+    runtime = engine.create_world("住宿入账测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_touzi"})
+        agent.location_id = "village_hotel"
+        agent.money = 500
+        session.commit()
+        hotel_before = session.get(
+            Company, {"world_id": world_id, "company_id": "company_village_hotel"}
+        ).money
+    finally:
+        session.close()
+
+    ok, _, reason = engine.action_service.execute_sleep(
+        world_id, "agent_touzi", minutes=120, reason="住一晚"
+    )
+    assert ok is True and reason is None
+
+    session = SessionLocal()
+    try:
+        hotel = session.get(
+            Company, {"world_id": world_id, "company_id": "company_village_hotel"}
+        )
+        assert hotel.money == hotel_before + HOTEL_NIGHTLY_FEE
+        row = session.scalar(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.company_id == "company_village_hotel",
+                CompanyTransaction.type == "hotel_income",
+            )
+        )
+        assert row is not None and row.amount == HOTEL_NIGHTLY_FEE
+        assert row.related_agent_id == "agent_touzi"
+    finally:
+        session.close()
+
+    money_events = [
+        e
+        for e in engine.events_after(world_id, 0)
+        if e.type == "company_money_changed"
+        and e.payload.get("company_id") == "company_village_hotel"
+    ]
+    assert money_events
+    assert money_events[-1].payload["amount"] == HOTEL_NIGHTLY_FEE

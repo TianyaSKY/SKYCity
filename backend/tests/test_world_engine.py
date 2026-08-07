@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.config.settings import get_settings
 from app.database.models.agents import Agent
+from app.database.models.companies import Company, CompanyTransaction
 from app.database.models.locations import WorldLocation
 from app.database.models.scheduled_actions import ScheduledAction
 from app.database.models.transactions import Transaction
