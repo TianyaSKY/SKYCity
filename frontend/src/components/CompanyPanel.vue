@@ -435,6 +435,7 @@ watch(
     gap: 4px;
     padding: 6px;
     overflow-y: auto;
+    min-height: 0;
 }
 
 .cp-company {
@@ -537,6 +538,7 @@ watch(
     display: flex;
     flex-direction: column;
     gap: 4px;
+    min-height: 0;
 }
 
 .ov-row {

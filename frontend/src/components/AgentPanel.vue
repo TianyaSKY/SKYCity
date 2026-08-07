@@ -503,6 +503,7 @@ function teleportLocations(): WorldLocation[] {
     display: flex;
     flex-direction: column;
     width: 300px;
+    height: 100%;
     max-height: 100%;
     border-radius: 12px;
     background: rgba(6, 12, 9, 0.82);
@@ -577,6 +578,8 @@ function teleportLocations(): WorldLocation[] {
 }
 
 .agent-body {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 8px;
     display: flex;
