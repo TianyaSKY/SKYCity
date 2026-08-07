@@ -147,7 +147,7 @@ class OpenAIProvider:
                 output_tokens=output_tokens,
                 latency_ms=latency_ms,
                 raw_summary=(
-                    f"[openai:{self._settings.llm_model}] wait (text-only reply, "
+                    f"wait (text-only reply, "
                     f"tool_choice={self._settings.llm_tool_choice})"
                 ),
             )
@@ -169,7 +169,7 @@ class OpenAIProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             latency_ms=latency_ms,
-            raw_summary=f"[openai:{self._settings.llm_model}] {tool_name} {arguments}",
+            raw_summary=f"{tool_name} {arguments}",
             tool_output=tool_output,
         )
 

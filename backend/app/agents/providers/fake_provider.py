@@ -338,7 +338,7 @@ class FakeDecisionProvider:
             input_tokens=0,
             output_tokens=0,
             latency_ms=latency_ms,
-            raw_summary=f"[fake] {tool_name} {tool_arguments}",
+            raw_summary=f"{tool_name} {tool_arguments}",
         )
 
     def _next_pool_message(self, world_id: str, agent_id: str) -> str:

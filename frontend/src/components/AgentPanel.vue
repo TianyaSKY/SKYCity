@@ -370,7 +370,6 @@ function teleportLocations(): WorldLocation[] {
                             decisionSuccess(d) ? '✓' : '✗'
                         }}</span>
                     <span class="dec-reason">{{ decisionReason(d) }}</span>
-                    <span class="dec-model">{{ d.model }}</span>
                 </div>
             </div>
         </div>
@@ -1013,13 +1012,6 @@ function teleportLocations(): WorldLocation[] {
     color: rgba(255, 255, 255, 0.8);
     word-break: break-word;
     font-size: 11px;
-}
-
-.dec-model {
-    flex-shrink: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10px;
-    color: rgba(205, 232, 213, 0.5);
 }
 
 /* 上帝 tab */
