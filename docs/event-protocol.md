@@ -123,9 +123,9 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `job_application_withdrawn`    | `{application_id, agent_id}`                                                                           | 撤回申请                        | 已实现 |
 | `job_application_accepted`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason, employment_id}`         | 录用（随 `employment_started`） | 待实现 |
 | `job_application_rejected`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason}`                        | 拒绝申请                        | 已实现 |
-| `employment_started`           | `{application_id, company_id, position_id, agent_id, manager_agent_id, employment_id}`                 | 建立合同                        | 已实现 |
-| `employment_resigned`          | `{employment_id, company_id, agent_id, reason}`                                                        | 员工辞职                        | 已实现 |
-| `employment_terminated`        | `{employment_id, company_id, agent_id, manager_agent_id, reason}`                                      | 经理解雇                        | 已实现 |
+| `employment_started`           | `{application_id, company_id, position_id, agent_id, manager_agent_id, employment_id, employee_count, open_vacancies}` | 建立合同                        | 已实现 |
+| `employment_resigned`          | `{employment_id, company_id, agent_id, reason, employee_count, open_vacancies}`                                        | 员工辞职                        | 已实现 |
+| `employment_terminated`        | `{employment_id, company_id, agent_id, manager_agent_id, reason, employee_count, open_vacancies}`                      | 经理解雇                        | 已实现 |
 | `employment_suspended`         | `{employment_id, company_id, agent_id, reason?}`                                                       | 合同挂起                        | 待实现 |
 | `shift_scheduled`              | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end}`                      | 班次生成                        | 已实现 |
 | `shift_upcoming`               | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end, minutes_until_start}` | 班前 60 分钟提醒                | 已实现 |
@@ -136,7 +136,7 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `shift_leave_requested`        | `{shift_id, employment_id, company_id, agent_id, reason}`                                              | 请假申请                        | 已实现 |
 | `shift_leave_approved`         | `{shift_id, agent_id, manager_agent_id, reason}`                                                       | 准假（班次转 `leave`）          | 已实现 |
 | `shift_leave_rejected`         | `{shift_id, agent_id, manager_agent_id, reason}`                                                       | 拒绝请假                        | 已实现 |
-| `shift_cancelled`              | `{shift_id, employment_id, company_id, agent_id, reason?}`                                             | 班次取消（辞职/企业暂停）       | 待实现 |
+| `shift_cancelled`              | `{shift_id, employment_id, company_id, agent_id, reason?}`                                             | 班次取消（辞职/解雇/停业/行动中断） | 已实现 |
 | `wage_paid`                    | `{shift_id, employment_id, company_id, agent_id, wage_due, wage_paid, company_balance}`                | 足额支付                        | 已实现 |
 | `wage_unpaid`                  | `{shift_id, employment_id, company_id, agent_id, wage_due, wage_paid: 0, company_balance}`             | 欠薪                            | 已实现 |
 | `wage_repaid`                  | `{shift_id?, employment_id, company_id, agent_id, amount}`                                             | 补发欠薪                        | 已实现 |

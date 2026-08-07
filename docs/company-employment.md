@@ -220,13 +220,16 @@ Transaction:        type=work_wage,     amount=+90
 ### 5.6 班次完成（调度器 `formal_shift_completed`）
 
 1. 班次处于 `in_progress` / `late` 才结算（幂等：其余状态直接返回）。
-2. `worked_minutes = actual_end - actual_start`，计算 `wage_due`（比例向下取整）。
-3. 按配方结算（R37）：先消耗已预留原料（`min(reserved, qty)`），再按 `products` 产出进入
+2. 行动守卫：若居民当前行动不是该班次的 `formal_work`（行动被中断/清除，如上帝传送），
+   班次转 `cancelled`（`absence_reason = 行动被中断，班次取消`）、全额释放预留原料、
+   发布 `shift_cancelled`，**不发工资、不产出、不续排**。
+3. `worked_minutes = actual_end - actual_start`，计算 `wage_due`（比例向下取整）。
+4. 按配方结算（R37）：先消耗已预留原料（`min(reserved, qty)`），再按 `products` 产出进入
    `CompanyInventory`；无配方的旧存档回退到 `job.products_json`（只产出、不消耗）。
-4. 工资结算（见 5.7）。
-5. 班次转 `completed`；合同 `completed_shifts += 1`； 清空居民行动状态；发布
-   `shift_completed` + 工资事件 + `company_inventory_changed` + `company_production_completed`；
-   生成下一班次；调度居民下次决策。
+5. 工资结算（见 5.7）。
+6. 班次转 `completed`；合同 `completed_shifts += 1`； 清空居民行动状态；发布
+   `shift_completed` + 工资事件（仅 `wage_due > 0` 时）+ `company_inventory_changed` +
+   `company_production_completed`；生成下一班次；调度居民下次决策。
 
 ### 5.7 工资结算（PayrollService 职责，v1 内嵌于班次完成）
 
@@ -238,14 +241,18 @@ Transaction:        type=work_wage,     amount=+90
 ### 5.8 辞职（resign_job / API）
 
 - 仅员工本人；合同须为 active/on_leave。
-- 合同转 `resigned`；未来 `scheduled` 班次全部转 `cancelled`； 招聘名额 +1（无招聘则新建）；发布 `employment_resigned`。
+- 合同转 `resigned`；未来 `scheduled` 班次全部转 `cancelled`（发布 `shift_cancelled`）；
+  招聘名额 +1（无招聘则新建；企业停业期间新建/恢复的招聘保持 `paused`，恢复经营后重新开放并发布
+  `job_opening_created`）；发布 `employment_resigned`（含权威 `employee_count` / `open_vacancies`）。
 - 欠薪不因辞职消失。
 
 ### 5.9 解雇（terminate_employment / API）
 
 - 仅企业经理；不能解雇他企业员工；不能重复终止。
-- 合同转 `terminated`；未来班次与 pending 请假转 `cancelled`；名额恢复。
-- 欠薪不因解雇消失；发布 `employment_terminated`。
+- 合同转 `terminated`；未来班次与 pending 请假转 `cancelled`（班次发布 `shift_cancelled`）；
+  名额恢复（停业期间同上保持 `paused`）；发布 `employment_terminated`（含权威
+  `employee_count` / `open_vacancies`）。
+- 欠薪不因解雇消失。
 
 ### 5.10 招聘暂停/恢复（pause / resume_recruitment）
 
@@ -255,9 +262,11 @@ Transaction:        type=work_wage,     amount=+90
 
 ### 5.11 企业停业/恢复（suspend / resume_company）
 
-- 停业：`suspended` + `suspended_at`；招聘暂停；未来 scheduled 班次全部取消； 进行中班次照常完成但不生成下一班次；发布
+- 停业：`suspended` + `suspended_at`；招聘暂停；未来 scheduled 班次全部取消（每个取消班次发布
+  `shift_cancelled`）； 进行中班次照常完成但不生成下一班次；发布
   `company_status_changed`。
-- 恢复：`active`；招聘恢复；为没有 scheduled 班次的 active 合同重新生成班次。
+- 恢复：`active`；招聘恢复（仅对非 open 且有余额的招聘重新开放并发布 `job_opening_created`）；
+  为没有 scheduled 班次的 active 合同重新生成班次。
 
 ### 5.12 上帝注资（inject_company_money）
 
