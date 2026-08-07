@@ -41,7 +41,7 @@ uv run uvicorn app.main:app --port 8000
 ```bash
 cd frontend
 npm install
-npm run dev                             # http://localhost:5173
+npm run dev
 ```
 
 打开 http://localhost:5173 即可看到小镇。页面会自动创建/加入一个世界；想开启 LLM 自主行动，可在后端创建自主世界：
