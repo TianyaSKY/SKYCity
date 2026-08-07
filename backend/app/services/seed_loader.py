@@ -36,6 +36,10 @@ class BlueprintDef:
     footprint: tuple[tuple[int, int], ...]
     tile_gids: dict[str, tuple[int, ...]] = field(default_factory=dict)
     blocking: bool = False
+    # Paving blueprints (R24) turn a non-walkable cell into a walkable one:
+    # the cell joins effective_walkable once built. Mutually exclusive with
+    # blocking (a paving cell neither occupies nor blocks).
+    paving: bool = False
     materials: dict[str, int] = field(default_factory=dict)
     duration_minutes: int = 30
     description: str = ""
@@ -110,6 +114,7 @@ def load_blueprints(world_data_dir: Path | None = None) -> tuple[BlueprintDef, .
                     for key, gids in (row.get("tile_gids") or {}).items()
                 },
                 blocking=bool(row.get("blocking") or False),
+                paving=bool(row.get("paving") or False),
                 materials={str(k): int(v) for k, v in (row.get("materials") or {}).items()},
                 duration_minutes=int(row.get("duration_minutes") or 30),
                 description=str(row.get("description") or ""),

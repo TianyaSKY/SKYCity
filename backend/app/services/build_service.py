@@ -14,6 +14,10 @@ World rules enforced here (docs/world-rules.md):
 - R22.5: ownership is the builder; v1 removal is god-only (god_action_service).
 - R22.6: pathfinding uses effective_walkable (engine.effective_walkable),
   so built structures are real obstacles.
+- R24: paving blueprints (BlueprintDef.paving) turn a non-walkable,
+  non-collision cell into a walkable one; the cell joins effective_walkable
+  on completion (a real shortcut for every agent) and paving placements
+  skip the R22.4 connectivity check (a road can only add connectivity).
 
 The scheduler handler ``handle_build_completed`` re-validates placement and
 connectivity at completion (the world may have changed mid-build): on any
@@ -46,6 +50,8 @@ MSG_BUSY = "当前行动未完成"
 MSG_BLUEPRINT_MISSING = "蓝图不存在"
 MSG_OUT_OF_BOUNDS = "目标超出地图范围"
 MSG_NOT_WALKABLE = "目标格不可建造"
+MSG_ALREADY_WALKABLE = "目标格已经是可走的路，无需铺路"
+MSG_UNPAVABLE = "目标格是障碍地形（水域/墙），无法铺路"
 MSG_CELL_OCCUPIED = "该位置已被占用"
 MSG_CELL_RESERVED = "该位置是建筑/出生点，不能建造"
 MSG_TOO_FAR = "离目标格太远"
@@ -100,7 +106,14 @@ class BuildService:
             footprint = self._footprint_cells(blueprint, col, row)
             if not self._cells_in_bounds(footprint):
                 return False, None, MSG_OUT_OF_BOUNDS
-            if not self._cells_walkable(footprint):
+            if blueprint.paving:
+                # R24: paving targets non-walkable, non-collision terrain —
+                # a road only on bare ground, never on an existing path.
+                if not self._cells_unpaved(footprint):
+                    return False, None, MSG_ALREADY_WALKABLE
+                if not self._cells_pavable(footprint):
+                    return False, None, MSG_UNPAVABLE
+            elif not self._cells_walkable(footprint):
                 return False, None, MSG_NOT_WALKABLE
             if self._cells_reserved(footprint):
                 return False, None, MSG_CELL_RESERVED
@@ -289,6 +302,18 @@ class BuildService:
     def _cells_walkable(self, cells: list[tuple[int, int]]) -> bool:
         return all(cell in self.engine.world_config.walkable_cells for cell in cells)
 
+    def _cells_unpaved(self, cells: list[tuple[int, int]]) -> bool:
+        """R24: a paving target must not already be walkable (static road)."""
+        return all(
+            cell not in self.engine.world_config.walkable_cells for cell in cells
+        )
+
+    def _cells_pavable(self, cells: list[tuple[int, int]]) -> bool:
+        """R24: a paving target must not be collision terrain (water/walls)."""
+        return all(
+            cell not in self.engine.world_config.collision_cells for cell in cells
+        )
+
     def _cells_reserved(self, cells: list[tuple[int, int]]) -> bool:
         """R22.3: no location anchors or spawn points under the footprint."""
         anchors = {
@@ -377,6 +402,7 @@ class BuildService:
         spawn point must stay mutually reachable (BFS, 8-connected; anchor
         cells themselves count as passable — they sit on building tiles)."""
         blocked = set(extra_blocked)
+        paved: set[tuple[int, int]] = set()
         for row in session.scalars(
                 select(TileStructure).where(
                     TileStructure.world_id == world_id,
@@ -384,13 +410,17 @@ class BuildService:
                 )
         ).all():
             blueprint = self.engine.blueprints.get(row.blueprint_id)
-            if blueprint is not None and blueprint.blocking:
+            if blueprint is None:
+                continue
+            if blueprint.blocking:
                 blocked.add((row.col, row.row))
+            elif blueprint.paving:
+                paved.add((row.col, row.row))
         anchors = [(loc.col, loc.row) for loc in self.engine.world_config.locations]
         anchors += [(sp.col, sp.row) for sp in self.engine.world_config.spawn_points]
         if not anchors:
             return True
-        walkable = self.engine.world_config.walkable_cells - blocked
+        walkable = (self.engine.world_config.walkable_cells - blocked) | paved
         passable = walkable | {tuple(a) for a in anchors}
         start = tuple(anchors[0])
         seen = {start}

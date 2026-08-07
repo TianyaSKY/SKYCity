@@ -345,13 +345,21 @@ def build_observation(
         lines.append("- use_item(item_id, reason): 食用背包里的食物提高饱食度")
 
         # M14: build blueprints (R22) — always visible, like the stock market:
-        # construction changes the town for everyone.
+        # construction changes the town for everyone. Paving blueprints (R24)
+        # get their own hint: they open new walkable ground.
         lines.append("【可建造的蓝图】")
         for blueprint in load_blueprints():
             materials = "、".join(
                 f"{item_names.get(item_id, item_id)}×{quantity}"
                 for item_id, quantity in blueprint.materials.items()
             )
+            if blueprint.paving:
+                lines.append(
+                    f"- build(col, row, {blueprint.blueprint_id}, reason): {blueprint.name}"
+                    f"（{blueprint.duration_minutes}分钟，需{materials}；"
+                    f"把草地/空地铺成可走的路，目标格需离你 ≤ 3 格且当前不可走）"
+                )
+                continue
             lines.append(
                 f"- build(col, row, {blueprint.blueprint_id}, reason): {blueprint.name}"
                 f"（{blueprint.duration_minutes}分钟，需{materials}；"
@@ -359,6 +367,7 @@ def build_observation(
                 f"目标格需离你 ≤ 3 格且可行走）"
             )
         lines.append("- 建造完成后建筑会一直留在小镇地图上，所有人都要绕开它走")
+        lines.append("- 铺好的路会一直留在小镇地图上，所有人都可以走它去更远的地方")
 
         # M15: plantable seeds + nearby crops (R23). The farmer sees what it
         # can sow and what is growing near it.

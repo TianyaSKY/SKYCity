@@ -320,6 +320,8 @@ export interface Blueprint {
     /** Per-footprint-cell tile gids: "dcol,drow" → gids (tiny_farm tileset, firstGid 1). */
     tile_gids: Record<string, number[]>;
     blocking: boolean;
+    /** Paving blueprints (R24) turn a non-walkable cell into a walkable one. */
+    paving?: boolean;
     /** Materials required to build: item_id → quantity. */
     materials: Record<string, number>;
     duration_minutes: number;

@@ -26,6 +26,7 @@ from app.services.action_execution_service import (
     ActionExecutionService,
 )
 from app.services.build_service import (
+    MSG_ALREADY_WALKABLE,
     MSG_BLOCKS_VILLAGE,
     MSG_BUSY,
     MSG_CELL_OCCUPIED,
@@ -34,6 +35,7 @@ from app.services.build_service import (
     MSG_NOT_WALKABLE,
     MSG_OUT_OF_BOUNDS,
     MSG_TOO_FAR,
+    MSG_UNPAVABLE,
     BuildService,
 )
 from app.services.god_action_service import GodActionService
@@ -711,6 +713,192 @@ def test_save_restore_keeps_structures(engine: WorldEngine) -> None:
         assert target not in walkable
     finally:
         session.close()
+
+
+# --------------------------------------------------------------------------- #
+# Paving (R24): roads turn grass into walkable ground
+# --------------------------------------------------------------------------- #
+
+ROAD = "road_dirt"
+# Probed from the shipped map: (15,22) is grass adjacent to walkable (15,21);
+# (18,26) is a collision cell; (37,25) is grass next to the CHOKE_CELL road.
+GRASS_CELL = (15, 22)
+GRASS_ADJACENT = (15, 21)
+COLLISION_GRASS = (18, 26)
+
+
+def test_pave_lifecycle_opens_walkable_cell(engine: WorldEngine) -> None:
+    """A completed road joins effective_walkable; pathfinding and departure
+    work from the paved cell (R24)."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, *GRASS_ADJACENT)
+
+    ok, envelope, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD, reason="把草地铺成路"
+    )
+    assert ok, err
+    assert envelope is not None and envelope.type == "build_started"
+    assert held_quantity(engine, world_id, agent_id, "wood") == 4  # R22.2
+
+    session = SessionLocal()
+    try:
+        # While "building": the cell is still grass (road not yet usable).
+        walkable = engine.effective_walkable(session, world_id)
+        assert GRASS_CELL not in walkable
+        session.commit()
+    finally:
+        session.close()
+
+    advance_minutes(engine, world_id, 21)  # road_dirt takes 20 minutes
+    rows = structure_rows(engine, world_id)
+    assert len(rows) == 1 and rows[0].status == "built"
+    assert rows[0].blueprint_id == ROAD and rows[0].owner_agent_id == agent_id
+
+    session = SessionLocal()
+    try:
+        walkable = engine.effective_walkable(session, world_id)
+        assert GRASS_CELL in walkable  # the road is real now
+    finally:
+        session.close()
+
+    # Pathfinding treats the paved cell as passable: an agent standing on
+    # the new road can depart (no MSG_START_BLOCKED) and reach the shop.
+    place_agent(engine, world_id, agent_id, *GRASS_CELL)
+    ok, _, err = engine.action_service.execute_move(
+        world_id, agent_id, "village_shop", reason="从新路出发"
+    )
+    assert ok, err
+
+
+def test_pave_rejected_on_walkable_cell(engine: WorldEngine) -> None:
+    """You cannot pave over an existing road."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1])
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, *GRASS_ADJACENT, ROAD
+    )
+    assert not ok and err == MSG_ALREADY_WALKABLE
+    assert structure_rows(engine, world_id) == []
+
+
+def test_pave_rejected_on_collision_terrain(engine: WorldEngine) -> None:
+    """Water/walls stay unpavable."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, 18, 27)  # walkable neighbor
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, *COLLISION_GRASS, ROAD
+    )
+    assert not ok and err == MSG_UNPAVABLE
+    assert structure_rows(engine, world_id) == []
+
+
+def test_pave_rejected_on_occupied_cell(engine: WorldEngine) -> None:
+    """A grass cell already claimed by a road cannot be paved again."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, *GRASS_ADJACENT)
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD
+    )
+    assert ok, err  # first road claims the grass cell
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD
+    )
+    assert not ok and err == MSG_BUSY  # still building; same agent
+    # Second paving attempt after the road lands is blocked by occupancy.
+    advance_minutes(engine, world_id, 21)
+    place_agent(engine, world_id, agent_id, *GRASS_ADJACENT)
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD
+    )
+    assert not ok and err == MSG_CELL_OCCUPIED
+
+
+def test_pave_allowed_at_choke_area_without_connectivity_check(
+        engine: WorldEngine,
+) -> None:
+    """R22.4 applies to blocking blueprints only: paving next to the choke
+    cell is allowed — a road can only add connectivity."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, CHOKE_CELL[0], CHOKE_CELL[1])
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, 37, 25, ROAD  # grass beside the choke road
+    )
+    assert ok, err
+
+
+def test_pave_removal_restores_unwalkable(engine: WorldEngine) -> None:
+    """Demolishing a road turns the cell back into grass."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, *GRASS_ADJACENT)
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD
+    )
+    assert ok, err
+    advance_minutes(engine, world_id, 21)
+    result = engine.god_action_service.apply(
+        world_id,
+        "remove_structure",
+        parameters={"col": GRASS_CELL[0], "row": GRASS_CELL[1]},
+    )
+    assert result["success"]
+    assert ok, err
+    session = SessionLocal()
+    try:
+        walkable = engine.effective_walkable(session, world_id)
+        assert GRASS_CELL not in walkable
+    finally:
+        session.close()
+
+
+def test_pave_survives_save_restore(engine: WorldEngine) -> None:
+    """A restored world keeps its paved shortcuts."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    give_item(engine, world_id, agent_id, "wood", 5)
+    place_agent(engine, world_id, agent_id, *GRASS_ADJACENT)
+    ok, _, err = engine.build_service.build_start(
+        world_id, agent_id, GRASS_CELL[0], GRASS_CELL[1], ROAD
+    )
+    assert ok, err
+    advance_minutes(engine, world_id, 21)
+
+    saved = engine.save_service.save(world_id)
+    restored = engine.save_service.restore(saved.save_id)
+    session = SessionLocal()
+    try:
+        walkable = engine.effective_walkable(session, restored.world_id)
+        assert GRASS_CELL in walkable
+    finally:
+        session.close()
+
+
+def test_observation_lists_paving_blueprint(engine: WorldEngine) -> None:
+    """The LLM sees the road blueprint with its paving-specific hint."""
+    runtime = engine.create_world()
+    from app.agents.observation_service import build_observation
+
+    observation = build_observation(runtime.world_id, "agent_linxia", SessionLocal)
+    assert "road_dirt" in observation
+    assert "把草地/空地铺成可走的路" in observation
 
 
 # --------------------------------------------------------------------------- #

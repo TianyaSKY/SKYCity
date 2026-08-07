@@ -85,6 +85,28 @@
       },
       "duration_minutes": 20,
       "description": "一小片花圃，让小镇更美"
+    },
+    {
+      "blueprint_id": "road_dirt",
+      "name": "土路",
+      "footprint": [
+        [
+          0,
+          0
+        ]
+      ],
+      "tile_gids": {
+        "0,0": [
+          37
+        ]
+      },
+      "blocking": false,
+      "paving": true,
+      "materials": {
+        "wood": 1
+      },
+      "duration_minutes": 20,
+      "description": "一段夯实的土路，把草地变成可以走的路"
     }
   ]
 }

@@ -253,12 +253,14 @@ class WorldEngine:
     def effective_walkable(
             self, session: Session, world_id: str
     ) -> frozenset[tuple[int, int]]:
-        """R22.6: static walkable cells minus blocking built structures.
+        """R22.6/R24: static walkable cells minus blocking built structures,
+        plus cells paved by paving blueprints.
 
         The single source for pathfinding and build connectivity checks —
-        a placed structure is a real obstacle for every agent.
+        a placed structure is a real obstacle, a laid road a real shortcut.
         """
         blocked: set[tuple[int, int]] = set()
+        paved: set[tuple[int, int]] = set()
         rows = session.scalars(
             select(TileStructure).where(
                 TileStructure.world_id == world_id,
@@ -267,9 +269,13 @@ class WorldEngine:
         ).all()
         for row in rows:
             blueprint = self.blueprints.get(row.blueprint_id)
-            if blueprint is not None and blueprint.blocking:
+            if blueprint is None:
+                continue
+            if blueprint.blocking:
                 blocked.add((row.col, row.row))
-        return frozenset(self.world_config.walkable_cells - blocked)
+            elif blueprint.paving:
+                paved.add((row.col, row.row))
+        return frozenset((self.world_config.walkable_cells - blocked) | paved)
 
     def home_location_id(self, agent_id: str) -> str | None:
         """The agent's home location id from its character card.
