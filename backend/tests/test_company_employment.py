@@ -2358,3 +2358,198 @@ def test_unbound_store_rejects_buy_and_sell(system) -> None:
         assert wheat is not None and wheat.quantity == 3  # 背包未变
     finally:
         session.close()
+
+
+# --------------------------------------------------------------------------- #
+# M17: manager daily profit share (R-daily settlement at 00:00)
+# --------------------------------------------------------------------------- #
+
+
+def _seed_company_flow(
+        engine: WorldEngine, world_id: str, company_id: str, amount: int, tx_type: str
+) -> None:
+    """Insert one CompanyTransaction row (and mirror it on the company
+    balance) at world_time 500 — inside day 1, before the midnight crossing."""
+    session = SessionLocal()
+    try:
+        company = session.get(Company, {"world_id": world_id, "company_id": company_id})
+        company.money += amount
+        session.add(CompanyTransaction(
+            world_id=world_id, company_id=company_id, type=tx_type,
+            amount=amount, balance_after=company.money,
+            related_agent_id="agent_linxia", reason="测试流水",
+            world_time=500, trace_id="",
+        ))
+        session.commit()
+    finally:
+        session.close()
+
+
+def _company_money(world_id: str, company_id: str) -> int:
+    session = SessionLocal()
+    try:
+        return session.get(
+            Company, {"world_id": world_id, "company_id": company_id}
+        ).money
+    finally:
+        session.close()
+
+
+def test_manager_profit_share_paid_at_midnight(system) -> None:
+    """A profitable day pays the manager 20% of net profit at 00:00, funded
+    from the company treasury, with both ledgers and events."""
+    engine, service = system
+    runtime = engine.create_world("经理分成测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    manager_id = "agent_zhangming"  # company_morning_farm manager (seed)
+    _seed_company_flow(engine, world_id, "company_morning_farm", +100, "sale_income")
+
+    session = SessionLocal()
+    try:
+        manager_before = session.get(Agent, {"world_id": world_id, "agent_id": manager_id}).money
+        company_before = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        ).money
+    finally:
+        session.close()
+
+    advance_minutes(engine, world_id, 1440 - 480 + 1)  # 08:00 -> next 00:00
+
+    session = SessionLocal()
+    try:
+        manager = session.get(Agent, {"world_id": world_id, "agent_id": manager_id})
+        # share 100*20//100 = 20, minus the 120 daily upkeep.
+        assert manager.money == manager_before + 20 - 120
+        company = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        assert company.money == company_before - 20
+        company_tx = session.scalar(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.company_id == "company_morning_farm",
+                CompanyTransaction.type == "manager_profit",
+            )
+        )
+        assert company_tx is not None and company_tx.amount == -20
+        assert company_tx.related_agent_id == manager_id
+        agent_tx = session.scalar(
+            select(Transaction).where(
+                Transaction.world_id == world_id,
+                Transaction.agent_id == manager_id,
+                Transaction.type == "manager_profit",
+            )
+        )
+        assert agent_tx is not None and agent_tx.amount == 20
+        profit_events = session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "manager_profit_paid",
+            )
+        ).all()
+        assert len(profit_events) == 1
+        assert profit_events[0].payload["amount"] == 20
+        assert profit_events[0].payload["profit"] == 100
+    finally:
+        session.close()
+
+
+def test_manager_profit_skipped_when_treasury_short(system) -> None:
+    """No payout when the company cannot cover the share."""
+    engine, service = system
+    runtime = engine.create_world("分成金库不足")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    _seed_company_flow(engine, world_id, "company_morning_farm", +100, "sale_income")
+    session = SessionLocal()
+    try:
+        company = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        company.money = 10  # share is 20 > 10
+        session.commit()
+    finally:
+        session.close()
+    advance_minutes(engine, world_id, 1440 - 480 + 1)
+    session = SessionLocal()
+    try:
+        assert _company_money(world_id, "company_morning_farm") == 10  # untouched
+        assert not session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "manager_profit_paid",
+            )
+        ).all()
+    finally:
+        session.close()
+
+
+def test_manager_profit_skipped_when_day_lost_money(system) -> None:
+    """A loss-making day pays nothing."""
+    engine, service = system
+    runtime = engine.create_world("分成亏损日")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    _seed_company_flow(engine, world_id, "company_morning_farm", -50, "wage_payment")
+    advance_minutes(engine, world_id, 1440 - 480 + 1)
+    session = SessionLocal()
+    try:
+        manager = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
+        # Only the daily upkeep moved the balance (-120).
+        assert manager.money == 50 - 120
+        assert not session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "manager_profit_paid",
+            )
+        ).all()
+    finally:
+        session.close()
+
+
+def test_manager_profit_skipped_without_manager(system) -> None:
+    """A manager-less company never pays out."""
+    engine, service = system
+    runtime = engine.create_world("分成无经理")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    session = SessionLocal()
+    try:
+        company = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        company.manager_agent_id = None
+        session.commit()
+    finally:
+        session.close()
+    _seed_company_flow(engine, world_id, "company_morning_farm", +100, "sale_income")
+    advance_minutes(engine, world_id, 1440 - 480 + 1)
+    session = SessionLocal()
+    try:
+        assert _company_money(world_id, "company_morning_farm") == 800 + 100  # untouched
+        assert not session.scalars(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "manager_profit_paid",
+            )
+        ).all()
+    finally:
+        session.close()
+
+
+def test_observation_shows_manager_profit_share(system) -> None:
+    """The manager desk surfaces the daily profit-share rule."""
+    engine, service = system
+    runtime = engine.create_world("分成观察")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    from app.agents.observation_service import build_observation
+
+    observation = build_observation(runtime.world_id, "agent_zhangming", SessionLocal)
+    assert "经理分成" in observation
+    assert "20%" in observation

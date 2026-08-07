@@ -37,6 +37,7 @@ from app.database.models.stores import Store, StoreProduct
 from app.database.models.worlds import World
 from app.config.gameplay import (
     HOTEL_NIGHTLY_FEE,
+    MANAGER_PROFIT_SHARE_PERCENT,
     OBSERVATION_MAX_CHARS,
     OBSERVATION_MAX_SHOP_PRODUCTS,
     OBSERVATION_MAX_UNREAD_MESSAGES,
@@ -518,6 +519,11 @@ def build_observation(
                     f"员工{employee_count}人，欠薪{company.unpaid_wage_total}金币，"
                     f"待审核申请{len(pending)}条，待审批请假"
                     f"{sum(1 for r in pending_leaves if r.company_id == company.company_id)}条"
+                )
+                lines.append(
+                    f"- 每日 00:00 你会按当日净利润的 "
+                    f"{MANAGER_PROFIT_SHARE_PERCENT}% 获得经理分成"
+                    f"（公司亏损或金库不足则不发）"
                 )
                 # M16: warehouse + procurement + shelf visibility for the
                 # manager's own company (fixed server prices, full IDs).

@@ -547,6 +547,10 @@ function eventText(
         }
         case 'dividend_paid':
             return `${p.stock_name} 每股分红 ${p.div_per_share} 金币`;
+        case 'manager_profit_paid': {
+            const mgr = agentName(agents, p.manager_agent_id);
+            return `${p.company_name ?? p.company_id} 给经理${mgr}分成 ${p.amount} 金币`;
+        }
         case 'money_transferred': {
             const from = agentName(agents, p.from_agent_id);
             const to = agentName(agents, p.to_agent_id);

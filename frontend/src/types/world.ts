@@ -390,6 +390,7 @@ export type WorldEventType =
     | 'stock_bought'
     | 'stock_sold'
     | 'dividend_paid'
+    | 'manager_profit_paid'
     | 'money_transferred'
     | 'item_given'
     | 'build_started'

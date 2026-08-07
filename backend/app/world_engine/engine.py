@@ -35,6 +35,7 @@ from app.config.gameplay import (
     INITIAL_SATIETY,
     LONELINESS_BOOST_THRESHOLD,
     LONELINESS_GAIN_PER_HOUR,
+    MANAGER_PROFIT_SHARE_PERCENT,
     MOOD_BOOST_THRESHOLD,
     MOOD_DRAIN_PER_HOUR,
     NEEDS_MAX,
@@ -54,7 +55,7 @@ from app.config.gameplay import (
     WAIT_MOOD_PER_HOUR,
 )
 from app.database.models.agents import Agent
-from app.database.models.companies import Company
+from app.database.models.companies import Company, CompanyTransaction
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
@@ -977,9 +978,11 @@ class WorldEngine:
             day = world_time // 1440
             if runtime.last_day is not None and day != runtime.last_day:
                 # M10: dividends settle before the daily counters reset (same
-                # transaction, same commit). M12 D6: upkeep is deducted
-                # between dividends and the counter reset.
+                # transaction, same commit). M17: the manager's daily profit
+                # share comes after dividends, before upkeep. M12 D6: upkeep
+                # is deducted between dividends and the counter reset.
                 self._pay_dividends(session, runtime, world, world_time)
+                self._pay_manager_profits(session, runtime, world, world_time)
                 self._apply_daily_upkeep(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
@@ -1006,6 +1009,105 @@ class WorldEngine:
         """M10: daily dividend settlement at 00:00 (delegates when wired)."""
         if self.stock_service is not None:
             self.stock_service.pay_dividends(session, runtime, world, world_time)
+
+    def _pay_manager_profits(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
+    ) -> None:
+        """M17: at 00:00 pay each company manager a share of the day's net
+        profit (MANAGER_PROFIT_SHARE_PERCENT, floor-divided).
+
+        Net profit = today's CompanyTransaction amounts (initial capital and
+        the manager-share rows excluded). No payout when the day lost money,
+        the company's treasury cannot cover the share, or the company has no
+        manager. Same transaction as dividends/upkeep (one commit).
+        """
+        # world_time is the first minute of the NEW day; the profit window is
+        # the day that just ended: [(world_time - 1) // 1440 * 1440, world_time).
+        day_start = ((world_time - 1) // 1440) * 1440
+        companies = session.scalars(
+            select(Company).where(Company.world_id == world.world_id)
+        ).all()
+        for company in companies:
+            if not company.manager_agent_id:
+                continue
+            rows = session.scalars(
+                select(CompanyTransaction).where(
+                    CompanyTransaction.world_id == world.world_id,
+                    CompanyTransaction.company_id == company.company_id,
+                    CompanyTransaction.world_time >= day_start,
+                    CompanyTransaction.world_time < world_time,
+                )
+            ).all()
+            profit = sum(
+                row.amount
+                for row in rows
+                if row.type not in ("initial_capital", "manager_profit")
+            )
+            if profit <= 0:
+                continue
+            share = profit * MANAGER_PROFIT_SHARE_PERCENT // 100
+            if share <= 0 or company.money < share:
+                continue
+            manager = session.get(
+                Agent,
+                {"world_id": world.world_id, "agent_id": company.manager_agent_id},
+            )
+            if manager is None:
+                continue
+            company.money -= share
+            session.add(
+                CompanyTransaction(
+                    world_id=world.world_id,
+                    company_id=company.company_id,
+                    type="manager_profit",
+                    amount=-share,
+                    balance_after=company.money,
+                    related_agent_id=manager.agent_id,
+                    reason=f"{company.name} 经理利润分成",
+                    world_time=world_time,
+                    trace_id="",
+                )
+            )
+            manager.money += share
+            session.add(
+                Transaction(
+                    world_id=world.world_id,
+                    agent_id=manager.agent_id,
+                    type="manager_profit",
+                    amount=share,
+                    balance_after=manager.money,
+                    reason=f"{company.name} 经理利润分成",
+                    world_time=world_time,
+                    trace_id="",
+                )
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "manager_profit_paid",
+                {
+                    "company_id": company.company_id,
+                    "company_name": company.name,
+                    "manager_agent_id": manager.agent_id,
+                    "amount": share,
+                    "profit": profit,
+                },
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "money_changed",
+                {
+                    "agent_id": manager.agent_id,
+                    "amount": share,
+                    "balance": manager.money,
+                    "reason": f"{company.name} 经理利润分成",
+                },
+            )
 
     def _apply_daily_upkeep(
             self,

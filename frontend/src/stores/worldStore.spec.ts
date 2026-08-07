@@ -833,6 +833,17 @@ describe('applyEvent M10 stock events', () => {
         }));
         expect(store.events[0].text).toBe('晨露商店 每股分红 2 金币');
     });
+
+    it('manager_profit_paid: manager profit share line', () => {
+        store.applyEvent(env(1, 'manager_profit_paid', {
+            company_id: 'company_morning_farm',
+            company_name: '晨露农场',
+            manager_agent_id: 'agent_zhangming',
+            amount: 20,
+            profit: 100,
+        }));
+        expect(store.events[0].text).toBe('晨露农场 给经理张明分成 20 金币');
+    });
 });
 
 describe('applyEvent M11 transfer events', () => {
