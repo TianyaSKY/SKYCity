@@ -500,6 +500,12 @@ export interface AgentIdentity {
     age: number;
     occupation: string;
     background: string;
+    life_story: string;
+    character_traits: string;
+    likes: string[];
+    dislikes: string[];
+    quirks: string[];
+    daily_routine: string;
     values: string[];
     long_term_goals: string[];
     speaking_style: string;

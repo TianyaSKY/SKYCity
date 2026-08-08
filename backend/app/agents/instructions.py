@@ -32,6 +32,12 @@ _IDENTITY_FIELDS = (
     ("age", "年龄"),
     ("occupation", "职业"),
     ("background", "背景"),
+    ("life_story", "人生经历"),
+    ("character_traits", "性格特点"),
+    ("likes", "喜好"),
+    ("dislikes", "厌恶"),
+    ("quirks", "小癖好"),
+    ("daily_routine", "日常作息"),
     ("values", "价值观"),
     ("long_term_goals", "长期目标"),
     ("speaking_style", "说话风格"),
@@ -110,7 +116,9 @@ def build_system_prompt(identity: dict) -> str:
         value = identity.get(key)
         if value is None:
             continue
-        if isinstance(value, (list, dict)):
+        if isinstance(value, list):
+            value = "、".join(str(item) for item in value)
+        elif isinstance(value, dict):
             value = json.dumps(value, ensure_ascii=False)
         lines.append(f"- {label}: {value}")
     lines.append("")

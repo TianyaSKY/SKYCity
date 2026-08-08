@@ -627,9 +627,13 @@ def test_agent_detail_contract(world_config: ParsedWorldConfig) -> None:
     assert identity["age"] == 24
     assert identity["occupation"] == "农场帮工"
     assert "background" in identity and "长" in identity["background"]
-    assert identity["values"] == ["诚实", "稳定", "友谊"]
-    assert identity["long_term_goals"] == ["存下 2000 金币", "建立自己的花圃"]
-    assert identity["speaking_style"] == "温和、简短"
+    assert identity["life_story"] and "花" in identity["life_story"]
+    assert identity["character_traits"] and len(identity["character_traits"]) > 20
+    assert identity["likes"] and identity["dislikes"] and identity["quirks"]
+    assert identity["daily_routine"] and len(identity["daily_routine"]) > 20
+    assert identity["values"] == ["诚实", "稳定", "友谊", "踏实"]
+    assert identity["long_term_goals"] == ["存下 2000 金币", "建立自己的花圃", "让晨露镇的窗台上都开满花"]
+    assert "温和" in identity["speaking_style"]
     assert set(identity["personality"]) == {
         "openness", "conscientiousness", "extraversion",
         "agreeableness", "emotional_stability",

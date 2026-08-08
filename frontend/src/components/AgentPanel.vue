@@ -327,6 +327,24 @@ function teleportLocations(): WorldLocation[] {
                         }} 岁 · {{ store.agentDetail.identity.occupation }}</span>
                 </div>
                 <p class="ov-background">{{ store.agentDetail.identity.background }}</p>
+                <div v-if="store.agentDetail.identity.life_story" class="ov-section-title">人生经历</div>
+                <p v-if="store.agentDetail.identity.life_story" class="ov-speaking">{{ store.agentDetail.identity.life_story }}</p>
+                <div v-if="store.agentDetail.identity.character_traits" class="ov-section-title">性格特点</div>
+                <p v-if="store.agentDetail.identity.character_traits" class="ov-speaking">{{ store.agentDetail.identity.character_traits }}</p>
+                <div v-if="store.agentDetail.identity.likes?.length" class="ov-section-title">喜好</div>
+                <div v-if="store.agentDetail.identity.likes?.length" class="ov-chips">
+                    <span v-for="v in store.agentDetail.identity.likes" :key="'lk' + v" class="ov-chip">{{ v }}</span>
+                </div>
+                <div v-if="store.agentDetail.identity.dislikes?.length" class="ov-section-title">厌恶</div>
+                <div v-if="store.agentDetail.identity.dislikes?.length" class="ov-chips">
+                    <span v-for="v in store.agentDetail.identity.dislikes" :key="'dl' + v" class="ov-chip">{{ v }}</span>
+                </div>
+                <div v-if="store.agentDetail.identity.quirks?.length" class="ov-section-title">小癖好</div>
+                <ul v-if="store.agentDetail.identity.quirks?.length" class="ov-goals">
+                    <li v-for="q in store.agentDetail.identity.quirks" :key="q">{{ q }}</li>
+                </ul>
+                <div v-if="store.agentDetail.identity.daily_routine" class="ov-section-title">日常作息</div>
+                <p v-if="store.agentDetail.identity.daily_routine" class="ov-speaking">{{ store.agentDetail.identity.daily_routine }}</p>
                 <div class="ov-section-title">价值观</div>
                 <div class="ov-chips">
                     <span v-for="v in store.agentDetail.identity.values" :key="v" class="ov-chip">{{ v }}</span>

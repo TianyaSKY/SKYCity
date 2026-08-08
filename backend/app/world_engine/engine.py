@@ -1561,16 +1561,26 @@ class WorldEngine:
                 return None
             snapshot = self._agent_snapshot(session, agent, runtime.clock.world_time)
             detail = snapshot.model_dump(by_alias=True)
+            # Identity comes from the character card (single source of truth,
+            # may carry persona fields beyond the DB columns); the DB row is
+            # the fallback for anything the card lacks.
+            card = self._load_identity(agent.agent_id)
             detail["identity"] = {
                 "id": agent.agent_id,
-                "name": agent.name,
-                "age": agent.age,
-                "occupation": agent.occupation,
-                "background": agent.background,
-                "values": agent.values or [],
-                "long_term_goals": agent.long_term_goals or [],
-                "speaking_style": agent.speaking_style,
-                "personality": agent.personality or {},
+                "name": card.get("name") or agent.name,
+                "age": card.get("age", agent.age),
+                "occupation": card.get("occupation") or agent.occupation,
+                "background": card.get("background") or agent.background,
+                "life_story": card.get("life_story") or "",
+                "character_traits": card.get("character_traits") or "",
+                "likes": card.get("likes") or [],
+                "dislikes": card.get("dislikes") or [],
+                "quirks": card.get("quirks") or [],
+                "daily_routine": card.get("daily_routine") or "",
+                "values": card.get("values") or agent.values or [],
+                "long_term_goals": card.get("long_term_goals") or agent.long_term_goals or [],
+                "speaking_style": card.get("speaking_style") or agent.speaking_style,
+                "personality": card.get("personality") or agent.personality or {},
             }
             detail["is_deciding"] = agent.is_deciding
             detail["consecutive_failures"] = agent.consecutive_failures
