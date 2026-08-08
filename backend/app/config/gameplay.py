@@ -55,7 +55,10 @@ SLEEP_MAX_MINUTES = 480
 # R1 等待
 # --------------------------------------------------------------------------- #
 WAIT_MIN_MINUTES = 1
-WAIT_MAX_MINUTES = 240
+# 单次 wait 硬上限：LLM 常挑大值"先歇三个小时"，导致智能体长时间原地
+# 空等（白天指引 ≤ IDLE_DELAY=30）。60 分钟封顶后每小时强制重新决策，
+# 夜间的长休息走 sleep（上限 480），R8/R15 自动等待不受此钳制。
+WAIT_MAX_MINUTES = 60
 DEFAULT_WAIT_MINUTES = 60  # API 未给 minutes 时的默认等待时长
 
 # R12：精力 = 0 强制休息时长（休息结束前禁止 move/work）。

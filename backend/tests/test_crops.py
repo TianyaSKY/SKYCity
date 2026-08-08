@@ -619,7 +619,21 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
             ("move", {"destination_id": "village_farm", "reason": "去农场播种"}),
             ("plant",
              {"col": plant_cell[0], "row": plant_cell[1], "item_id": "wheat_seed", "reason": "在田里种下小麦"}),
+            # WAIT_MAX_MINUTES=60 clamps each wait; 7×60 + 30 = 450 min of
+            # waiting plus the 30-min idle gap after planting covers the
+            # 465 min wheat growth. The last wait is trimmed to 30 so the
+            # harvest-to-shop leg arrives before village_shop closes at
+            # 20:00 — a full 60-min wait would arrive after close, trigger
+            # the R8 door wait until next morning and cross the midnight
+            # upkeep, changing the money assertion below.
             ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 240, "reason": "等小麦长大"}),
+            ("wait", {"minutes": 30, "reason": "等小麦长大"}),
             ("harvest", {"col": plant_cell[0], "row": plant_cell[1], "reason": "收小麦"}),
             ("move", {"destination_id": "village_shop", "reason": "去商店卖小麦"}),
             ("sell_item", {"item_id": "wheat", "quantity": 4, "reason": "卖掉收获的小麦"}),
@@ -631,8 +645,9 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
     eng = _make_llm_engine(world_config, scripts)
     runtime = eng.create_world("自主农场", autonomous=True)
     world_id = runtime.world_id
-    # Enough game time for: travel + 465 min wheat growth + harvest + sell.
-    advance_minutes(eng, world_id, 700)
+    # Enough game time for: travel + 8×60 min waits (WAIT_MAX_MINUTES cap)
+    # covering 465 min wheat growth + harvest + 30-min idle re-decides + sell.
+    advance_minutes(eng, world_id, 760)
 
     from app.database.models.llm_runs import LLMRun
 
