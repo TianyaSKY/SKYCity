@@ -2,6 +2,7 @@ backend/.venv/
 backend/.env
 backend/ai_tiny_world.db
 backend/test_ai_tiny_world.db
+backend/logs/
 __pycache__/
 *.pyc
 frontend/node_modules/

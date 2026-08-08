@@ -1,5 +1,6 @@
 """AI Tiny World backend — FastAPI application entry point."""
 
+import logging
 import uuid
 from contextlib import asynccontextmanager
 
@@ -44,14 +45,78 @@ settings = get_settings()
 set_tracing_disabled(True)
 
 
+class _InterceptHandler(logging.Handler):
+    """Route stdlib loggers (uvicorn, ...) through loguru so their lines land
+    in the same console + file sinks instead of escaping to the terminal."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame, depth = logging.currentframe(), 2
+        while frame is not None and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+        logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
+
+
+# loguru appends "\n{exception}" to string formats itself (tracebacks land
+# on their own lines); do not add the field manually or it renders twice.
+_FILE_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+    "{name}:{function}:{line} - {message}"
+)
+
+
 def _configure_logging(level: str) -> None:
     logger.remove()
+    # console keeps the default interactive format (colorized)
     logger.add(
         lambda message: print(message, end=""),
         level=level.upper(),
         enqueue=False,
         colorize=True,
     )
+    # durable file sinks, categorized by severity (rotated + retained)
+    log_dir = settings.log_dir
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        log_dir / "app.log",
+        level=level.upper(),
+        format=_FILE_FORMAT,
+        rotation="10 MB",
+        retention=7,
+        enqueue=True,
+        encoding="utf-8",
+    )
+    logger.add(
+        log_dir / "warning.log",
+        level="WARNING",
+        format=_FILE_FORMAT,
+        rotation="10 MB",
+        retention=14,
+        enqueue=True,
+        encoding="utf-8",
+    )
+    logger.add(
+        log_dir / "error.log",
+        level="ERROR",
+        format=_FILE_FORMAT,
+        rotation="10 MB",
+        retention=30,
+        enqueue=True,
+        encoding="utf-8",
+    )
+    # uvicorn configures its own loggers with propagate=False; reroute them so
+    # access/error lines are captured by the sinks above, not only the terminal.
+    logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        stdlib_logger = logging.getLogger(name)
+        stdlib_logger.handlers.clear()
+        stdlib_logger.propagate = True
 
 
 @asynccontextmanager

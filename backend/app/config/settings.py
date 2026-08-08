@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     world_data_dir: Path = Path("../world_data")
     map_name: str = "tiny_world"
     log_level: str = "INFO"
+    # Durable log output dir; categorized sinks write app.log / warning.log /
+    # error.log there (rotated + retained). Override with LOG_DIR.
+    log_dir: Path = Path("logs")
 
     # LLM agent decisions (M3).
     llm_provider: str = "auto"  # "auto" | "openai" | "fake"
