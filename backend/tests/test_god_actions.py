@@ -148,10 +148,10 @@ def test_grant_money_updates_balance_audits_and_memory(world_config: ParsedWorld
 
     assert response["success"] is True
     assert response["command_id"].startswith("cmd_")
-    assert response["result"]["balance"] == 100  # 50 + 50
+    assert response["result"]["balance"] == 3050  # 3000 + 50
 
     row = agent_row(world_id, "agent_linxia")
-    assert row.money == 100
+    assert row.money == 3050
 
     session = SessionLocal()
     try:
@@ -164,12 +164,12 @@ def test_grant_money_updates_balance_audits_and_memory(world_config: ParsedWorld
         session.close()
     assert len(txs) == 1
     assert txs[0].type == "god_grant"
-    assert (txs[0].amount, txs[0].balance_after) == (50, 100)
+    assert (txs[0].amount, txs[0].balance_after) == (50, 3050)
 
     changed = events_of(eng, world_id, "money_changed")
     assert len(changed) == 1
     assert changed[0].payload["amount"] == 50
-    assert changed[0].payload["balance"] == 100
+    assert changed[0].payload["balance"] == 3050
 
     # M6 hook: god_action_applied records an episodic memory for the target.
     memory_texts = [m.text for m in memories_for(world_id, "agent_linxia")]
@@ -183,10 +183,10 @@ def test_deduct_money_clamps_at_zero(world_config: ParsedWorldConfig) -> None:
     world_id = runtime.world_id
 
     response = god(eng, world_id, command_type="deduct_money",
-                   target_id="agent_linxia", parameters={"amount": 200}, reason="罚款")
+                   target_id="agent_linxia", parameters={"amount": 4000}, reason="罚款")  # > initial 3000
 
     assert response["success"] is True
-    assert response["result"]["actual"] == 50  # clamped to balance
+    assert response["result"]["actual"] == 3000  # clamped to balance
     assert response["result"]["balance"] == 0
     assert agent_row(world_id, "agent_linxia").money == 0
 
@@ -202,10 +202,10 @@ def test_deduct_money_clamps_at_zero(world_config: ParsedWorldConfig) -> None:
     finally:
         session.close()
     assert tx is not None
-    assert (tx.amount, tx.balance_after) == (-50, 0)
+    assert (tx.amount, tx.balance_after) == (-3000, 0)
 
     changed = events_of(eng, world_id, "money_changed")
-    assert changed[0].payload["amount"] == -50
+    assert changed[0].payload["amount"] == -3000
     eng._runtimes.clear()
 
 
@@ -557,7 +557,7 @@ def test_audit_rows_written_for_every_command(world_config: ParsedWorldConfig) -
     assert by_type["grant_money"].target_id == "agent_linxia"
     assert by_type["grant_money"].parameters_json == {"amount": 50}
     assert by_type["grant_money"].reason == "奖励"
-    assert by_type["grant_money"].result_json["balance"] == 100  # snapshot at grant time
+    assert by_type["grant_money"].result_json["balance"] == 3050  # snapshot at grant time
     assert by_type["grant_money"].success is True
     assert all(row.success for row in rows)
     eng._runtimes.clear()
@@ -638,7 +638,7 @@ def test_agent_detail_contract(world_config: ParsedWorldConfig) -> None:
         "openness", "conscientiousness", "extraversion",
         "agreeableness", "emotional_stability",
     }
-    assert detail["money"] == 100
+    assert detail["money"] == 3050  # 3000 + 50 grant
     assert {"item_id": "bread", "quantity": 2} in detail["inventory"]
     assert detail["action"] is None
     assert detail["is_deciding"] is False
@@ -724,7 +724,7 @@ def test_rest_god_actions_and_agent_detail(client: TestClient) -> None:
     assert detail.status_code == 200
     detail = detail.json()
     assert detail["identity"]["name"] == "林夏"
-    assert detail["money"] == 100
+    assert detail["money"] == 3050  # 3000 + 50 grant
     assert detail["consecutive_failures"] == 0
 
     # Location detail endpoint exposes occupants + store products + jobs.

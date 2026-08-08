@@ -342,10 +342,12 @@ def build_observation(
         # to other agents being around.
         lines.append(
             "- open_shop(location, products, reason): 在空摊位或附近可达空地开店"
-            "（资本 ≥150 金币，商品从背包上架，≤3 种，价格 1~2 倍基准价）"
+            "（资本 ≥100 金币，商品从背包上架，≤3 种，价格 1~2 倍基准价；"
+            "可选 buy_price 0~1 倍基准价=收购价，0 不收购）"
         )
         lines.append("- stock_shop(store_id, item_id, quantity=1, reason): 给自己店铺的货架补货（从背包上架）")
         lines.append("- adjust_price(store_id, item_id, new_price, reason): 调整自己店铺的售价")
+        lines.append("- set_buy_price(store_id, item_id, new_price, reason): 设置自己店铺的收购价（0~1 倍基准价，0=不收购）")
         lines.append("- close_shop(store_id, reason): 收掉自己的店铺，货架货物退回背包")
 
         # M5: shop products at the current store (up to 6) + jobs offered here.
@@ -374,6 +376,8 @@ def build_observation(
                             tags.append(f"心情{item.mood_restore}")
                         if item.work_bonus > 0:
                             tags.append(f"工资+{item.work_bonus}%")
+                        elif item.work_bonus_jobs:
+                            tags.append("专长工具")  # M19: per-job bonus
                         if item.yield_bonus > 0:
                             tags.append("增产")
                     if product.sell_price < product.base_sell_price:

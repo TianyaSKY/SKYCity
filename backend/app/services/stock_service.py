@@ -191,7 +191,7 @@ class StockService:
     ) -> None:
         """R18.3: at 00:00 pay out the day's profit as dividends.
 
-        div_per_share = max(1, day_business // 5) when the company had any
+        div_per_share = max(1, day_business // 3) when the company had any
         business today (0 otherwise — no event). prev_price becomes the close,
         day_business resets. Each payout is a ``dividend`` transaction plus a
         per-agent ``money_changed`` event.

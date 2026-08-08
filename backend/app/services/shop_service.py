@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config.gameplay import (
     OPEN_SHOP_CAPITAL,
     PRICE_MAX_MULT,
+    STALL_BUY_MAX_MULT,
     STALL_CAPACITY,
     STALL_CLOSE_HOUR,
     STALL_INITIAL_STOCK,
@@ -47,10 +48,11 @@ MSG_NOT_AT_STALL = "不在摊位地点"
 MSG_TOO_FAR = "距离目标格太远"
 MSG_CELL_NOT_AVAILABLE = "目标格不可行走或已被占用"
 MSG_UNREACHABLE = "会堵住村庄"  # R39.3 复用文案
-MSG_CAPITAL_TOO_LOW = "开店需要至少 150 金币"
+MSG_CAPITAL_TOO_LOW = "开店需要至少 100 金币"
 MSG_PRODUCT_LIMIT = "最多上架 3 种商品"
 MSG_DUPLICATE_PRODUCT = "商品重复"
 MSG_PRICE_OUT_OF_RANGE = "价格超出合法区间（1~2 倍基准价）"
+MSG_BUY_PRICE_OUT_OF_RANGE = "收购价超出合法区间（0~1 倍基准价）"
 MSG_NOT_OWNER = "不是你的店铺"
 MSG_STORE_NOT_FOUND = "店铺不存在"
 MSG_PRODUCT_NOT_IN_STORE = "店铺没有该商品"
@@ -149,11 +151,11 @@ class ShopService:
             if agent.money < OPEN_SHOP_CAPITAL:
                 return False, None, MSG_CAPITAL_TOO_LOW
 
-            # --- product lines (R39.6 / R42) ---
+            # --- product lines (R39.6 / R42; M19: optional buy_price) ---
             if not 1 <= len(product_entries) <= STALL_MAX_PRODUCTS:
                 return False, None, MSG_PRODUCT_LIMIT
             seen: set[str] = set()
-            resolved: list[tuple[Item, int, Inventory]] = []
+            resolved: list[tuple[Item, int, int, Inventory]] = []
             for entry in product_entries:
                 item_id = str(entry.get("item_id") or "")
                 if item_id in seen:
@@ -163,18 +165,24 @@ class ShopService:
                     price = int(entry["price"])
                 except (KeyError, TypeError, ValueError):
                     return False, None, MSG_PRICE_OUT_OF_RANGE
+                try:
+                    buy_price = int(entry.get("buy_price") or 0)
+                except (TypeError, ValueError):
+                    return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
                 item = session.get(Item, {"world_id": world_id, "item_id": item_id})
                 if item is None:
                     return False, None, MSG_ITEM_MISSING
                 if not 1 <= price <= round(item.base_price * PRICE_MAX_MULT):
                     return False, None, MSG_PRICE_OUT_OF_RANGE
+                if not 0 <= buy_price <= round(item.base_price * STALL_BUY_MAX_MULT):
+                    return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
                 inventory = session.get(
                     Inventory,
                     {"world_id": world_id, "agent_id": agent_id, "item_id": item_id},
                 )
                 if inventory is None or inventory.quantity < 1:
                     return False, None, MSG_NO_ITEM
-                resolved.append((item, price, inventory))
+                resolved.append((item, price, buy_price, inventory))
 
             # --- write path (same transaction) ---
             first_item = resolved[0][0]
@@ -205,7 +213,7 @@ class ShopService:
                 )
             )
             products_payload: list[dict[str, Any]] = []
-            for item, price, inventory in resolved:
+            for item, price, buy_price, inventory in resolved:
                 stock = min(inventory.quantity, STALL_INITIAL_STOCK)
                 session.add(
                     StoreProduct(
@@ -214,7 +222,7 @@ class ShopService:
                         item_id=item.item_id,
                         sell_price=price,
                         base_sell_price=price,
-                        buy_price=0,
+                        buy_price=buy_price,
                         stock=stock,
                         stock_cap=STALL_STOCK_CAP,
                         restock_daily=0,
@@ -224,7 +232,12 @@ class ShopService:
                 if inventory.quantity <= 0:
                     session.delete(inventory)
                 products_payload.append(
-                    {"item_id": item.item_id, "sell_price": price, "stock": stock}
+                    {
+                        "item_id": item.item_id,
+                        "sell_price": price,
+                        "buy_price": buy_price,
+                        "stock": stock,
+                    }
                 )
             # R18.2: the personal store lists itself on the market; the row
             # lives and dies with the shop (close_shop deletes it).
@@ -409,6 +422,77 @@ class ShopService:
                     "item_name": item.name if item is not None else item_id,
                     "sell_price": price,
                     "promo": False,
+                },
+                trace_id,
+            )
+            return True, envelope, None
+
+        return self._uow.run(_inner)
+
+    # ------------------------------------------------------------------ #
+    # Set buy price (M19: personal stores may buy from residents)
+    # ------------------------------------------------------------------ #
+
+    def set_buy_price(
+            self,
+            world_id: str,
+            agent_id: str,
+            store_id: str,
+            item_id: str,
+            new_price: int,
+            reason: str | None = None,
+            trace_id: str | None = None,
+    ) -> tuple[bool, Any, str | None]:
+        """Set the owner's own store's purchase price for one item.
+
+        Valid range is 0..base_price (0 = the store does not buy; see R42
+        extension in world-rules). Buyers sell through EconomyService.sell,
+        which settles from the owner's balance (R7: no credit).
+        """
+
+        def _inner(session: Session) -> tuple[bool, Any, str | None]:
+            runtime = self.engine.get_runtime(world_id)
+            if runtime is None:
+                return False, None, MSG_WORLD_MISSING
+            world = session.get(World, world_id)
+            if world is None:
+                return False, None, MSG_WORLD_MISSING
+            if world.paused:
+                return False, None, MSG_PAUSED
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            if agent is None:
+                return False, None, MSG_AGENT_MISSING
+            if agent.action_type is not None:
+                return False, None, MSG_BUSY
+            store = session.get(Store, {"world_id": world_id, "store_id": store_id})
+            if store is None:
+                return False, None, MSG_STORE_NOT_FOUND
+            if store.owner_agent_id != agent_id:
+                return False, None, MSG_NOT_OWNER
+            product = session.get(
+                StoreProduct,
+                {"world_id": world_id, "store_id": store_id, "item_id": item_id},
+            )
+            if product is None:
+                return False, None, MSG_PRODUCT_NOT_IN_STORE
+            try:
+                price = int(new_price)
+            except (TypeError, ValueError):
+                return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
+            item = session.get(Item, {"world_id": world_id, "item_id": item_id})
+            base = item.base_price if item is not None else product.base_sell_price
+            if not 0 <= price <= round(base * STALL_BUY_MAX_MULT):
+                return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
+            product.buy_price = price
+            envelope = runtime.event_bus.publish(
+                session,
+                world.world_time,
+                "store_buy_price_changed",
+                {
+                    "store_id": store_id,
+                    "item_id": item_id,
+                    "item_name": item.name if item is not None else item_id,
+                    "buy_price": price,
                 },
                 trace_id,
             )

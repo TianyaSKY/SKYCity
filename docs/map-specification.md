@@ -50,7 +50,7 @@ cell_walkable(col, row) =
 |-----------------|--------|-----------------------------------------------------------|
 | `location_id`   | string | 稳定 ID，全局唯一（如 `village_shop`）                    |
 | `name`          | string | 中文显示名（如 `村庄杂货店`）                             |
-| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` / `stall`（M18：个人商店空摊位） |
+| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` / `stall`（M18：个人商店空摊位）/ `field`（M19：野外采集点） |
 | `capacity`      | int    | 同时容纳的最大智能体数                                    |
 | `open_hour`     | int    | 开门小时（世界时 0..24，`0` 表示 24 小时开放）            |
 | `close_hour`    | int    | 关门小时（`24` 表示整日开放）                             |
@@ -70,6 +70,8 @@ cell_walkable(col, row) =
 | `stall_plaza_1`  | stall  | 6-22 | 4    |
 | `stall_plaza_2`  | stall  | 6-22 | 4    |
 | `stall_plaza_3`  | stall  | 6-22 | 4    |
+| `forest`         | field  | 6-22 | 8    |
+| `river_bank`     | field  | 6-22 | 8    |
 | `linxia_home`    | house  | 0-24 | 4    |
 | `zhangming_home` | house  | 0-24 | 4    |
 | `chenyu_home`    | house  | 0-24 | 4    |

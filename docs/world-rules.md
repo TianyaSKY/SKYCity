@@ -139,8 +139,9 @@
 - R18.1 交易：买入/卖出为即时行动，要求智能体空闲（R1），无地点要求； 余额不足/持股不足拒绝（不赊账，R7）；交易不改变股价。
 - R18.2 股价：每笔经营事件（商店售出/工作完成）对应股票 +1（下限 1）； 每小时叠加确定性噪声 [-2, +2]（hashlib 公式，进程间稳定）；每股每小时
   发布一次 `stock_price_changed`（价格未变也发，前端静默）。
-- R18.3 分红：每日 00:00 按当日经营数 `div_per_share = max(1, day_business // 5)`
-  （无经营则 0 不发）；按持仓发放并记 `dividend` 流水；`prev_price` 更新为 收盘价，`day_business` 清零。
+- R18.3 分红：每日 00:00 按当日经营数 `div_per_share = max(1, day_business // 3)`
+  （无经营则 0 不发；M19 门槛由 5 下调至 3）；按持仓发放并记 `dividend` 流水；
+  `prev_price` 更新为 收盘价，`day_business` 清零。
 - R18.4 上帝：可设定任意股价（走 GodActionService 审计 + 事件）。
 - R18.5 存档：股票价格/经营计数/持仓随存档（R17）；旧存档恢复时自动补种市场。
 
@@ -378,8 +379,9 @@
      只确认「从道路网络能走到店」；不可达返回 `会堵住村庄`（复用拒绝文案）。
   4. 地点空闲：`stores` 表 `(world_id, location_id)` 部分唯一索引保证一个
      摊位/地点只能开一家店（含并发抢摊，同 R4 的事务模式）。
-  5. 资本门槛：`agent.money >= OPEN_SHOP_CAPITAL`（当前 150，见 gameplay.py）。
-  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42）。
+  5. 资本门槛：`agent.money >= OPEN_SHOP_CAPITAL`（当前 100，见 gameplay.py；M19 由 150 下调）。
+  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42）；可选 `buy_price`（收购价）在
+     合法区间（R42，默认 0 = 不收购）。
 - 一个居民可开**多家**个人店（无数量上限）：每家店独立货架、独立结算、
   独立定价，收摊一家不影响其他家；扩张受地点与资本天然约束。
 - 成功（同一事务）：荒地模式先创建运行时 `WorldLocation`
@@ -402,8 +404,13 @@
   被拒（`商店未开门`）。
 - 售货**无人值守**：顾客位于摊位地点即可购买（`agent.location_id ==
   store.location_id`），不要求店主在场或空闲；店主可离开摊位继续做别的事。
-- 个人店**只卖不收**：`buy_price=0`，居民 `sell_item` 到个人店返回
-  `商店不收购该物品`（复用既有 `buy_price <= 0` 校验，无新分支）。
+- 个人店**默认只卖不收**：`buy_price=0`，居民 `sell_item` 到个人店返回
+  `商店不收购该物品`（复用既有 `buy_price <= 0` 校验）。
+- M19：店主可用 `set_buy_price` 设收购价（R42 区间），此后居民可把该商品
+  卖给个人店：同一事务内店主余额扣款（R7 不赊账，余额不足拒绝 `店主资金不足`）、
+  卖家入账、货架增加（`stock + qty <= stock_cap` 条件更新，并发安全）；店主
+  不能卖货给自己店铺（`不能卖货给自己店铺`）。结算发布 `item_sold` +
+  `store_purchase_completed` + 双方 `money_changed`。
 - **无魔法补货**：R15 每日自动补货不适用于个人店（`restock_daily=0`）；
   货架只增不减路径为店主本人 `stock_shop`（R41）。
 - M12 每日促销**不适用于个人店**（无促销、无基准价恢复流程）。
@@ -416,6 +423,8 @@
 - `adjust_price(item_id, new_price)`：仅店主本人、空闲（R1）；价格区间校验
   同 R42；即时生效并同步更新 `sell_price` 与 `base_sell_price`；发布
   `store_price_changed`（promo=false）。
+- `set_buy_price(item_id, new_price)`（M19）：仅店主本人、空闲（R1）；收购价
+  区间校验同 R42；即时生效并发布 `store_buy_price_changed`。
 - 售出结算（R33 的并行路径）：顾客 `buy_item` 命中个人店时同一事务内——
   顾客扣款（`Transaction` type=`expense`）、店主入账（`Transaction`
   type=`sale_income`，与顾客流水同 `trace_id`）、货架减货、顾客得货；
@@ -425,11 +434,13 @@
 
 ### R42 定价
 
-- 个人店价格合法区间：`1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`
+- 个人店售价合法区间：`1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`
   （当前 `PRICE_MAX_MULT=2.0`，base_price 为 items.json 基准价，见
   gameplay.py）。
-- 越界拒绝（开店与调价共用同一校验）；v1 无动态市场价格，价格不随
-  供需自动波动。
+- M19 收购价合法区间：`0 ≤ buy_price ≤ round(base_price × STALL_BUY_MAX_MULT)`
+  （当前 `STALL_BUY_MAX_MULT=1.0`，0 = 不收购）。越界拒绝（开店、调价共用
+  同一校验）。
+- v1 无动态市场价格，价格不随供需自动波动。
 
 ### R43 收摊与上帝干预
 

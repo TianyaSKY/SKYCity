@@ -89,6 +89,10 @@ def load_items(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]
             # M12: mood restore / work wage bonus % / extra yield per unit.
             "mood_restore": int(entry.get("mood_restore") or 0),
             "work_bonus": int(entry.get("work_bonus") or 0),
+            # M19: per-job wage bonus (JSON object), wins over work_bonus.
+            "work_bonus_jobs": json.dumps(
+                entry.get("work_bonus_jobs") or {}, ensure_ascii=False
+            ),
             "yield_bonus": int(entry.get("yield_bonus") or 0),
             "base_price": int(entry.get("base_price") or 0),
         }

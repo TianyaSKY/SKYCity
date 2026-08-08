@@ -161,15 +161,42 @@
       "base_price": 11,
       "description": "做衣服和布袋的布料"
     },
-    {
-      "item_id": "tool_rake",
-      "name": "耙子",
-      "category": "tool",
-      "satiety_restore": 0,
-      "work_bonus": 20,
-      "base_price": 30,
-      "description": "翻地用的耙子，干活更快"
-    },
+  {
+   "item_id": "tool_rake",
+   "name": "耙子",
+   "category": "tool",
+   "satiety_restore": 0,
+   "work_bonus": 20,
+   "base_price": 30,
+   "description": "翻地用的耙子，干活更快"
+  },
+  {
+   "item_id": "tool_axe",
+   "name": "斧头",
+   "category": "tool",
+   "satiety_restore": 0,
+   "work_bonus_jobs": {"job_woodcutting": 40},
+   "base_price": 40,
+   "description": "伐木用的斧头，砍树事半功倍"
+  },
+  {
+   "item_id": "tool_rod",
+   "name": "渔竿",
+   "category": "tool",
+   "satiety_restore": 0,
+   "work_bonus_jobs": {"job_fishing": 40},
+   "base_price": 35,
+   "description": "钓鱼用的渔竿，鱼获更丰"
+  },
+  {
+   "item_id": "tool_sickle",
+   "name": "镰刀",
+   "category": "tool",
+   "satiety_restore": 0,
+   "work_bonus_jobs": {"job_farm_field": 40, "job_farm_production": 20},
+   "base_price": 25,
+   "description": "收庄稼用的镰刀，农活更利索"
+  },
     {
       "item_id": "pottery",
       "name": "陶罐",

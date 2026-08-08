@@ -27,6 +27,7 @@ const DEFAULT_AGENT_COLOR = '#9ee6b0';
 
 const store = useWorldStore();
 const host = ref<HTMLElement | null>(null);
+defineEmits<{ (e: 'open-dashboard'): void }>();
 
 /** World-space anchor (px) per location for the label overlay: the static
  * map locations plus any M18 runtime stall locations (wild-cell shops). */
@@ -319,6 +320,7 @@ onBeforeUnmount(() => {
         <LocationPanel v-draggable="'location'" class="hud hud-bottom-left"/>
         <div v-if="!store.mapLoaded && !store.mapError" class="status-banner">正在加载世界…</div>
         <div v-if="store.mapError" class="status-banner error">{{ store.mapError }}</div>
+        <button class="dashboard-btn" @click="$emit('open-dashboard')">数据看板</button>
     </div>
 </template>
 
@@ -416,4 +418,19 @@ onBeforeUnmount(() => {
 .status-banner.error {
     color: #ff9b9b;
 }
+
+.dashboard-btn {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 20;
+    padding: 8px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(20, 40, 30, 0.8);
+    color: #cde8d5;
+    font-size: 13px;
+    cursor: pointer;
+}
+.dashboard-btn:hover { background: rgba(30, 60, 45, 0.9); }
 </style>

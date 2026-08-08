@@ -62,6 +62,8 @@ def initialize_database() -> None:
         for alter in (
             "ALTER TABLE stores ADD COLUMN owner_agent_id VARCHAR(64)",
             "ALTER TABLE stores ADD COLUMN name VARCHAR(128)",
+            # M19: per-job tool bonuses (JSON object {job_id: bonus}).
+            "ALTER TABLE items ADD COLUMN work_bonus_jobs VARCHAR(256)",
         ):
             try:
                 conn.execute(_text(alter))

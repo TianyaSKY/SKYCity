@@ -28,6 +28,9 @@ class Item(Base):
     # extra yield per produced unit.
     mood_restore: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     work_bonus: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # M19: per-job wage bonus % (JSON object {job_id: bonus}); when the
+    # current job matches a key it wins over the flat work_bonus.
+    work_bonus_jobs: Mapped[str | None] = mapped_column(String(256), nullable=True)
     yield_bonus: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     base_price: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 

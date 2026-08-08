@@ -16,10 +16,12 @@ import type {
     CompanyTransaction,
     ConversationSummary,
     DecisionRecord,
+    EventStatsResponse,
     GodActionRequest,
     GodActionResult,
     JobOpening,
     LocationDetail,
+    LlmStatsResponse,
     MemoryItem,
     RelationshipItem,
     StocksResponse,
@@ -102,6 +104,16 @@ export function getSnapshot(id: string): Promise<WorldSnapshotPayload> {
 /** M10: 全部股票行情 + 全量持仓。 */
 export function getStocks(worldId: string): Promise<StocksResponse> {
     return requestJson<StocksResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stocks`);
+}
+
+/** 数据看板: llm_runs 聚合统计。 */
+export function getLlmStats(worldId: string): Promise<LlmStatsResponse> {
+    return requestJson<LlmStatsResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stats/llm`);
+}
+
+/** 数据看板: world_events 聚合统计。 */
+export function getEventStats(worldId: string): Promise<EventStatsResponse> {
+    return requestJson<EventStatsResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stats/events`);
 }
 
 /** M13: 世界内全部企业列表。 */

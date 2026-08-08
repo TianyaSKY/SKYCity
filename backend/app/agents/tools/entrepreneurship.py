@@ -25,10 +25,15 @@ class ShopLocation(BaseModel):
 
 
 class ShopProduct(BaseModel):
-    """One product line: item id + the seller's price in coins."""
+    """One product line: item id + the seller's price in coins.
+
+    ``buy_price`` (M19, optional) is what the owner pays residents selling
+    this item to the store; 0 = the store does not buy (default).
+    """
 
     item_id: str
     price: int
+    buy_price: int | None = None
 
 
 def _result_json(ok: bool, envelope, reason: str | None) -> str:
@@ -54,8 +59,8 @@ async def open_shop(
         reason: str,
 ) -> str:
     """在空摊位（location 传 {"stall_id": "..."}）或附近可达空地（{"col": N, "row": N}）开店；
-    需要至少 150 金币且背包持有商品；products 传 [{"item_id": "...", "price": N}]，
-    最多 3 种，价格在 1~2 倍基准价之间。"""
+    需要至少 100 金币且背包持有商品；products 传 [{"item_id": "...", "price": N}]，
+    最多 3 种，价格在 1~2 倍基准价之间；可选 buy_price（0~1 倍基准价，0=不收购）。"""
     service = ctx.context.engine.shop_service
     if service is None:
         return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
@@ -105,6 +110,30 @@ async def adjust_price(
     if service is None:
         return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
     ok, envelope, err = service.adjust_price(
+        world_id=ctx.context.world_id,
+        agent_id=ctx.context.agent_id,
+        store_id=store_id,
+        item_id=item_id,
+        new_price=new_price,
+        reason=reason,
+    )
+    return _result_json(ok, envelope, err)
+
+
+@function_tool
+async def set_buy_price(
+        ctx: RunContextWrapper[AgentToolContext],
+        store_id: str,
+        item_id: str,
+        new_price: int,
+        reason: str,
+) -> str:
+    """设置自己店铺某商品的收购价（0~1 倍基准价；0=不收购）。居民可把背包里的
+    该商品卖给你的店，货款从你余额支付。"""
+    service = ctx.context.engine.shop_service
+    if service is None:
+        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+    ok, envelope, err = service.set_buy_price(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,
         store_id=store_id,

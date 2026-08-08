@@ -156,16 +156,20 @@ M18（创业与个人商店，R39–R44）追加：
 
 | type                   | 载荷要点                                                                                        | 触发方            | 状态   |
 |------------------------|-------------------------------------------------------------------------------------------------|-------------------|--------|
-| `store_opened`         | `{store_id, name, owner_agent_id, location_id, col, row, products: [{item_id, sell_price, stock}]}` | 开店（R39；荒地店含新建运行时地点） | 待实现 |
-| `store_closed`         | `{store_id, owner_agent_id, reason}`                                                            | 收摊/上帝强制（R43） | 待实现 |
-| `store_stocked`        | `{store_id, owner_agent_id, item_id, quantity, stock_after}`                                    | 店主上架（R41）   | 待实现 |
-| `store_sale_completed` | `{store_id, owner_agent_id, buyer_agent_id, item_id, item_name, quantity, unit_price, total}`   | 个人店售出（R41） | 待实现 |
+| `store_opened`         | `{store_id, name, owner_agent_id, location_id, col, row, products: [{item_id, sell_price, buy_price, stock}]}` | 开店（R39；荒地店含新建运行时地点） | 已实现 |
+| `store_closed`         | `{store_id, owner_agent_id, reason}`                                                            | 收摊/上帝强制（R43） | 已实现 |
+| `store_stocked`        | `{store_id, owner_agent_id, item_id, quantity, stock_after}`                                    | 店主上架（R41）   | 已实现 |
+| `store_sale_completed` | `{store_id, owner_agent_id, buyer_agent_id, item_id, item_name, quantity, unit_price, total}`   | 个人店售出（R41） | 已实现 |
+| `store_buy_price_changed` | `{store_id, item_id, item_name, buy_price}`                                                  | 店主改收购价（M19） | 已实现 |
+| `store_purchase_completed` | `{store_id, owner_agent_id, seller_agent_id, item_id, item_name, quantity, unit_price, total}` | 个人店收购（M19，店主扣款结算） | 已实现 |
 
 - 复用既有事件：店主调价复用 `store_price_changed`（`promo=false`）；店主
   入账复用 `money_changed`；顾客购买复用 `item_purchased`；背包变化复用
   `inventory_changed`；收摊/开店不新增资金事件。
 - `store_sale_completed` 与 `company_sale_completed` 语义并行：前者触发方为
   个人店（无 `company_id`），后者为企业商店。
+- M19 个人店收购：卖家侧复用 `item_sold` + `money_changed`（+`inventory_changed`），
+  店主侧复用 `money_changed`（amount 为负），另发 `store_purchase_completed`。
 - `world_snapshot` 载荷扩展 `stores` 列表（含 owner/company/products）；
   荒地店创建的运行时地点随既有 `locations` 列表带出，随存档
   `runtime_locations` 段保存/恢复（R44）。

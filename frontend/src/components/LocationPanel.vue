@@ -28,6 +28,7 @@ function typeLabel(locationType: string): string {
         hotel: '旅店',
         workshop: '工坊',
         stall: '摊位', // M18
+        field: '野外', // M19: gathering spots
     };
     return labels[locationType] ?? locationType;
 }

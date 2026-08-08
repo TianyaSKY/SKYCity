@@ -31,7 +31,7 @@
       "yield": [
         {
           "item_id": "wheat",
-          "quantity": 2
+          "quantity": 4
         }
       ],
       "description": "晨露农场的当家作物"
@@ -64,7 +64,7 @@
       "yield": [
         {
           "item_id": "carrot",
-          "quantity": 3
+          "quantity": 4
         }
       ],
       "description": "甜甜脆脆的胡萝卜"
@@ -97,7 +97,7 @@
       "yield": [
         {
           "item_id": "strawberry",
-          "quantity": 2
+          "quantity": 3
         }
       ],
       "description": "要等很久，但值得"
@@ -130,7 +130,7 @@
       "yield": [
         {
           "item_id": "flower",
-          "quantity": 2
+          "quantity": 3
         }
       ],
       "description": "林夏梦想花圃的起点"

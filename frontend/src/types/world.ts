@@ -630,6 +630,40 @@ export interface StocksResponse {
     holdings: StockHolding[];
 }
 
+/** Response of GET .../stats/llm (数据看板): llm_runs 聚合。 */
+export interface LlmStatsResponse {
+    total_calls: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    failed_calls: number;
+    error_rate: number;
+    avg_latency_ms: number;
+    by_agent: {
+        agent_id: string;
+        calls: number;
+        input_tokens: number;
+        output_tokens: number;
+        failed: number;
+        avg_latency_ms: number;
+    }[];
+    by_model: {
+        model: string;
+        calls: number;
+        input_tokens: number;
+        output_tokens: number;
+    }[];
+}
+
+/** Response of GET .../stats/events (数据看板): world_events 聚合。 */
+export interface EventStatsResponse {
+    total: number;
+    latest_sequence: number;
+    by_type: {
+        type: string;
+        count: number;
+    }[];
+}
+
 /** Payload of the WS stock_price_changed event (M10). */
 export interface StockPriceChangedPayload {
     stock_id: string;

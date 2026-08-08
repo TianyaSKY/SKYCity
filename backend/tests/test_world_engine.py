@@ -193,14 +193,15 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     assert by_id["agent_linxia"].satiety == 100
     assert by_id["agent_linxia"].energy == 100
     assert by_id["agent_linxia"].loneliness == 0
-    assert by_id["agent_linxia"].money == 50
+    assert by_id["agent_linxia"].money == 3000
     assert by_id["agent_linxia"].action_type is None
 
-    assert len(locations) == 18  # 15 map locations + 3 M18 plaza stalls
+    assert len(locations) == 20  # 15 map locations + 3 M18 stalls + 2 M19 spots
     loc_ids = {l.location_id for l in locations}
     assert "village_shop" in loc_ids and "village_plaza" in loc_ids
     assert "village_hotel" in loc_ids
     assert {"stall_plaza_1", "stall_plaza_2", "stall_plaza_3"} <= loc_ids
+    assert {"forest", "river_bank"} <= loc_ids
 
 
 # --------------------------------------------------------------------------- #

@@ -977,7 +977,7 @@ def test_store_purchase_debits_company_and_rejects_when_broke(system) -> None:
         )
         assert store_row is not None and store_row.stock == 14 + 1  # 只有第一次成功
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent is not None and agent.money == 50 + 3  # 第二次失败未入账
+        assert agent is not None and agent.money == 3003  # 第二次失败未入账
     finally:
         session.close()
 
@@ -2348,7 +2348,7 @@ def test_unbound_store_rejects_buy_and_sell(system) -> None:
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent is not None and agent.money == 50  # 未扣款也未入账
+        assert agent is not None and agent.money == 3000  # 未扣款也未入账
         bread = session.get(
             StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
         )
@@ -2501,7 +2501,7 @@ def test_manager_profit_skipped_when_day_lost_money(system) -> None:
     try:
         manager = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
         # Only the daily upkeep moved the balance (-120).
-        assert manager.money == 50 - 120
+        assert manager.money == 2880  # 3000 - 120
         assert not session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,

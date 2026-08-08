@@ -294,7 +294,7 @@ def test_open_stall_success(engine: WorldEngine) -> None:
     assert envelope.payload["col"] == STALL_1_ANCHOR[0]
     assert envelope.payload["row"] == STALL_1_ANCHOR[1]
     assert envelope.payload["products"] == [
-        {"item_id": "wheat", "sell_price": 5, "stock": STALL_INITIAL_STOCK}
+        {"item_id": "wheat", "sell_price": 5, "buy_price": 0, "stock": STALL_INITIAL_STOCK}
     ]
 
     store = store_rows(engine, world_id)[0]
@@ -744,7 +744,7 @@ def test_buy_from_personal_shop_settlement(engine: WorldEngine) -> None:
     # 顾客扣款、店主入账（同一 trace_id 双流水）
     buyer = agent_row(engine, world_id, "agent_zhangming")
     owner = agent_row(engine, world_id, "agent_linxia")
-    assert buyer.money == 50 - 5
+    assert buyer.money == 2995  # 3000 - 5
     assert owner.money == 200 + 5
     buyer_txs = transaction_rows(engine, world_id, "agent_zhangming")
     owner_txs = transaction_rows(engine, world_id, "agent_linxia")
@@ -804,7 +804,7 @@ def test_buy_prefers_store_at_location(engine: WorldEngine) -> None:
     assert ok is True, reason
     assert envelope.payload["unit_price"] == 10
     assert envelope.payload["store_id"] == store_id
-    assert agent_row(engine, world_id, "agent_zhangming").money == 50 - 10
+    assert agent_row(engine, world_id, "agent_zhangming").money == 2990  # 3000 - 10
 
     session = SessionLocal()
     try:
@@ -863,7 +863,7 @@ def test_concurrent_last_item_race_personal_shop(engine: WorldEngine) -> None:
         assert product.stock == 0
     finally:
         session.close()
-    assert agent_row(engine, world_id, "agent_zhangming").money == 45  # 恰一单
+    assert agent_row(engine, world_id, "agent_zhangming").money == 2995  # 恰一单
 
 
 # --------------------------------------------------------------------------- #

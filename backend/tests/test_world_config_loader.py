@@ -52,7 +52,7 @@ def test_map_dimensions(world: ParsedWorldConfig) -> None:
 
 
 def test_map_version(world: ParsedWorldConfig) -> None:
-    assert world.map_version == "1.0.0"
+    assert world.map_version == "1.1.0"
 
 
 def test_tile_layers_present(world: ParsedWorldConfig) -> None:
@@ -89,6 +89,9 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "stall_plaza_1",
         "stall_plaza_2",
         "stall_plaza_3",
+        # M19 gathering spots.
+        "forest",
+        "river_bank",
     }
     # every location exposes the full property set
     for loc in world.locations:
@@ -140,7 +143,7 @@ def test_card_id_mismatch_rejected(fake_world_data: Path) -> None:
 
 
 def test_interactables(world: ParsedWorldConfig) -> None:
-    assert len(world.interactables) == 9
+    assert len(world.interactables) == 12  # 9 map + 3 M19 gathering spots
     for obj in world.interactables:
         assert obj.object_id and obj.object_type
 
@@ -167,4 +170,4 @@ def test_health_endpoint() -> None:
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "map_version": "1.0.0"}
+    assert response.json() == {"status": "ok", "map_version": "1.1.0"}

@@ -57,7 +57,7 @@ def test_snapshot_shape(client: TestClient) -> None:
         assert set(agent) >= {
             "agent_id", "name", "col", "row", "location_id", "satiety", "energy", "money", "action",
         }
-    assert len(payload["locations"]) == 18  # 15 map locations + 3 M18 stalls
+    assert len(payload["locations"]) == 20  # 15 map + 3 M18 stalls + 2 M19 spots
     # M18: the snapshot carries the store list (incl. the seeded village shop).
     assert any(
         store["store_id"] == "village_shop" and store["company_id"]

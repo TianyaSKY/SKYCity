@@ -149,7 +149,7 @@ def test_investor_agent_spawns_with_500(engine: WorldEngine) -> None:
     try:
         row = session.get(Agent, {"world_id": runtime.world_id, "agent_id": "agent_touzi"})
         assert row is not None, "agent_touzi must be seeded from the map spawn"
-        assert row.money == 500  # identity initial_money, not the 50 default
+        assert row.money == 5000  # identity initial_money, not the 3000 default
         assert (row.col, row.row) == (33, 20)  # plaza spawn cell
     finally:
         session.close()
@@ -176,7 +176,7 @@ def test_buy_stock_success(engine: WorldEngine) -> None:
         "unit_price": 20,
         "total": 40,
     }
-    assert agent_row_money(engine, world_id, "agent_linxia") == 10  # 50 - 2*20
+    assert agent_row_money(engine, world_id, "agent_linxia") == 2960  # 3000 - 2*20
     assert holding_of(engine, world_id, "agent_linxia", STOCK_SHOP) == 2
 
     types = [e.type for e in engine.events_after(world_id, 0)]
@@ -336,18 +336,18 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
     assert div_events[0].payload == {
         "stock_id": STOCK_SHOP,
         "stock_name": "晨露商店",
-        "div_per_share": 2,  # max(1, 12 // 5)
-        "payouts": [{"agent_id": "agent_linxia", "shares": 2, "amount": 4}],
+        "div_per_share": 4,  # max(1, 12 // 3) — M19 门槛 5→3
+        "payouts": [{"agent_id": "agent_linxia", "shares": 2, "amount": 8}],
     }
     row = stock_row(engine, world_id, STOCK_SHOP)
     assert row.day_business == 0
-    assert row.last_div_per_share == 2
+    assert row.last_div_per_share == 4
     assert row.prev_price == row.price  # close price snapshot
 
-    assert agent_row_money(engine, world_id, "agent_linxia") == 10 + 4 - 120  # 50-40, +4 dividend, -120 M12 daily upkeep
+    assert agent_row_money(engine, world_id, "agent_linxia") == 2848  # 3000-40, +8 dividend, -120 M12 daily upkeep
     txs = transaction_rows(engine, world_id, "agent_linxia")
     dividend_tx = [t for t in txs if t.type == "dividend"][-1]
-    assert dividend_tx.amount == 4
+    assert dividend_tx.amount == 8
     assert dividend_tx.item_id == STOCK_SHOP
     assert dividend_tx.quantity == 2
     upkeep_tx = [t for t in txs if t.type == "upkeep"][-1]
@@ -358,7 +358,7 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
         for e in engine.events_after(world_id, 0)
         if e.type == "money_changed"
            and e.payload["agent_id"] == "agent_linxia"
-           and e.payload["amount"] == 4
+           and e.payload["amount"] == 8
     ]
     assert money, "dividend payout must surface as money_changed"
 
@@ -472,6 +472,19 @@ def test_http_action_contract(client: TestClient) -> None:
     assert body["stocks"][0]["price"] == 12
     assert body["holdings"] == []
 
+    # Pin the balance down so the second buy overdraws (initial money is
+    # 3000 since M19 — the old 50-default scenario no longer holds).
+    pin = client.post(
+        f"/api/worlds/{world_id}/god-actions",
+        json={
+            "command_type": "deduct_money",
+            "target_id": "agent_linxia",
+            "parameters": {"amount": 2950},
+            "reason": "test",
+        },
+    )
+    assert pin.status_code == 200, pin.text
+
     bought = client.post(
         f"/api/worlds/{world_id}/agents/agent_linxia/actions",
         json={
@@ -528,7 +541,7 @@ def test_llm_script_buy_stock(world_config: ParsedWorldConfig) -> None:
             done = True
             break
     assert done, "scripted buy_stock decision did not execute"
-    assert agent_row_money(eng, world_id, "agent_linxia") == 10  # 50 - 2*20
+    assert agent_row_money(eng, world_id, "agent_linxia") == 2960  # 3000 - 2*20
     eng._runtimes.clear()
 
 

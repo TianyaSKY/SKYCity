@@ -36,15 +36,15 @@
     {
       "item_id": "carrot",
       "sell_price": 4,
-      "buy_price": 2,
-      "stock_cap": 20,
+      "buy_price": 3,
+      "stock_cap": 30,
       "restock_daily": 10
     },
     {
       "item_id": "strawberry",
       "sell_price": 8,
-      "buy_price": 4,
-      "stock_cap": 12,
+      "buy_price": 5,
+      "stock_cap": 18,
       "restock_daily": 6
     },
     {
@@ -58,21 +58,23 @@
       "item_id": "honey",
       "sell_price": 20,
       "buy_price": 10,
-      "stock_cap": 6,
-      "restock_daily": 3
+      "stock_cap": 12,
+      "restock_daily": 0,
+      "initial_stock": 0
     },
     {
       "item_id": "fish",
       "sell_price": 16,
-      "buy_price": 8,
-      "stock_cap": 6,
-      "restock_daily": 3
+      "buy_price": 9,
+      "stock_cap": 15,
+      "restock_daily": 0,
+      "initial_stock": 0
     },
     {
       "item_id": "wheat",
       "sell_price": 6,
-      "buy_price": 3,
-      "stock_cap": 30,
+      "buy_price": 4,
+      "stock_cap": 60,
       "restock_daily": 0,
       "initial_stock": 0
     },
@@ -80,8 +82,9 @@
       "item_id": "wood",
       "sell_price": 12,
       "buy_price": 6,
-      "stock_cap": 15,
-      "restock_daily": 0
+      "stock_cap": 30,
+      "restock_daily": 0,
+      "initial_stock": 5
     },
     {
       "item_id": "fertilizer",
@@ -121,8 +124,8 @@
     {
       "item_id": "flower",
       "sell_price": 12,
-      "buy_price": 6,
-      "stock_cap": 30,
+      "buy_price": 7,
+      "stock_cap": 40,
       "restock_daily": 0,
       "initial_stock": 0
     },
@@ -143,6 +146,27 @@
     {
       "item_id": "tool_rake",
       "sell_price": 35,
+      "buy_price": 0,
+      "stock_cap": 3,
+      "restock_daily": 0
+    },
+    {
+      "item_id": "tool_axe",
+      "sell_price": 48,
+      "buy_price": 0,
+      "stock_cap": 3,
+      "restock_daily": 0
+    },
+    {
+      "item_id": "tool_rod",
+      "sell_price": 42,
+      "buy_price": 0,
+      "stock_cap": 3,
+      "restock_daily": 0
+    },
+    {
+      "item_id": "tool_sickle",
+      "sell_price": 30,
       "buy_price": 0,
       "stock_cap": 3,
       "restock_daily": 0

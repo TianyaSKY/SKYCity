@@ -717,6 +717,7 @@ class WorldEngine:
                     satiety_restore=seed["satiety_restore"],
                     mood_restore=seed["mood_restore"],
                     work_bonus=seed["work_bonus"],
+                    work_bonus_jobs=seed["work_bonus_jobs"],
                     yield_bonus=seed["yield_bonus"],
                     base_price=seed["base_price"],
                 )

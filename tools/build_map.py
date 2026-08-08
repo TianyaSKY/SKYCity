@@ -111,6 +111,10 @@ CARPENTER_PATH_COLS = [10]  # rows 6..21 -> main road (row 21)
 LIMUJIANG_PATH_COLS = [12]  # rows 6..21 -> main road
 SUNSHEN_PATH_COLS = [4]  # rows 11..21 -> main road (row 21)
 GARDEN_PATH_COLS = [6]  # rows 15..21 -> main road
+# M19 gathering spots: forest north of the shop road, river bank east of the
+# pond; each needs a nav path so agents can walk there (is_road decides).
+FOREST_PATH_COLS = [20]  # rows 5..12 -> shop road (row 12)
+POND_PATH_COLS = [8]  # rows 22..32 -> main road (rows 20-21)
 PLAZA = ((28, 18), (36, 23))  # inclusive corners (col,row)
 POND_CELLS = [(6, 32), (7, 32), (6, 33), (7, 33)]
 FIELD = ((43, 26), (51, 31))  # crop field corners
@@ -152,6 +156,9 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "stall_plaza_1": (30, 19),
     "stall_plaza_2": (33, 19),
     "stall_plaza_3": (30, 22),
+    # M19 采集点: 村北树林伐木、池塘东岸钓鱼（锚点格进 occupied 防树）。
+    "forest": (20, 5),
+    "river_bank": (8, 32),
 }
 
 LOCATIONS: dict[str, dict] = {
@@ -199,6 +206,15 @@ LOCATIONS: dict[str, dict] = {
     },
     "stall_plaza_3": {
         "name": "广场摊位三", "location_type": "stall", "capacity": 4,
+        "open_hour": 6, "close_hour": 22,
+    },
+    # M19: 自雇采集点（伐木/钓鱼），6-22 点开放，随 map 重建。
+    "forest": {
+        "name": "村北树林", "location_type": "field", "capacity": 8,
+        "open_hour": 6, "close_hour": 22,
+    },
+    "river_bank": {
+        "name": "河边", "location_type": "field", "capacity": 8,
         "open_hour": 6, "close_hour": 22,
     },
 }
@@ -278,6 +294,13 @@ INTERACTABLES: dict[str, dict] = {
                         "col": 10, "row": 6},
     "garden_bed": {"object_type": "farm_field", "location_id": "flower_garden",
                    "col": 6, "row": 15},
+    # M19 gathering interactables (jobs.json 锚定 location_id + interactable_id)。
+    "forest_trees": {"object_type": "forest_trees", "location_id": "forest",
+                     "col": 20, "row": 5},
+    "fishing_spot": {"object_type": "fishing_spot", "location_id": "river_bank",
+                     "col": 8, "row": 32},
+    "bee_garden": {"object_type": "bee_garden", "location_id": "flower_garden",
+                   "col": 5, "row": 15},
 }
 
 
@@ -311,6 +334,10 @@ def is_road(c: int, r: int) -> bool:
     if c in SUNSHEN_PATH_COLS and 11 <= r <= 21:
         return True
     if c in GARDEN_PATH_COLS and 15 <= r <= 21:
+        return True
+    if c in FOREST_PATH_COLS and 5 <= r <= 12:
+        return True
+    if c in POND_PATH_COLS and 22 <= r <= 32:
         return True
     return False
 
@@ -387,7 +414,7 @@ def build_layers() -> dict:
         occupied.add((c, r))
     for (c, r) in POND_CELLS:
         occupied.add((c, r))
-    occupied.update((32, 20), (28, 22))
+    occupied.update((32, 20), (28, 22), (20, 5), (8, 32))
     door_cells = {(c, r + 1) for _bid, (c, r, _t) in BUILDINGS.items()}
 
     for r in range(2, H - 2):

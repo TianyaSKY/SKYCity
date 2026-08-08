@@ -216,7 +216,7 @@ def test_plant_lifecycle_grow_and_harvest(engine: WorldEngine) -> None:
     assert ok, err
     assert envelope is not None and envelope.type == "crop_harvested"
     assert crop_rows(engine, world_id) == []  # cell cleared (R23.6)
-    assert held_quantity(engine, world_id, agent_id, "wheat") == 2  # yield ×2
+    assert held_quantity(engine, world_id, agent_id, "wheat") == 4  # yield ×4 (M19)
     # Farmer remembers planting + harvesting (M6 hooks).
     session = SessionLocal()
     try:
@@ -409,9 +409,9 @@ def test_harvest_with_fertilizer_bonus(engine: WorldEngine) -> None:
     )
     assert ok, err
     products = envelope.payload["products"]
-    # Base wheat×2 + fertilizer yield_bonus(1)×2 held = ×4.
-    assert products == [{"item_id": "wheat", "quantity": 4}]
-    assert held_quantity(engine, world_id, agent_id, "wheat") == 4
+    # Base wheat×4 (M19) + fertilizer yield_bonus(1)×2 held = ×6.
+    assert products == [{"item_id": "wheat", "quantity": 6}]
+    assert held_quantity(engine, world_id, agent_id, "wheat") == 6
 
 
 # --------------------------------------------------------------------------- #
@@ -622,7 +622,7 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
             ("wait", {"minutes": 240, "reason": "等小麦长大"}),
             ("harvest", {"col": plant_cell[0], "row": plant_cell[1], "reason": "收小麦"}),
             ("move", {"destination_id": "village_shop", "reason": "去商店卖小麦"}),
-            ("sell_item", {"item_id": "wheat", "quantity": 2, "reason": "卖掉收获的小麦"}),
+            ("sell_item", {"item_id": "wheat", "quantity": 4, "reason": "卖掉收获的小麦"}),
         ]
     }
     for other in ("agent_zhangming", "agent_chenyu", "agent_wangfang", "agent_laozhang", "agent_touzi"):
@@ -655,8 +655,8 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
         )
         assert harvest_ok and sell_ok
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        # 50 - 5 (seed) + 6 (wheat×2 @3) = 51; wheat fully sold.
-        assert agent.money == 51, f"money={agent.money}"
+        # 50 - 5 (seed) + 16 (wheat×4 @4, M19) = 61; wheat fully sold.
+        assert agent.money == 3011, f"money={agent.money}"
         assert held_quantity(eng, world_id, "agent_linxia", "wheat") == 0
         # No crop left on the farm.
         assert crop_rows(eng, world_id) == []

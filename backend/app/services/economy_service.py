@@ -15,6 +15,7 @@ retrying BEGIN IMMEDIATE transaction (app.database.unit_of_work).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from loguru import logger
@@ -54,6 +55,8 @@ MSG_NO_MONEY = "余额不足"
 MSG_NO_STOCK = "库存不足"
 MSG_NOT_IN_INVENTORY = "背包中没有该物品"
 MSG_NOT_BUYABLE = "商店不收购该物品"
+MSG_SELL_TO_SELF = "不能卖货给自己店铺"
+MSG_OWNER_POOR = "店主资金不足"
 MSG_STORE_FULL = "商店收不下"
 MSG_ITEM_MISSING = "物品不存在"
 MSG_NOT_FOOD = "该物品不是食物"
@@ -193,7 +196,7 @@ class EconomyService:
             item = items.get(row.item_id)
             if item is None:
                 continue
-            bonus_pct += item.work_bonus * row.quantity
+            bonus_pct += self._item_work_bonus(item, job_id) * row.quantity
             yield_extra += item.yield_bonus * row.quantity
 
         energy_spent = max(int(job.energy_cost_per_hour * job.duration_minutes / 60), 0)
@@ -556,9 +559,19 @@ class EconomyService:
                 return False, None, MSG_STORE_CLOSED  # R8
             if product.buy_price <= 0:
                 return False, None, MSG_NOT_BUYABLE
-            if not store.company_id:
-                # A4: unbound stores would mint money (agent paid, nobody
-                # pays) — reject before the stock mutation.
+            # M19: a personal store may buy (owner pays from own balance);
+            # unbound stores would mint money (agent paid, nobody pays).
+            owner: Agent | None = None
+            if store.owner_agent_id:
+                if store.owner_agent_id == agent_id:
+                    return False, None, MSG_SELL_TO_SELF
+                owner = session.get(
+                    Agent,
+                    {"world_id": world_id, "agent_id": store.owner_agent_id},
+                )
+                if owner is None:
+                    return False, None, MSG_STORE_UNBOUND
+            elif not store.company_id:
                 return False, None, MSG_STORE_UNBOUND
             inventory = session.get(
                 Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}
@@ -584,6 +597,8 @@ class EconomyService:
             )
             if company is not None and company.money < total:
                 return False, None, "企业资金不足"
+            if owner is not None and owner.money < total:
+                return False, None, MSG_OWNER_POOR  # R7: no credit either
 
             result = session.execute(
                 update(StoreProduct)
@@ -630,6 +645,52 @@ class EconomyService:
                         "amount": -total,
                         "balance": company.money,
                         "reason": f"商店收购 {item_name}×{quantity}",
+                    },
+                    trace_id,
+                )
+            elif owner is not None:
+                # M19: personal-store purchase — the owner pays from their
+                # own balance (mirror of the R41 sale settlement).
+                owner.money -= total
+                session.add(
+                    Transaction(
+                        world_id=world_id,
+                        agent_id=owner.agent_id,
+                        type="expense",
+                        amount=-total,
+                        balance_after=owner.money,
+                        item_id=item_id,
+                        quantity=quantity,
+                        reason=f"店铺收购 {item_name}×{quantity}",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "store_purchase_completed",
+                    {
+                        "store_id": store.store_id,
+                        "owner_agent_id": owner.agent_id,
+                        "seller_agent_id": agent_id,
+                        "item_id": item_id,
+                        "item_name": item_name,
+                        "quantity": quantity,
+                        "unit_price": product.buy_price,
+                        "total": total,
+                    },
+                    trace_id,
+                )
+                runtime.event_bus.publish(
+                    session,
+                    world.world_time,
+                    "money_changed",
+                    {
+                        "agent_id": owner.agent_id,
+                        "amount": -total,
+                        "balance": owner.money,
+                        "reason": f"店铺收购 {item_name}×{quantity}",
                     },
                     trace_id,
                 )
@@ -827,6 +888,26 @@ class EconomyService:
         if store is None:
             return None
         return product, store
+
+    @staticmethod
+    def _item_work_bonus(item: Item, job_id: str) -> int:
+        """M19: per-job tool bonus wins over the flat work_bonus.
+
+        ``item.work_bonus_jobs`` is a JSON object {job_id: bonus}; when the
+        current job matches a key, that value applies, else the legacy flat
+        bonus. Malformed JSON degrades to the flat bonus.
+        """
+        if item.work_bonus_jobs:
+            try:
+                mapping = json.loads(item.work_bonus_jobs)
+            except (TypeError, ValueError):
+                mapping = {}
+            if isinstance(mapping, dict) and job_id in mapping:
+                try:
+                    return int(mapping[job_id])
+                except (TypeError, ValueError):
+                    pass
+        return item.work_bonus
 
     @staticmethod
     def _store_open(

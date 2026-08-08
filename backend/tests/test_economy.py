@@ -332,7 +332,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
 
     row = agent_row(engine, world_id, "agent_linxia")
     assert row.action_type is None
-    assert row.money == 80  # 50 + wage 30 (R10)
+    assert row.money == 3030  # 3000 + wage 30 (R10)
     # energy: -1/h x2 (hourly) then -8 work drain (4/h x 2h) = 90
     assert row.energy == 90
     assert row.satiety == 98  # -1/h x2 (R14)
@@ -355,7 +355,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
     assert len(txs) == 1
     assert txs[0].type == "work_wage"
     assert txs[0].amount == 30
-    assert txs[0].balance_after == 80
+    assert txs[0].balance_after == 3030
 
     types = [e.type for e in engine.events_after(world_id, 0)]
     assert "work_started" in types
@@ -368,7 +368,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
     assert money_events[-1].payload == {
         "agent_id": "agent_linxia",
         "amount": 30,
-        "balance": 80,
+        "balance": 3030,
         "reason": "完成工作 农场劳作 获得工资",
     }
     inv_events = [e for e in engine.events_after(world_id, 0) if e.type == "inventory_changed"]
@@ -401,7 +401,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 38
+    assert row.money == 2988  # 3000 - 12
     assert inventory_of(engine, world_id, "agent_linxia") == {"bread": 1}
 
     session = SessionLocal()
@@ -416,7 +416,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
     txs = transaction_rows(engine, world_id, "agent_linxia")
     assert txs[0].type == "expense"
     assert txs[0].amount == -12
-    assert txs[0].balance_after == 38
+    assert txs[0].balance_after == 2988
     assert txs[0].item_id == "bread"
 
     events = engine.events_after(world_id, 0)
@@ -425,7 +425,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
         and e.payload == {
             "agent_id": "agent_linxia",
             "amount": -12,
-            "balance": 38,
+            "balance": 2988,
             "reason": "购买 面包×1",
         }
         for e in events
@@ -449,13 +449,13 @@ def test_buy_rejected_no_money(engine: WorldEngine) -> None:
     place_agent(engine, world_id, "agent_linxia", "village_shop", *SHOP_ANCHOR)
 
     ok, envelope, reason = engine.economy_service.buy(
-        world_id, "agent_linxia", "bread", quantity=5, reason="囤货"
-    )  # 5 * 12 = 60 > 50
+        world_id, "agent_linxia", "bread", quantity=300, reason="囤货"
+    )  # 300 * 12 = 3600 > 3000
     assert ok is False and envelope is None
     assert reason == MSG_NO_MONEY  # R7: no credit
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 50
+    assert row.money == 3000
     assert inventory_of(engine, world_id, "agent_linxia") == {}
     session = SessionLocal()
     try:
@@ -481,7 +481,7 @@ def test_buy_rejected_no_stock(engine: WorldEngine) -> None:
     assert reason == MSG_NO_STOCK
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 50
+    assert row.money == 3000
     assert inventory_of(engine, world_id, "agent_linxia") == {}
     session = SessionLocal()
     try:
@@ -553,7 +553,7 @@ def test_concurrent_last_item_race_exactly_one_wins(engine: WorldEngine) -> None
     finally:
         session.close()
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 38  # exactly one transaction
+    assert row.money == 2988  # exactly one transaction
     assert inventory_of(engine, world_id, "agent_linxia") == {"bread": 1}
     assert len(transaction_rows(engine, world_id, "agent_linxia")) == 1
 
@@ -580,12 +580,12 @@ def test_sell_success(engine: WorldEngine) -> None:
         "item_id": "wheat",
         "item_name": "小麦",
         "quantity": 1,
-        "unit_price": 3,  # buy_price
-        "total": 3,
+        "unit_price": 4,  # buy_price (M19)
+        "total": 4,
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 53
+    assert row.money == 3004  # 3000 + 4
     assert inventory_of(engine, world_id, "agent_linxia") == {}  # stack emptied
 
     session = SessionLocal()
@@ -599,14 +599,14 @@ def test_sell_success(engine: WorldEngine) -> None:
 
     txs = transaction_rows(engine, world_id, "agent_linxia")
     assert txs[0].type == "income"
-    assert txs[0].amount == 3
-    assert txs[0].balance_after == 53
+    assert txs[0].amount == 4
+    assert txs[0].balance_after == 3004
 
     events = engine.events_after(world_id, 0)
     assert any(e.type == "item_sold" for e in events)
     assert any(
         e.type == "money_changed"
-        and e.payload == {"agent_id": "agent_linxia", "amount": 3, "balance": 53, "reason": "出售 小麦×1"}
+        and e.payload == {"agent_id": "agent_linxia", "amount": 4, "balance": 3004, "reason": "出售 小麦×1"}
         for e in events
     )
 
@@ -617,8 +617,8 @@ def test_sell_rejected_store_full(engine: WorldEngine) -> None:
     place_agent(engine, world_id, "agent_linxia", "village_shop", *SHOP_ANCHOR)
     add_inventory(engine, world_id, "agent_linxia", "wheat", 1)
     # M15: wheat now starts at 0 stock (agent-produce sink) — fill it to cap
-    # explicitly so this test exercises the store-full rejection.
-    set_stock(engine, world_id, "wheat", 30)
+    # explicitly so this test exercises the store-full rejection (cap 60, M19).
+    set_stock(engine, world_id, "wheat", 60)
 
     ok, envelope, reason = engine.economy_service.sell(
         world_id, "agent_linxia", "wheat", quantity=1, reason="卖小麦"
@@ -627,7 +627,7 @@ def test_sell_rejected_store_full(engine: WorldEngine) -> None:
     assert reason == MSG_STORE_FULL
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 50
+    assert row.money == 3000
     assert inventory_of(engine, world_id, "agent_linxia") == {"wheat": 1}
 
 
@@ -807,8 +807,10 @@ def test_exhausted_agent_forced_to_rest(world_config: ParsedWorldConfig) -> None
 
 def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     """Linxia: shop -> 4x buy bread (50-48=2) -> 5th buy fails 余额不足 ->
-    farm work (+30 wage, +wheat) -> sell wheat (+3) -> buy bread (-12) ->
-    eat it. Final balance 23, bread left 4."""
+    farm work (+30 wage, +wheat) -> sell wheat (+4, M19 buy price) -> buy
+    bread (-12) -> eat it. Final balance 24, bread left 4. The low balance
+    is pinned explicitly: since M19 the default INITIAL_MONEY is 3000, which
+    would make the 5th buy succeed and distort the chain."""
     eng = make_engine(
         world_config,
         scripts={"agent_linxia": DEFAULT_SCRIPTS["agent_linxia"]},
@@ -818,19 +820,20 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     world_id = runtime.world_id
     # The shop starts at full wheat stock (30/30); make room so the sell lands.
     set_stock(eng, world_id, "wheat", 29)
+    set_agent(eng, world_id, "agent_linxia", money=50)
 
     done = False
     for _ in range(20):  # up to 1200 game minutes
         advance_minutes(eng, world_id, 60)
         row = agent_row(eng, world_id, "agent_linxia")
         used = any(e.type == "item_used" for e in eng.events_after(world_id, 0))
-        if row.money == 23 and used:
+        if row.money == 24 and used:
             done = True
             break
     assert done, "economic chain did not complete in time"
 
     row = agent_row(eng, world_id, "agent_linxia")
-    assert row.money == 23  # 50 - 4*12 + 30 + 3 - 12
+    assert row.money == 24  # 50 - 4*12 + 30 + 4 - 12
     assert inventory_of(eng, world_id, "agent_linxia") == {"bread": 4}
 
     # item_used carried satiety before/after and actually restored satiety
@@ -866,7 +869,7 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     assert sum(1 for t in txs if t.type == "expense") == 5
     assert sum(1 for t in txs if t.type == "income") == 1
     assert sum(1 for t in txs if t.type == "work_wage") == 1
-    assert txs[-1].balance_after == 23
+    assert txs[-1].balance_after == 24
 
     session = SessionLocal()
     try:
@@ -889,7 +892,7 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     # snapshot contract: inventory array + money visible
     snapshot = eng.snapshot(world_id)
     linxia = next(a for a in snapshot["agents"] if a["agent_id"] == "agent_linxia")
-    assert linxia["money"] == 23
+    assert linxia["money"] == 24
     assert linxia["inventory"] == [{"item_id": "bread", "quantity": 4}]
 
     eng._runtimes.clear()
@@ -959,7 +962,7 @@ def test_hungry_agent_buys_bread_at_shop(world_config) -> None:
         assert runs[-1].tool_arguments["item_id"] == "bread"
         assert runs[-1].success == 1
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent.money == 50 - 12
+        assert agent.money == 2988  # 3000 - 12
     finally:
         session.close()
     eng._runtimes.clear()

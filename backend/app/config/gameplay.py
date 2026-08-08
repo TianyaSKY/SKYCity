@@ -34,7 +34,7 @@ INITIAL_SATIETY = 100
 INITIAL_ENERGY = 100
 INITIAL_MOOD = 100
 INITIAL_LONELINESS = 0
-INITIAL_MONEY = 50
+INITIAL_MONEY = 3000
 
 # 高优先级决策阈值 与 夜间睡觉引导。
 MOOD_BOOST_THRESHOLD = 20
@@ -147,7 +147,7 @@ CLAMP_DEBT = (0, 1000)  # debt 钳制
 # R18 股票
 # --------------------------------------------------------------------------- #
 STOCK_NOISE_RANGE = 2  # 每小时确定性噪声 ±2
-DIV_BUSINESS_PER_SHARE = 5  # 分红 = max(1, 当日经营数 // 5)
+DIV_BUSINESS_PER_SHARE = 3  # 分红 = max(1, 当日经营数 // 3)（M19 由 5 下调增强）
 MAX_SHARES = 9999  # 单笔交易上限（schema le 镜像）
 
 # --------------------------------------------------------------------------- #
@@ -160,11 +160,12 @@ MANAGER_PROFIT_SHARE_PERCENT = 20
 # --------------------------------------------------------------------------- #
 # M18 创业与个人商店
 # --------------------------------------------------------------------------- #
-OPEN_SHOP_CAPITAL = 150  # 开店资本门槛（R39.5：只校验不扣款）
+OPEN_SHOP_CAPITAL = 100  # 开店资本门槛（R39.5：只校验不扣款；M19 由 150 下调）
 STALL_STOCK_CAP = 20  # 个人店每商品货架容量上限
 STALL_INITIAL_STOCK = 5  # 开店首单上架件数（min(持有量, 该值)）
 STALL_MAX_PRODUCTS = 3  # 单店最多商品种类
 PRICE_MAX_MULT = 2.0  # 个人店售价上限倍数（1 ~ base_price × 该值）
+STALL_BUY_MAX_MULT = 1.0  # M19：个人店收购价上限倍数（0 ~ base_price × 该值）
 STALL_OPEN_HOUR = 6  # 摊位/荒地店开门小时（R8 复用）
 STALL_CLOSE_HOUR = 22  # 摊位/荒地店关门小时
 STALL_CAPACITY = 4  # 摊位/荒地店同时容纳最大人数

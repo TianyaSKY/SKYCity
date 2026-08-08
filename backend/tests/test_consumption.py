@@ -224,7 +224,7 @@ def test_tool_rake_boosts_wage(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 121)  # 480 -> 601: completes at 600
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 86  # 50 + wage 30 * 1.2 = 36
+    assert row.money == 3036  # 3000 + wage 30 * 1.2 = 36
     txs = transaction_rows(engine, world_id, "agent_linxia")
     assert txs[-1].type == "work_wage"
     assert txs[-1].amount == 36
@@ -271,16 +271,16 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
     # Shortfall is allowed: the balance goes negative (debt), it is not floored.
     for agent_id in ("agent_linxia", "agent_zhangming"):
         row = agent_row(engine, world_id, agent_id)
-        assert row.money == -70  # 50 - 120 upkeep
+        assert row.money == 2880  # 3000 - 120 upkeep
     row = agent_row(engine, world_id, "agent_touzi")
-    assert row.money == 380  # 500 - 120 upkeep (identity initial_money)
+    assert row.money == 4880  # 5000 - 120 upkeep (identity initial_money)
 
     txs = transaction_rows(engine, world_id, "agent_linxia")
     upkeep = [t for t in txs if t.type == "upkeep"]
     assert len(upkeep) == 1
     assert upkeep[0].amount == -120
     assert upkeep[0].reason == "每日生活开销"
-    assert upkeep[0].balance_after == -70
+    assert upkeep[0].balance_after == 2880
 
     events = engine.events_after(world_id, 0)
     moved = [
@@ -293,7 +293,7 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
     assert moved and moved[-1].payload == {
         "agent_id": "agent_linxia",
         "amount": -120,
-        "balance": -70,
+        "balance": 2880,
         "reason": "每日生活开销",
     }
 

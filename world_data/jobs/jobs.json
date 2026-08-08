@@ -138,6 +138,54 @@
       "inputs": [],
       "formal_only": true,
       "description": "正式班次：在晨露花圃照料鲜花，产物进入花圃企业库存"
+    },
+    {
+      "job_id": "job_woodcutting",
+      "name": "伐木",
+      "location_id": "forest",
+      "interactable_id": "forest_trees",
+      "duration_minutes": 180,
+      "wage": 12,
+      "energy_cost_per_hour": 4,
+      "products": [
+        {
+          "item_id": "wood",
+          "quantity": 3
+        }
+      ],
+      "description": "自雇活：在村北树林砍柴，木材可卖商店或用来建造"
+    },
+    {
+      "job_id": "job_fishing",
+      "name": "钓鱼",
+      "location_id": "river_bank",
+      "interactable_id": "fishing_spot",
+      "duration_minutes": 180,
+      "wage": 12,
+      "energy_cost_per_hour": 3,
+      "products": [
+        {
+          "item_id": "fish",
+          "quantity": 2
+        }
+      ],
+      "description": "自雇活：在河边垂钓，鲜鱼可卖商店或自己吃"
+    },
+    {
+      "job_id": "job_honey_collect",
+      "name": "采蜜",
+      "location_id": "flower_garden",
+      "interactable_id": "bee_garden",
+      "duration_minutes": 120,
+      "wage": 10,
+      "energy_cost_per_hour": 2,
+      "products": [
+        {
+          "item_id": "honey",
+          "quantity": 1
+        }
+      ],
+      "description": "自雇活：在花圃的蜂箱收蜂蜜，蜂蜜可卖商店或享用"
     }
   ]
 }

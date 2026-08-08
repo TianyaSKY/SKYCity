@@ -1,6 +1,6 @@
 {
   "manifest_version": "1.0",
-  "map_version": "1.0.0",
+  "map_version": "1.1.0",
   "tile_width": 16,
   "tile_height": 16,
   "assets": [

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from app.database.models.llm_runs import LLMRun
+from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.schemas.actions import ActionRequest, ActionSuccess
@@ -320,3 +321,103 @@ async def world_stocks(request: Request, world_id: str) -> StocksResponse:
     if result is None:
         raise HTTPException(status_code=404, detail="世界不存在")
     return StocksResponse(**result)
+
+
+@router.get("/{world_id}/stats/llm")
+async def llm_stats(request: Request, world_id: str) -> dict:
+    """数据看板: llm_runs 聚合 —— 总量/Token/失败率/延迟 + 按智能体、按模型。"""
+    if _engine(request).get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    session = SessionLocal()
+    try:
+        total = session.execute(
+            select(
+                func.count(),
+                func.coalesce(func.sum(LLMRun.input_tokens), 0),
+                func.coalesce(func.sum(LLMRun.output_tokens), 0),
+                func.coalesce(func.sum(case((LLMRun.success == 0, 1), else_=0)), 0),
+                func.coalesce(func.avg(LLMRun.latency_ms), 0),
+            ).where(LLMRun.world_id == world_id)
+        ).one()
+        calls = total[0] or 0
+        agent_rows = session.execute(
+            select(
+                LLMRun.agent_id,
+                func.count(),
+                func.coalesce(func.sum(LLMRun.input_tokens), 0),
+                func.coalesce(func.sum(LLMRun.output_tokens), 0),
+                func.coalesce(func.sum(case((LLMRun.success == 0, 1), else_=0)), 0),
+                func.coalesce(func.avg(LLMRun.latency_ms), 0),
+            )
+            .where(LLMRun.world_id == world_id)
+            .group_by(LLMRun.agent_id)
+            .order_by(func.count().desc(), LLMRun.agent_id)
+        ).all()
+        model_rows = session.execute(
+            select(
+                LLMRun.model,
+                func.count(),
+                func.coalesce(func.sum(LLMRun.input_tokens), 0),
+                func.coalesce(func.sum(LLMRun.output_tokens), 0),
+            )
+            .where(LLMRun.world_id == world_id)
+            .group_by(LLMRun.model)
+            .order_by(func.count().desc(), LLMRun.model)
+        ).all()
+    finally:
+        session.close()
+    return {
+        "total_calls": calls,
+        "total_input_tokens": int(total[1] or 0),
+        "total_output_tokens": int(total[2] or 0),
+        "failed_calls": int(total[3] or 0),
+        "error_rate": round(total[3] / calls, 4) if calls else 0.0,
+        "avg_latency_ms": int(round(total[4] or 0)),
+        "by_agent": [
+            {
+                "agent_id": row[0],
+                "calls": row[1],
+                "input_tokens": int(row[2] or 0),
+                "output_tokens": int(row[3] or 0),
+                "failed": int(row[4] or 0),
+                "avg_latency_ms": int(round(row[5] or 0)),
+            }
+            for row in agent_rows
+        ],
+        "by_model": [
+            {
+                "model": row[0],
+                "calls": row[1],
+                "input_tokens": int(row[2] or 0),
+                "output_tokens": int(row[3] or 0),
+            }
+            for row in model_rows
+        ],
+    }
+
+
+@router.get("/{world_id}/stats/events")
+async def event_stats(request: Request, world_id: str) -> dict:
+    """数据看板: world_events 聚合 —— 总数、最新序号、按类型分布。"""
+    if _engine(request).get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    session = SessionLocal()
+    try:
+        type_rows = session.execute(
+            select(WorldEvent.type, func.count())
+            .where(WorldEvent.world_id == world_id)
+            .group_by(WorldEvent.type)
+            .order_by(func.count().desc(), WorldEvent.type)
+        ).all()
+        latest = session.execute(
+            select(func.coalesce(func.max(WorldEvent.sequence), 0)).where(
+                WorldEvent.world_id == world_id
+            )
+        ).scalar_one()
+    finally:
+        session.close()
+    return {
+        "total": sum(count for _, count in type_rows),
+        "latest_sequence": int(latest),
+        "by_type": [{"type": event_type, "count": count} for event_type, count in type_rows],
+    }

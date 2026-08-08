@@ -104,8 +104,8 @@ def test_transfer_success(engine: WorldEngine) -> None:
         "amount": 30,
         "reason": "还你钱",
     }
-    assert agent_row_money(engine, world_id, "agent_linxia") == 20  # 50 - 30
-    assert agent_row_money(engine, world_id, "agent_zhangming") == 80  # 50 + 30
+    assert agent_row_money(engine, world_id, "agent_linxia") == 2970  # 3000 - 30
+    assert agent_row_money(engine, world_id, "agent_zhangming") == 3030  # 3000 + 30
 
     types = [e.type for e in engine.events_after(world_id, 0)]
     assert "money_transferred" in types
@@ -115,18 +115,18 @@ def test_transfer_success(engine: WorldEngine) -> None:
         if e.type == "money_changed" and e.payload.get("amount") in (-30, 30)
     ]
     assert len(moved) == 2, "both sides must get their money_changed"
-    assert sorted(e.payload["balance"] for e in moved) == [20, 80]
+    assert sorted(e.payload["balance"] for e in moved) == [2970, 3030]
 
     sender_txs = transaction_rows(engine, world_id, "agent_linxia")
     assert len(sender_txs) == 1
     assert sender_txs[0].type == "transfer"
     assert sender_txs[0].amount == -30
-    assert sender_txs[0].balance_after == 20
+    assert sender_txs[0].balance_after == 2970
     recipient_txs = transaction_rows(engine, world_id, "agent_zhangming")
     assert len(recipient_txs) == 1
     assert recipient_txs[0].type == "transfer"
     assert recipient_txs[0].amount == 30
-    assert recipient_txs[0].balance_after == 80
+    assert recipient_txs[0].balance_after == 3030
 
 
 def test_transfer_insufficient(engine: WorldEngine) -> None:
@@ -141,7 +141,7 @@ def test_transfer_insufficient(engine: WorldEngine) -> None:
     assert ok is False and envelope is None
     assert reason == MSG_NO_MONEY  # R7: no credit
     assert agent_row_money(engine, world_id, "agent_linxia") == 5
-    assert agent_row_money(engine, world_id, "agent_zhangming") == 50
+    assert agent_row_money(engine, world_id, "agent_zhangming") == 3000
     types = [e.type for e in engine.events_after(world_id, 0)]
     assert "money_transferred" not in types
 
@@ -288,7 +288,7 @@ def test_http_contract(client: TestClient) -> None:
         json={
             "action_type": "transfer_money",
             "target_agent_id": "agent_zhangming",
-            "amount": 100,
+            "amount": 4000,  # > initial 3000 (M19 balance)
             "reason": "test",
         },
     )
@@ -342,12 +342,12 @@ def test_llm_script_transfer(world_config: ParsedWorldConfig) -> None:
     done = False
     for _ in range(3):
         advance_minutes(eng, world_id, 10)
-        if agent_row_money(eng, world_id, "agent_linxia") == 20:
+        if agent_row_money(eng, world_id, "agent_linxia") == 2970:
             done = True
             break
     assert done, "scripted transfer_money decision did not execute"
-    assert agent_row_money(eng, world_id, "agent_linxia") == 20  # 50 - 30
-    assert agent_row_money(eng, world_id, "agent_zhangming") == 80  # 50 + 30
+    assert agent_row_money(eng, world_id, "agent_linxia") == 2970  # 3000 - 30
+    assert agent_row_money(eng, world_id, "agent_zhangming") == 3030  # 3000 + 30
     eng._runtimes.clear()
 
 
