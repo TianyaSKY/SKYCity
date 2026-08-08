@@ -283,6 +283,56 @@ def test_decision_loop_survives_restart(world_config: ParsedWorldConfig) -> None
     eng2._runtimes.clear()
 
 
+def test_restart_unwedges_stale_is_deciding(world_config: ParsedWorldConfig) -> None:
+    """Regression: a crashed process can leave is_deciding=True in the DB,
+    which wedges decide()'s claim (``is_deciding=False -> True``) forever —
+    the agent never decides again and stands idle for hundreds of game
+    minutes. load_existing must reset the flag (a fresh process has no
+    in-flight tasks)."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("卡死恢复", autonomous=True)
+    world_id = runtime.world_id
+    advance_minutes(eng, world_id, 10)
+
+    session = SessionLocal()
+    try:
+        before = len(
+            session.scalars(
+                select(LLMRun).where(LLMRun.world_id == world_id)
+            ).all()
+        )
+        # simulate the process dying mid-decision: every agent's in-flight
+        # flag survives into the next process
+        for agent in session.scalars(
+                select(Agent).where(Agent.world_id == world_id)
+        ).all():
+            agent.is_deciding = True
+        session.commit()
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+    # restart: new engine, same DB -> load_existing must reset the flag
+    eng2 = make_engine(world_config)
+    eng2.load_existing()
+    advance_minutes(eng2, world_id, 20)
+
+    session = SessionLocal()
+    try:
+        after = len(
+            session.scalars(
+                select(LLMRun).where(LLMRun.world_id == world_id)
+            ).all()
+        )
+        assert after > before, (
+            "wedged agents must resume deciding after restart "
+            f"(runs before={before}, after={after})"
+        )
+    finally:
+        session.close()
+    eng2._runtimes.clear()
+
+
 class ToolOutputProvider:
     """Decision provider mimicking the real OpenAI SDK path: the tool was
     already executed and ``tool_output`` carries its JSON result. The service

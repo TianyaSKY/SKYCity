@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from starlette.websockets import WebSocket
 
@@ -231,6 +231,12 @@ class WorldEngine:
         """Restore runtimes for worlds persisted in the DB (restart-safe)."""
         session = self._session_factory()
         try:
+            # A fresh process has no in-flight decision tasks, so a stale
+            # is_deciding=True left by a crashed/restarted process is dead
+            # state. Keeping it would wedge the decision loop permanently:
+            # decide() claims via ``is_deciding=False -> True`` and would
+            # refuse forever, leaving the agent idle for hours.
+            session.execute(update(Agent).values(is_deciding=False))
             worlds = session.scalars(select(World).order_by(World.world_id)).all()
             for world in worlds:
                 runtime = self._ensure_runtime(
