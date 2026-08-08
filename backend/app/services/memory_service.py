@@ -518,6 +518,8 @@ class MemoryRecorder:
             self._on_god_action(session, envelope, payload)
         elif event_type == "structure_built":
             self._on_structure_built(session, envelope, payload)
+        elif event_type == "agent_move_completed":
+            self._on_move_completed(session, envelope, payload)
         elif event_type == "crop_planted":
             self._on_crop_planted(session, envelope, payload)
         elif event_type == "crop_harvested":
@@ -771,6 +773,30 @@ class MemoryRecorder:
             session=session, world_id=envelope.world_id, agent_id=agent_id,
             memory_type="episodic", text=f"神谕：{text}", importance=0.7,
             entities=[agent_id], keywords=["神谕"],
+        )
+
+    def _on_move_completed(
+            self, session: Session, envelope: WorldEventEnvelope, payload: dict
+    ) -> None:
+        """The mover remembers arriving somewhere and how long it took.
+
+        The duration is the R6 cost already settled (steps × MINUTES_PER_STEP
+        × weather multiplier at departure), so repeated trips teach the agent
+        real travel costs.
+        """
+        agent_id = payload.get("agent_id")
+        if not agent_id:
+            return
+        destination_id = payload.get("destination_id") or ""
+        destination_name = payload.get("destination_name") or destination_id
+        duration = payload.get("duration_minutes") or 0
+        cost = f"（路程{duration}分钟）" if duration else ""
+        self._memory_service.record(
+            session=session, world_id=envelope.world_id, agent_id=agent_id,
+            memory_type="episodic",
+            text=f"我移动到了 {destination_name}{cost}",
+            importance=0.4,
+            entities=[destination_id], keywords=["移动"],
         )
 
     def _on_structure_built(

@@ -34,7 +34,8 @@ async def move(
         destination_id: str,
         reason: str,
 ) -> str:
-    """移动到地图上的一个地点（destination_id 必须是可见地点列表中的 id）。"""
+    """移动到地图上的一个地点（destination_id 必须是可见地点列表中的 id；
+    路程耗时已在观察的【可见地点】中标注，雨雪天更慢）。"""
     ok, envelope, err = ctx.context.action_service.execute_move(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,

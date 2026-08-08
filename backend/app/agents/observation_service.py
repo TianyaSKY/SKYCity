@@ -39,6 +39,7 @@ from app.database.models.worlds import World
 from app.config.gameplay import (
     HOTEL_NIGHTLY_FEE,
     MANAGER_PROFIT_SHARE_PERCENT,
+    MINUTES_PER_STEP,
     OBSERVATION_MAX_CHARS,
     OBSERVATION_MAX_SHOP_PRODUCTS,
     OBSERVATION_MAX_UNREAD_MESSAGES,
@@ -51,7 +52,9 @@ from app.config.gameplay import (
     STALL_MAX_DISTANCE,
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
+    WEATHER_MULTIPLIERS,
 )
+from app.services.action_execution_service import find_path
 from app.services.seed_loader import load_blueprints, load_companies, load_crops, load_jobs
 from app.world_engine.engine import is_location_open
 
@@ -260,6 +263,12 @@ def build_observation(
             lines.append("（没有新消息）")
 
         lines.append("【可见地点】")
+        # R6 travel cost: BFS steps × MINUTES_PER_STEP × weather multiplier.
+        # Shown per location so the agent can weigh time before moving.
+        walkable = (
+            engine.effective_walkable(session, world_id) if engine is not None else None
+        )
+        speed_multiplier = WEATHER_MULTIPLIERS.get(world.weather, 1.0)
         for loc in locations:
             open_state = (
                 "开门"
@@ -267,7 +276,16 @@ def build_observation(
                 else "关门"
             )
             mark = "（当前位置）" if loc.location_id == agent.location_id else ""
-            lines.append(f"- {loc.name}({loc.location_id}): {open_state}{mark}")
+            if loc.location_id != agent.location_id and walkable is not None:
+                path = find_path((agent.col, agent.row), (loc.col, loc.row), walkable)
+                if path is None:
+                    cost_text = "，无法到达"
+                else:
+                    minutes = max(len(path) - 1, 0) * MINUTES_PER_STEP * speed_multiplier
+                    cost_text = f"，路程约{int(minutes)}分钟"
+            else:
+                cost_text = ""
+            lines.append(f"- {loc.name}({loc.location_id}): {open_state}{mark}{cost_text}")
 
         # M18 R39: where this agent could open a personal shop — free map
         # stalls plus nearby wild cells that are walkable and reachable.
@@ -318,7 +336,10 @@ def build_observation(
             lines.append("（当前地点没有其他人）")
 
         lines.append("【可做的事】")
-        lines.append("- move(destination_id, reason): 移动到可见地点中的某个 id")
+        lines.append(
+            "- move(destination_id, reason): 移动到可见地点中的某个 id"
+            "（路程耗时见上方地点列表，雨雪天更慢）"
+        )
         lines.append(f"- wait(minutes, reason): 原地等待 {WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES} 分钟")
         lines.append(
             f"- sleep(minutes, reason): 睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 "

@@ -153,9 +153,14 @@ def test_conversation_records_memories_for_both_parties(world_config: ParsedWorl
     assert sorted(sent.entities_json) == ["agent_linxia", "agent_zhangming"]
     assert sent.importance == 0.6
 
-    # memory_created events are part of the persisted event log.
-    event_types = [e.type for e in eng.events_after(world_id, 0)]
-    assert event_types.count("memory_created") == 2
+    # memory_created events are part of the persisted event log. The two
+    # park_at moves each record a movement memory too, so count only the
+    # conversation-derived ones (text contains 说).
+    memory_events = [
+        e for e in eng.events_after(world_id, 0)
+        if e.type == "memory_created" and "说" in (e.payload.get("text") or "")
+    ]
+    assert len(memory_events) == 2
     eng._runtimes.clear()
 
 
@@ -210,8 +215,12 @@ def test_secrets_are_not_recorded(world_config: ParsedWorldConfig) -> None:
 
     assert memories_for(world_id, "agent_wangfang") == []
     assert memories_for(world_id, "agent_laozhang") == []
-    assert len(memories_for(world_id, "agent_linxia")) == 1
-    assert len(memories_for(world_id, "agent_zhangming")) == 1
+    # Each participant has exactly one movement memory (park_at) and one
+    # conversation memory; no secrets leak to third parties.
+    for agent_id in ("agent_linxia", "agent_zhangming"):
+        mems = memories_for(world_id, agent_id)
+        assert len(mems) == 2
+        assert len([m for m in mems if "悄悄话" in m.text]) == 1
     eng._runtimes.clear()
 
 
@@ -350,6 +359,57 @@ def test_observation_memory_section_contract(world_config: ParsedWorldConfig) ->
     assert "- [episodic] 我在广场见过张明（重要度 0.6）" in filled
     # The failure marker section the fake provider parses stays intact.
     assert "【上次工具结果】" in filled
+    eng._runtimes.clear()
+
+
+def test_move_completed_records_movement_memory(world_config: ParsedWorldConfig) -> None:
+    """T6-3: arriving somewhere is remembered with the R6 travel time."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("移动记忆")
+    world_id = runtime.world_id
+
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+
+    mems = memories_for(world_id, "agent_linxia")
+    move_mems = [m for m in mems if "移动" in (m.keywords_json or [])]
+    assert len(move_mems) == 1, f"expected one movement memory, got {len(move_mems)}"
+    memory = move_mems[0]
+    assert memory.memory_type == "episodic"
+    plaza = next(
+        loc for loc in world_config.locations if loc.location_id == "village_plaza"
+    )
+    assert plaza.name in memory.text
+    assert "分钟" in memory.text  # the settled travel cost is part of the memory
+    assert memory.importance == 0.4
+    assert memory.entities_json == ["village_plaza"]
+    # The move itself produced no other memories.
+    assert len(mems) == 1
+    eng._runtimes.clear()
+
+
+def test_observation_shows_movement_cost(world_config: ParsedWorldConfig) -> None:
+    """【可见地点】 carries the R6 travel time per location (cost-aware LLM)."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("移动成本")
+    world_id = runtime.world_id
+
+    observation = build_observation(
+        world_id, "agent_linxia", SessionLocal,
+        memory_service=eng.memory_service, engine=eng,
+    )
+    section = observation.split("【可见地点】", 1)[1].split("【", 1)[0]
+    lines = [line for line in section.splitlines() if line.startswith("- ")]
+    assert lines, "【可见地点】 section must list locations"
+    seen_current = False
+    for line in lines:
+        if "（当前位置）" in line:
+            seen_current = True
+            continue
+        assert "路程约" in line and "分钟" in line, line
+    assert seen_current
+    # The action list tells the model to weigh travel time.
+    assert "路程耗时见上方地点列表" in observation
+    assert "雨雪天更慢" in observation
     eng._runtimes.clear()
 
 
@@ -570,13 +630,14 @@ def test_rest_memories_and_relationships(client: TestClient) -> None:
     memories = client.get(
         f"/api/worlds/{world_id}/agents/agent_linxia/memories?limit=30"
     ).json()
-    assert isinstance(memories, list) and len(memories) == 1
+    # park_at move memory + conversation memory.
+    assert isinstance(memories, list) and len(memories) == 2
     assert set(memories[0]) == {
         "memory_id", "memory_type", "text", "importance", "created_at", "recall_count",
     }
-    assert memories[0]["memory_type"] == "episodic"
-    assert "你好呀" in memories[0]["text"]
-    assert memories[0]["created_at"] == world_time(world_id)
+    conv = next(m for m in memories if "你好呀" in m["text"])
+    assert conv["memory_type"] == "episodic"
+    assert conv["created_at"] == world_time(world_id)
 
     relationships = client.get(
         f"/api/worlds/{world_id}/agents/agent_linxia/relationships"

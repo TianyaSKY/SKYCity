@@ -355,7 +355,12 @@ class ActionExecutionService:
                 agent_id,
                 "move_completed",
                 ends_at,
-                {"destination_id": destination_id, "destination_name": destination.name},
+                {
+                    "destination_id": destination_id,
+                    "destination_name": destination.name,
+                    "duration_minutes": duration,
+                    "steps": steps,
+                },
             )
             envelope = runtime.event_bus.publish(
                 session,
@@ -601,7 +606,13 @@ class ActionExecutionService:
             session,
             world_time,
             "agent_move_completed",
-            {"agent_id": action.agent_id, "at": [destination.col, destination.row]},
+            {
+                "agent_id": action.agent_id,
+                "at": [destination.col, destination.row],
+                "destination_id": destination.location_id,
+                "destination_name": destination.name,
+                "duration_minutes": payload.get("duration_minutes", 0),
+            },
         )
 
         # M4 R9: moving out of earshot ends the mover's active conversations.

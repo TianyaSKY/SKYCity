@@ -47,7 +47,7 @@
 | `world_speed_changed`   | `{speed}`                                                                                                      | 调速                                                                                   |
 | `agent_state_changed`   | `{agent_id, state: {...}}`                                                                                     | 状态/需求变化                                                                          |
 | `agent_move_started`    | `{agent_id, from: [c,r], to: [c,r], path: [[c,r]...], duration_minutes, speed_multiplier}`            | 移动开始                                                                               |
-| `agent_move_completed`  | `{agent_id, at: [c,r]}`                                                                                        | 移动完成                                                                               |
+| `agent_move_completed`  | `{agent_id, at: [c,r], destination_id, destination_name, duration_minutes}`  | 移动完成（duration_minutes = 出发时结算的路程耗时，供记忆/回放）   |
 | `agent_wait_started`    | `{agent_id, minutes, reason}`                                                                                  | 等待开始                                                                               |
 | `agent_wait_completed`  | `{agent_id}`                                                                                                   | 等待结束                                                                               |
 | `agent_sleep_started`   | `{agent_id, minutes, ends_at, reason, place, fee}`                                                             | 睡觉开始（R14：有家在家、无家在旅店；`fee`=旅店房费，家睡为 0）                        |

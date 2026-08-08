@@ -69,7 +69,8 @@ _BEHAVIORAL_RULES = f"""行为规则：
 """
 
 _TOOL_CONVENTIONS = f"""工具约定：
-- move(destination_id, reason)：移动到指定地点。destination_id 必须是可见地点列表中的 id。
+- move(destination_id, reason)：移动到指定地点。destination_id 必须是可见地点列表中的 id；
+  路程耗时已在【可见地点】中标注（每步 2 分钟，雨雪天更慢），移动期间无法做其他事，权衡路程后再决定。
 - wait(minutes, reason)：原地等待 {WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES} 分钟。
 - sleep(minutes, reason)：睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 {SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情
   （精力是 wait 的 {SLEEP_ENERGY_PER_HOUR // WAIT_ENERGY_PER_HOUR} 倍、心情 {SLEEP_MOOD_PER_HOUR // WAIT_MOOD_PER_HOUR} 倍）；
