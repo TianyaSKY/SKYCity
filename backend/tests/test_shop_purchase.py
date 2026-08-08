@@ -75,7 +75,7 @@ def _open_stall_with_buy(
         world_id,
         agent_id,
         {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5, "buy_price": buy_price}],
+        [{"item_id": "wheat", "price": 6, "buy_price": buy_price}],
         reason="摆摊兼收购",
     )
     assert ok is True and reason is None
@@ -142,7 +142,7 @@ def test_open_shop_defaults_buy_price_zero(engine: WorldEngine) -> None:
         world_id,
         "agent_linxia",
         {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}],
+        [{"item_id": "wheat", "price": 6}],
         reason="摆摊",
     )
     assert ok is True and reason is None
@@ -159,7 +159,7 @@ def test_open_shop_rejects_buy_price_above_base(engine: WorldEngine) -> None:
         world_id,
         "agent_linxia",
         {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5, "buy_price": 10}],  # base is 3
+        [{"item_id": "wheat", "price": 6, "buy_price": 10}],  # 收购价上限 min(3, 4)=3
         reason="摆摊",
     )
     assert ok is False and envelope is None

@@ -51,6 +51,24 @@
           "max_quantity_per_order": 99
         },
         {
+          "item_id": "tool_axe",
+          "seller_company_id": "company_carpenter_shop",
+          "unit_price": 26,
+          "max_quantity_per_order": 99
+        },
+        {
+          "item_id": "tool_rod",
+          "seller_company_id": "company_carpenter_shop",
+          "unit_price": 23,
+          "max_quantity_per_order": 99
+        },
+        {
+          "item_id": "tool_sickle",
+          "seller_company_id": "company_carpenter_shop",
+          "unit_price": 16,
+          "max_quantity_per_order": 99
+        },
+        {
           "item_id": "flower",
           "seller_company_id": "company_flower_garden",
           "unit_price": 6,

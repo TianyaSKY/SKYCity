@@ -51,8 +51,13 @@ MSG_UNREACHABLE = "会堵住村庄"  # R39.3 复用文案
 MSG_CAPITAL_TOO_LOW = "开店需要至少 100 金币"
 MSG_PRODUCT_LIMIT = "最多上架 3 种商品"
 MSG_DUPLICATE_PRODUCT = "商品重复"
-MSG_PRICE_OUT_OF_RANGE = "价格超出合法区间（1~2 倍基准价）"
-MSG_BUY_PRICE_OUT_OF_RANGE = "收购价超出合法区间（0~1 倍基准价）"
+MSG_PRICE_OUT_OF_RANGE = "价格须不低于村庄杂货店同款售价且不超过 2 倍基准价"
+MSG_BUY_PRICE_OUT_OF_RANGE = "收购价须不高于村庄杂货店同款收购价且不超过 1 倍基准价"
+
+# R42: personal-shop prices anchor to the seeded general store — a stall may
+# never undercut its selling price nor outbid its buying price, so the two
+# store types compete on assortment and location, not on price.
+SEED_STORE_ID = "village_shop"
 MSG_NOT_OWNER = "不是你的店铺"
 MSG_STORE_NOT_FOUND = "店铺不存在"
 MSG_PRODUCT_NOT_IN_STORE = "店铺没有该商品"
@@ -90,8 +95,9 @@ class ShopService:
         ``location`` = ``{"stall_id": "..."}`` (must be the agent's current
         location) or ``{"col": N, "row": N}`` (within STALL_MAX_DISTANCE,
         walkable, unreserved and reachable). ``products`` =
-        ``[{"item_id": str, "price": int}]``, at most STALL_MAX_PRODUCTS
-        entries priced within [1, base_price × PRICE_MAX_MULT].
+        ``[{"item_id": str, "price": int, "buy_price"?: int}]``, at most
+        STALL_MAX_PRODUCTS entries priced within the R42 bounds (anchored to
+        the seeded village store's sell/buy prices).
         """
 
         def _inner(session: Session) -> tuple[bool, Any, str | None]:
@@ -172,9 +178,12 @@ class ShopService:
                 item = session.get(Item, {"world_id": world_id, "item_id": item_id})
                 if item is None:
                     return False, None, MSG_ITEM_MISSING
-                if not 1 <= price <= round(item.base_price * PRICE_MAX_MULT):
+                floor, cap, buy_cap = self._price_bounds(
+                    session, world_id, item_id, item.base_price
+                )
+                if not floor <= price <= cap:
                     return False, None, MSG_PRICE_OUT_OF_RANGE
-                if not 0 <= buy_price <= round(item.base_price * STALL_BUY_MAX_MULT):
+                if not 0 <= buy_price <= buy_cap:
                     return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
                 inventory = session.get(
                     Inventory,
@@ -375,7 +384,7 @@ class ShopService:
             reason: str | None = None,
             trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Reprice one product of the owner's own store (1~2× base price)."""
+        """Reprice one product of the owner's own store (R42 bounds)."""
 
         def _inner(session: Session) -> tuple[bool, Any, str | None]:
             runtime = self.engine.get_runtime(world_id)
@@ -408,7 +417,8 @@ class ShopService:
                 return False, None, MSG_PRICE_OUT_OF_RANGE
             item = session.get(Item, {"world_id": world_id, "item_id": item_id})
             base = item.base_price if item is not None else product.base_sell_price
-            if not 1 <= price <= round(base * PRICE_MAX_MULT):
+            floor, cap, _ = self._price_bounds(session, world_id, item_id, base)
+            if not floor <= price <= cap:
                 return False, None, MSG_PRICE_OUT_OF_RANGE
             product.sell_price = price
             product.base_sell_price = price
@@ -445,9 +455,10 @@ class ShopService:
     ) -> tuple[bool, Any, str | None]:
         """Set the owner's own store's purchase price for one item.
 
-        Valid range is 0..base_price (0 = the store does not buy; see R42
-        extension in world-rules). Buyers sell through EconomyService.sell,
-        which settles from the owner's balance (R7: no credit).
+        Valid range is 0..buy_cap (R42: never above the village store's buy
+        price for the item; 0 = the store does not buy). Buyers sell through
+        EconomyService.sell, which settles from the owner's balance (R7: no
+        credit).
         """
 
         def _inner(session: Session) -> tuple[bool, Any, str | None]:
@@ -481,7 +492,8 @@ class ShopService:
                 return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
             item = session.get(Item, {"world_id": world_id, "item_id": item_id})
             base = item.base_price if item is not None else product.base_sell_price
-            if not 0 <= price <= round(base * STALL_BUY_MAX_MULT):
+            _, _, buy_cap = self._price_bounds(session, world_id, item_id, base)
+            if not 0 <= price <= buy_cap:
                 return False, None, MSG_BUY_PRICE_OUT_OF_RANGE
             product.buy_price = price
             envelope = runtime.event_bus.publish(
@@ -638,9 +650,36 @@ class ShopService:
                 frontier.append(neighbour)
         return (col, row) in seen
 
-    @staticmethod
+    def _price_bounds(
+            self,
+            session: Session,
+            world_id: str,
+            item_id: str,
+            base_price: int,
+    ) -> tuple[int, int, int]:
+        """Personal-shop price bounds anchored to the seeded village store (R42).
+
+        Selling floor = the village store's base sell price for the same item,
+        so a stall can never undercut the general store; buying cap = the
+        village store's buy price (when it buys), so a stall can never outbid
+        it. Items the village store does not carry keep the plain base-price
+        bounds. Returns ``(sell_floor, sell_cap, buy_cap)``.
+        """
+        floor, cap = 1, round(base_price * PRICE_MAX_MULT)
+        buy_cap = round(base_price * STALL_BUY_MAX_MULT)
+        village = session.get(
+            StoreProduct,
+            {"world_id": world_id, "store_id": SEED_STORE_ID, "item_id": item_id},
+        )
+        if village is not None:
+            floor = max(floor, village.base_sell_price)
+            cap = max(cap, floor)
+            if village.buy_price > 0:
+                buy_cap = min(buy_cap, village.buy_price)
+        return floor, cap, buy_cap
+
     def _add_inventory(
-            session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
+            self, session: Session, world_id: str, agent_id: str, item_id: str, quantity: int
     ) -> None:
         row = session.get(
             Inventory, {"world_id": world_id, "agent_id": agent_id, "item_id": item_id}

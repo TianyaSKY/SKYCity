@@ -60,7 +60,8 @@ async def open_shop(
 ) -> str:
     """在空摊位（location 传 {"stall_id": "..."}）或附近可达空地（{"col": N, "row": N}）开店；
     需要至少 100 金币且背包持有商品；products 传 [{"item_id": "...", "price": N}]，
-    最多 3 种，价格在 1~2 倍基准价之间；可选 buy_price（0~1 倍基准价，0=不收购）。"""
+    最多 3 种，售价须不低于村庄杂货店同款、不超过 2 倍基准价；可选 buy_price
+    （不高于杂货店同款收购价，0=不收购）。"""
     service = ctx.context.engine.shop_service
     if service is None:
         return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
@@ -105,7 +106,7 @@ async def adjust_price(
         new_price: int,
         reason: str,
 ) -> str:
-    """调整自己店铺里某商品的售价（1~2 倍基准价）。"""
+    """调整自己店铺里某商品的售价（须不低于杂货店同款、不超过 2 倍基准价）。"""
     service = ctx.context.engine.shop_service
     if service is None:
         return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
@@ -128,7 +129,7 @@ async def set_buy_price(
         new_price: int,
         reason: str,
 ) -> str:
-    """设置自己店铺某商品的收购价（0~1 倍基准价；0=不收购）。居民可把背包里的
+    """设置自己店铺某商品的收购价（不高于杂货店同款收购价；0=不收购）。居民可把背包里的
     该商品卖给你的店，货款从你余额支付。"""
     service = ctx.context.engine.shop_service
     if service is None:

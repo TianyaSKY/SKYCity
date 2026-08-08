@@ -441,7 +441,7 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
 
     ok, envelope, reason = eng.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
     store_id = envelope.payload["store_id"]

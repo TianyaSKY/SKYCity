@@ -93,10 +93,10 @@ _TOOL_CONVENTIONS = f"""工具约定：
   建造是重体力活：完成后建筑永久留在地图上，挡住通行的建筑（栅栏/房屋）所有人都会绕行，别把路堵死。
 - plant(col, row, item_id, reason)：在农田 (col,row) 格种下一粒【可种植的种子】里的种子；作物按世界时钟生长，成熟后可 harvest 收获卖钱。
 - harvest(col, row, reason)：收获 (col,row) 格已成熟的作物（见【附近作物】里的"成熟可收"）。
-- open_shop(location, products, reason)：在空摊位或附近可达空地开店（资本 ≥100 金币，商品从背包上架，≤3 种，价格 1~2 倍基准价；可选 buy_price 0~1 倍基准价=收购价）。
+- open_shop(location, products, reason)：在空摊位或附近可达空地开店（资本 ≥100 金币，商品从背包上架，≤3 种；售价须不低于村庄杂货店同款、不超过 2 倍基准价；可选 buy_price 收购价须不高于杂货店同款收购价，0=不收购）。
 - stock_shop(store_id, item_id, quantity=1, reason)：给自己店铺的货架补货（从背包上架）。
 - adjust_price(store_id, item_id, new_price, reason)：调整自己店铺的售价。
-- set_buy_price(store_id, item_id, new_price, reason)：设置自己店铺的收购价（0~1 倍基准价，0=不收购）。
+- set_buy_price(store_id, item_id, new_price, reason)：设置自己店铺的收购价（不高于杂货店同款收购价，0=不收购）。
 - close_shop(store_id, reason)：收掉自己的店铺，货架货物退回背包。
 - 每个工具都必须提供中文 reason（talk 的消息用中文），说明你为什么这么做。
 - 一次决策至多发起一次行动；其余情况请选择 wait 并给出理由。"""
@@ -113,7 +113,7 @@ _ECONOMY_GUIDE = """经济规则：
 - 缺钱时可以请朋友 transfer_money 帮忙，不需要的物品可以 give_item 送人（只能给附近的人）。
 - 有余钱时改善生活：蜂蜜/鱼/草莓等可以恢复心情，陶罐/蜡烛/花种可以装点生活或送人（心情和关系都会变好）；工具和肥料让工作更高效。
 - 想改造小镇时，去商店买木材/麻绳/花种，到空地上用 build 建造（详见工具约定）。
-- 想当老板：攒够 100 金币后可以在摊位/空地 open_shop 开店，售价自己定（1~2 倍基准价），卖出收入直接进你的余额；也可以 set_buy_price 定收购价收别人卖来的货，再转手卖出赚差价。"""
+- 想当老板：攒够 100 金币后可以在摊位/空地 open_shop 开店，售价不能低于村庄杂货店同款（上限 2 倍基准价），卖出收入直接进你的余额；也可以 set_buy_price 定收购价收别人卖来的货（不能高于杂货店同款收购价），再转手卖出赚差价——定价和杂货店错位，别打价格战，靠特色货品和地段竞争。"""
 
 
 def build_system_prompt(identity: dict) -> str:

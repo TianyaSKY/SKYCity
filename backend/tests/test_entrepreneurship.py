@@ -46,6 +46,7 @@ from app.services.economy_service import (
     EconomyService,
 )
 from app.services.shop_service import (
+    MSG_BUY_PRICE_OUT_OF_RANGE,
     MSG_CAPITAL_TOO_LOW,
     MSG_DUPLICATE_PRODUCT,
     MSG_NOT_OWNER,
@@ -229,7 +230,7 @@ def _open_stall(
         agent_id: str = "agent_linxia",
         stall_id: str = STALL_1,
         item_id: str = "wheat",
-        price: int = 5,
+        price: int = 6,  # R42: 小麦个人店售价下限=杂货店同款 6
         stock_qty: int = 10,
 ) -> tuple[bool, object, str | None]:
     place_agent(engine, world_id, agent_id, stall_id, *STALL_1_ANCHOR)
@@ -294,7 +295,7 @@ def test_open_stall_success(engine: WorldEngine) -> None:
     assert envelope.payload["col"] == STALL_1_ANCHOR[0]
     assert envelope.payload["row"] == STALL_1_ANCHOR[1]
     assert envelope.payload["products"] == [
-        {"item_id": "wheat", "sell_price": 5, "buy_price": 0, "stock": STALL_INITIAL_STOCK}
+        {"item_id": "wheat", "sell_price": 6, "buy_price": 0, "stock": STALL_INITIAL_STOCK}
     ]
 
     store = store_rows(engine, world_id)[0]
@@ -311,8 +312,8 @@ def test_open_stall_success(engine: WorldEngine) -> None:
             {"world_id": world_id, "store_id": store.store_id, "item_id": "wheat"},
         )
         assert product.stock == STALL_INITIAL_STOCK  # min(10, 5)
-        assert product.sell_price == 5
-        assert product.base_sell_price == 5
+        assert product.sell_price == 6
+        assert product.base_sell_price == 6
         assert product.buy_price == 0
         assert product.stock_cap == STALL_STOCK_CAP
         assert product.restock_daily == 0
@@ -341,7 +342,7 @@ def test_open_shop_capital_too_low(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}], reason="摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="摆摊",
     )
     assert ok is False and envelope is None
     assert reason == MSG_CAPITAL_TOO_LOW
@@ -360,7 +361,7 @@ def test_open_shop_stall_occupied(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_zhangming", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_zhangming", {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}], reason="抢摊位",
+        [{"item_id": "wheat", "price": 6}], reason="抢摊位",
     )
     assert ok is False and envelope is None
     assert reason == MSG_STALL_OCCUPIED
@@ -376,7 +377,7 @@ def test_open_shop_not_at_stall(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}], reason="摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="摆摊",
     )
     assert ok is False and reason == MSG_NOT_AT_STALL
 
@@ -392,9 +393,9 @@ def test_open_shop_product_rules(engine: WorldEngine) -> None:
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
         [
-            {"item_id": "wheat", "price": 5},
+            {"item_id": "wheat", "price": 6},
             {"item_id": "wood", "price": 10},
-            {"item_id": "egg", "price": 5},
+            {"item_id": "egg", "price": 6},
             {"item_id": "apple", "price": 6},
         ],
         reason="摆摊",
@@ -403,7 +404,7 @@ def test_open_shop_product_rules(engine: WorldEngine) -> None:
     # 重复商品
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}, {"item_id": "wheat", "price": 6}],
+        [{"item_id": "wheat", "price": 6}, {"item_id": "wheat", "price": 6}],
         reason="摆摊",
     )
     assert ok is False and reason == MSG_DUPLICATE_PRODUCT
@@ -427,6 +428,42 @@ def test_open_shop_product_rules(engine: WorldEngine) -> None:
     assert store_rows(engine, world_id) == []
 
 
+def test_open_shop_price_anchored_to_village_store(engine: WorldEngine) -> None:
+    """R42 错位竞争：个人店售价不得低于杂货店同款、收购价不得高于杂货店
+    同款——杂货店（小麦售 6 / 收 4）是价格锚点。"""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    place_agent(engine, world_id, "agent_linxia", STALL_1, *STALL_1_ANCHOR)
+    set_agent(engine, world_id, "agent_linxia", money=200)
+    add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
+
+    # 售价低于杂货店（wheat 杂货店卖 6）→ 拒绝
+    ok, _, reason = engine.shop_service.open_shop(
+        world_id, "agent_linxia", {"stall_id": STALL_1},
+        [{"item_id": "wheat", "price": 5}], reason="摆摊",
+    )
+    assert ok is False and reason == MSG_PRICE_OUT_OF_RANGE
+    # 售价等于杂货店 → 允许
+    ok, _, reason = engine.shop_service.open_shop(
+        world_id, "agent_linxia", {"stall_id": STALL_1},
+        [{"item_id": "wheat", "price": 6}], reason="摆摊",
+    )
+    assert ok is True, reason
+    # 收购价高于杂货店（wheat 杂货店收 4，个人店上限 min(3, 4)=3）→ 拒绝
+    place_agent(engine, world_id, "agent_linxia", STALL_2, *STALL_2_ANCHOR)
+    ok, _, reason = engine.shop_service.open_shop(
+        world_id, "agent_linxia", {"stall_id": STALL_2},
+        [{"item_id": "wheat", "price": 6, "buy_price": 4}], reason="摆摊兼收购",
+    )
+    assert ok is False and reason == MSG_BUY_PRICE_OUT_OF_RANGE
+    # 收购价 ≤ min(1×基准, 杂货店收购价) → 允许
+    ok, _, reason = engine.shop_service.open_shop(
+        world_id, "agent_linxia", {"stall_id": STALL_2},
+        [{"item_id": "wheat", "price": 6, "buy_price": 3}], reason="摆摊兼收购",
+    )
+    assert ok is True, reason
+
+
 def test_open_shop_multiple_stores_same_owner(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
@@ -436,7 +473,7 @@ def test_open_shop_multiple_stores_same_owner(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_2},
-        [{"item_id": "wheat", "price": 5}], reason="第二家店",
+        [{"item_id": "wheat", "price": 6}], reason="第二家店",
     )
     assert ok is True, reason
     stores = store_rows(engine, world_id)
@@ -453,7 +490,7 @@ def test_open_shop_wild_cell_success(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
     assert envelope.payload["location_id"].startswith("stall_")
@@ -482,14 +519,14 @@ def test_open_shop_wild_cell_too_far(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 35, "row": 20},  # 距离 4 > STALL_MAX_DISTANCE
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is False and reason == MSG_TOO_FAR
     # 距离恰好 ≤3 的合法格不受距离限制
     assert STALL_MAX_DISTANCE == 3
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 34, "row": 20},  # 距离 3
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
 
@@ -506,7 +543,7 @@ def test_open_shop_wild_cell_reachability(engine: WorldEngine) -> None:
         _add_structure(engine, world_id, col, row, "agent_linxia")
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
     store_id = envelope.payload["store_id"]
@@ -519,14 +556,14 @@ def test_open_shop_wild_cell_reachability(engine: WorldEngine) -> None:
     _add_structure(engine, world_id, 31, 20, "agent_linxia")
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is False and reason == MSG_UNREACHABLE
     # 拆掉一面墙 → 可达，重新开店成功
     _remove_structure(engine, world_id, 31, 20)
     ok, _, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
 
@@ -679,7 +716,7 @@ def test_close_shop_wild_cell_deletes_location(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 5}], reason="荒地摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
     )
     assert ok is True, reason
     location_id = envelope.payload["location_id"]
@@ -730,7 +767,7 @@ def test_buy_from_personal_shop_settlement(engine: WorldEngine) -> None:
     ok, envelope, reason = _open_stall(engine, world_id)
     assert ok is True, reason
     store_id = envelope.payload["store_id"]
-    # 顾客站在摊位 → 按个人店价成交（小麦 5，杂货店 6）
+    # 顾客站在摊位 → 按个人店价成交（小麦 6，与杂货店同价）
     place_agent(engine, world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
     before_shop = stock_row(engine, world_id, "village_shop")
     ok, envelope, reason = engine.economy_service.buy(
@@ -744,14 +781,14 @@ def test_buy_from_personal_shop_settlement(engine: WorldEngine) -> None:
     # 顾客扣款、店主入账（同一 trace_id 双流水）
     buyer = agent_row(engine, world_id, "agent_zhangming")
     owner = agent_row(engine, world_id, "agent_linxia")
-    assert buyer.money == 2995  # 3000 - 5
-    assert owner.money == 200 + 5
+    assert buyer.money == 2994  # 3000 - 6
+    assert owner.money == 200 + 6
     buyer_txs = transaction_rows(engine, world_id, "agent_zhangming")
     owner_txs = transaction_rows(engine, world_id, "agent_linxia")
     assert len(buyer_txs) == 1 and buyer_txs[0].type == "expense"
-    assert buyer_txs[0].amount == -5
+    assert buyer_txs[0].amount == -6
     assert len(owner_txs) == 1 and owner_txs[0].type == "sale_income"
-    assert owner_txs[0].amount == 5
+    assert owner_txs[0].amount == 6
     assert owner_txs[0].trace_id == buyer_txs[0].trace_id != ""
 
     events = engine.events_after(world_id, 0)
@@ -763,16 +800,16 @@ def test_buy_from_personal_shop_settlement(engine: WorldEngine) -> None:
         "item_id": "wheat",
         "item_name": "小麦",
         "quantity": 1,
-        "unit_price": 5,
-        "total": 5,
+        "unit_price": 6,
+        "total": 6,
     }
     owner_money = next(
         e
         for e in events
         if e.type == "money_changed" and e.payload["agent_id"] == "agent_linxia"
     )
-    assert owner_money.payload["amount"] == 5
-    assert owner_money.payload["balance"] == 205
+    assert owner_money.payload["amount"] == 6
+    assert owner_money.payload["balance"] == 206
 
     # 个人店售出计入 R18.2（+1 且价格 +1）；杂货店 Stock 不动
     personal = stock_row(engine, world_id, store_id)
@@ -792,7 +829,7 @@ def test_buy_prefers_store_at_location(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "bread", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
-        [{"item_id": "bread", "price": 10}], reason="卖面包",
+        [{"item_id": "bread", "price": 12}], reason="卖面包",
     )
     assert ok is True, reason
     store_id = envelope.payload["store_id"]
@@ -802,9 +839,9 @@ def test_buy_prefers_store_at_location(engine: WorldEngine) -> None:
         world_id, "agent_zhangming", "bread", quantity=1, reason="买面包"
     )
     assert ok is True, reason
-    assert envelope.payload["unit_price"] == 10
+    assert envelope.payload["unit_price"] == 12
     assert envelope.payload["store_id"] == store_id
-    assert agent_row(engine, world_id, "agent_zhangming").money == 2990  # 3000 - 10
+    assert agent_row(engine, world_id, "agent_zhangming").money == 2988  # 3000 - 12
 
     session = SessionLocal()
     try:
@@ -831,7 +868,7 @@ def test_concurrent_last_item_race_personal_shop(engine: WorldEngine) -> None:
     add_inventory(engine, world_id, "agent_linxia", "wheat", 1)  # stock = min(1, 5) = 1
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id, "agent_linxia", {"stall_id": STALL_1},
-        [{"item_id": "wheat", "price": 5}], reason="摆摊",
+        [{"item_id": "wheat", "price": 6}], reason="摆摊",
     )
     assert ok is True, reason
     store_id = envelope.payload["store_id"]
@@ -863,7 +900,7 @@ def test_concurrent_last_item_race_personal_shop(engine: WorldEngine) -> None:
         assert product.stock == 0
     finally:
         session.close()
-    assert agent_row(engine, world_id, "agent_zhangming").money == 2995  # 恰一单
+    assert agent_row(engine, world_id, "agent_zhangming").money == 2994  # 恰一单
 
 
 # --------------------------------------------------------------------------- #
@@ -894,8 +931,8 @@ def test_personal_shop_no_restock_no_promo(engine: WorldEngine) -> None:
             {"world_id": world_id, "store_id": store_id, "item_id": "wheat"},
         )
         assert product.stock == STALL_INITIAL_STOCK  # 无魔法补货
-        assert product.sell_price == 5  # 促销未改写
-        assert product.base_sell_price == 5
+        assert product.sell_price == 6  # 促销未改写
+        assert product.base_sell_price == 6
     finally:
         session.close()
 
@@ -936,7 +973,7 @@ def test_autonomous_shop_chain(world_config: ParsedWorldConfig) -> None:
                         "open_shop",
                         {
                             "location": {"stall_id": STALL_1},
-                            "products": [{"item_id": "wheat", "price": 5}],
+                            "products": [{"item_id": "wheat", "price": 6}],
                             "reason": "摆摊卖小麦",
                         },
                     ),

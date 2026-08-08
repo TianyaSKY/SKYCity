@@ -83,7 +83,7 @@
       "sell_price": 12,
       "buy_price": 6,
       "stock_cap": 30,
-      "restock_daily": 0,
+      "restock_daily": 10,
       "initial_stock": 5
     },
     {
@@ -91,14 +91,14 @@
       "sell_price": 18,
       "buy_price": 9,
       "stock_cap": 10,
-      "restock_daily": 0
+      "restock_daily": 4
     },
     {
       "item_id": "flower_seed",
       "sell_price": 12,
       "buy_price": 6,
       "stock_cap": 10,
-      "restock_daily": 0
+      "restock_daily": 4
     },
     {
       "item_id": "wheat_seed",
@@ -134,14 +134,14 @@
       "sell_price": 9,
       "buy_price": 4,
       "stock_cap": 12,
-      "restock_daily": 0
+      "restock_daily": 5
     },
     {
       "item_id": "cloth",
       "sell_price": 14,
       "buy_price": 7,
       "stock_cap": 10,
-      "restock_daily": 0
+      "restock_daily": 4
     },
     {
       "item_id": "tool_rake",
@@ -176,14 +176,14 @@
       "sell_price": 16,
       "buy_price": 8,
       "stock_cap": 6,
-      "restock_daily": 0
+      "restock_daily": 2
     },
     {
       "item_id": "candle",
       "sell_price": 6,
       "buy_price": 3,
       "stock_cap": 15,
-      "restock_daily": 0
+      "restock_daily": 6
     }
   ]
 }

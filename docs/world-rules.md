@@ -361,6 +361,9 @@
 个人店 = 居民自主创建、直接归属个人的商店（`stores.owner_agent_id` 非空、
 `company_id` 为空），与种子/企业商店（R33/R38）并行。个人店资金即店主
 个人余额，R21 企业账户独立性规则不适用。
+个人店与种子商店**错位竞争**：定价锚定村庄杂货店（R42），个人店不得比
+杂货店卖得便宜、不得比杂货店收购得贵——只能靠特色商品、地段与经营
+（补货/调价/收购）竞争，不能打价格战。
 
 ### R39 开店（open_shop）
 
@@ -383,7 +386,8 @@
   4. 地点空闲：`stores` 表 `(world_id, location_id)` 部分唯一索引保证一个
      摊位/地点只能开一家店（含并发抢摊，同 R4 的事务模式）。
   5. 资本门槛：`agent.money >= OPEN_SHOP_CAPITAL`（当前 100，见 gameplay.py；M19 由 150 下调）。
-  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42）；可选 `buy_price`（收购价）在
+  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42，售价下限锚定杂货店同款
+     售价、收购价上限锚定杂货店同款收购价）；可选 `buy_price`（收购价）在
      合法区间（R42，默认 0 = 不收购）。
 - 一个居民可开**多家**个人店（无数量上限）：每家店独立货架、独立结算、
   独立定价，收摊一家不影响其他家；扩张受地点与资本天然约束。
@@ -437,12 +441,20 @@
 
 ### R42 定价
 
-- 个人店售价合法区间：`1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`
-  （当前 `PRICE_MAX_MULT=2.0`，base_price 为 items.json 基准价，见
-  gameplay.py）。
-- M19 收购价合法区间：`0 ≤ buy_price ≤ round(base_price × STALL_BUY_MAX_MULT)`
-  （当前 `STALL_BUY_MAX_MULT=1.0`，0 = 不收购）。越界拒绝（开店、调价共用
-  同一校验）。
+- **价格锚定种子商店（错位竞争）**：个人店定价以村庄杂货店（种子店
+  `village_shop`，见 world_data/stores/）为锚——
+  - 售价下限：同款商品杂货店的基准售价（`base_sell_price`，促销不改基准），
+    即个人店**不得比杂货店卖得便宜**；售价上限
+    `round(base_price × PRICE_MAX_MULT)`（当前 `PRICE_MAX_MULT=2.0`）。
+  - 收购价上限：`min(round(base_price × STALL_BUY_MAX_MULT),
+    杂货店同款收购价)`（当前 `STALL_BUY_MAX_MULT=1.0`），即个人店**不得比
+    杂货店收购得贵**；杂货店不收购（`buy_price=0`）或未上架的商品沿用
+    纯基准价上限。
+  - 据此杂货店始终是价格锚点：居民摊既不能压价抢客、也不能抬价抢货，
+    只能以特色商品、地段与经营竞争。杂货店未上架的新商品自动回退到
+    `1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`。
+- M19 收购价合法区间：`0 ≤ buy_price ≤ 收购价上限`（0 = 不收购）。越界拒绝
+  （开店、`adjust_price`、`set_buy_price` 共用同一校验）。
 - v1 无动态市场价格，价格不随供需自动波动。
 
 ### R43 收摊与上帝干预

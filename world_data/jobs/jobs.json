@@ -63,11 +63,11 @@
       "name": "商店值班",
       "location_id": "village_shop",
       "interactable_id": "shop_counter",
-      "duration_minutes": 240,
-      "wage": 60,
+      "duration_minutes": 480,
+      "wage": 90,
       "energy_cost_per_hour": 2,
       "products": [],
-      "description": "在杂货店柜台招呼客人、整理货架"
+      "description": "在杂货店柜台招呼客人、整理货架（8 小时班，与正式岗位同薪）"
     },
     {
       "job_id": "job_delivery",
@@ -115,11 +115,23 @@
         {
           "item_id": "tool_rake",
           "quantity": 1
+        },
+        {
+          "item_id": "tool_axe",
+          "quantity": 1
+        },
+        {
+          "item_id": "tool_rod",
+          "quantity": 1
+        },
+        {
+          "item_id": "tool_sickle",
+          "quantity": 1
         }
       ],
       "inputs": [],
       "formal_only": true,
-      "description": "正式班次：在巧木工坊打造耙子，产物进入工坊企业库存"
+      "description": "正式班次：在巧木工坊打造耙子、斧头、渔竿、镰刀等农具，产物进入工坊企业库存"
     },
     {
       "job_id": "job_flower_gardening",

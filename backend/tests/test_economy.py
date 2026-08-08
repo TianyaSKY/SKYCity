@@ -752,10 +752,12 @@ def test_restock_at_next_day_open_hour(engine: WorldEngine) -> None:
 
     restock = [e for e in engine.events_after(world_id, 0) if e.type == "store_restocked"]
     assert restock
-    assert restock[0].payload == {
-        "store_id": "village_shop",
-        "restocked": [{"item_id": "apple", "quantity": 1}],
+    assert restock[0].payload["store_id"] == "village_shop"
+    restocked = {
+        item["item_id"]: item["quantity"] for item in restock[0].payload["restocked"]
     }
+    # apple 回补 1（14 → 15）；wood 从初始 5 回补到 15（restock_daily 10）
+    assert restocked == {"apple": 1, "wood": 10}
 
 
 # --------------------------------------------------------------------------- #

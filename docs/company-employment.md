@@ -164,8 +164,9 @@ Transaction:        type=work_wage,     amount=+90
   配方与 `formal_only` 标记在 `world_data/jobs/jobs.json`，采购规则在
   `world_data/companies/companies.json` 的 `procurement` 列表；面包不再自动补货
   （`restock_daily = 0`）。
-- **M17 延伸链（新经理企业）**：巧木工坊班次产出 1 耙子/班 → 杂货店按 18 金币/件采购并上架
-  （零售 35）；晨露花圃班次产出 5 鲜花/班 → 杂货店按 6 金币/件采购并上架（零售 12）。
+- **M17 延伸链（新经理企业）**：巧木工坊班次产出耙子/斧头/渔竿/镰刀各 1 件/班 → 杂货店按
+  18/26/23/16 金币/件采购并上架（零售 35/48/42/30）；晨露花圃班次产出 5 鲜花/班 → 杂货店按
+  6 金币/件采购并上架（零售 12）。
   旅店为纯服务企业，无产物。三家新企业经理：周婶（agent_zhoushen）、李木匠（agent_limujiang）、
   孙婶（agent_sunshen），角色卡与地图（建筑/小路/出生点）由 `tools/build_map.py` 从
   `world_data/identities/` 派生。
