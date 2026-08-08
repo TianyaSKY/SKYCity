@@ -1101,13 +1101,15 @@ describe('getters', () => {
         store = useWorldStore();
     });
 
-    it('timeLabel: minutes-since-midnight -> HH:MM', () => {
+    it('timeLabel: includes game day + minutes-since-midnight -> HH:MM', () => {
+        store.day = 1;
         store.worldTime = 480;
-        expect(store.timeLabel).toBe('08:00');
+        expect(store.timeLabel).toBe('第 1 天 08:00');
+        store.day = 3;
         store.worldTime = 1439;
-        expect(store.timeLabel).toBe('23:59');
+        expect(store.timeLabel).toBe('第 3 天 23:59');
         store.worldTime = 0;
-        expect(store.timeLabel).toBe('00:00');
+        expect(store.timeLabel).toBe('第 3 天 00:00');
     });
 
     it('isOpen: honors open_hour/close_hour against worldTime', () => {

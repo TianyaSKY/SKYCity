@@ -96,7 +96,6 @@ const worldLabel = (w: { world_id: string; name: string }): string =>
             </option>
         </select>
         <span class="time">{{ store.timeLabel }}</span>
-        <span class="day">{{ store.dayLabel }}</span>
         <label class="weather" title="改变天气">
             <select
                 :disabled="store.connection !== 'connected' || weatherPending"
@@ -231,10 +230,6 @@ const worldLabel = (w: { world_id: string; name: string }): string =>
     font-size: 15px;
     font-weight: 600;
     color: #ffe082;
-}
-
-.day {
-    opacity: 0.85;
 }
 
 .weather {

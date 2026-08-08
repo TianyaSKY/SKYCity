@@ -991,7 +991,7 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
             timeLabel(state): string {
                 const hours = Math.floor(state.worldTime / 60) % 24;
                 const minutes = state.worldTime % 60;
-                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+                return `第 ${state.day} 天 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
             },
             isOpen: (state) => (locationId: string): boolean => {
                 const loc = state.locations.find((l) => l.location_id === locationId);
@@ -1010,9 +1010,6 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
             },
             weatherLabel(state): string {
                 return WEATHER_LABELS[state.weather] ?? WEATHER_LABELS.sunny;
-            },
-            dayLabel(state): string {
-                return `第 ${state.day} 天`;
             },
             /** Other participant of an active conversation involving the agent (if any). */
             activePartnerOf: (state) => (agentId: string): string | null => {

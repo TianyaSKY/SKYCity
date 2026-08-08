@@ -7,8 +7,11 @@
 import {Container} from 'pixi.js';
 import type {AgentSnapshot} from '../types/world';
 import type {AgentVisual} from './AgentSprite';
-import {AgentSprite} from './AgentSprite';
+import {AGENT_TILE_SIZE, AgentSprite} from './AgentSprite';
 import {MovementAnimator} from './MovementAnimator';
+
+/** Horizontal px between same-cell agents so stacked sprites stay visible. */
+const CELL_FAN_SPACING = 9;
 
 export class AgentLayer {
     readonly container: Container;
@@ -37,6 +40,7 @@ export class AgentLayer {
             let sprite = this.sprites.get(agent.agent_id);
             if (!sprite) {
                 sprite = new AgentSprite(this.colorOf(agent.agent_id));
+                sprite.label = agent.agent_id;
                 this.sprites.set(agent.agent_id, sprite);
                 this.container.addChild(sprite);
             }
@@ -85,7 +89,35 @@ export class AgentLayer {
                 sprite.y += Math.sin(bobTime * 3 + agentId.length) * 1.5;
             }
         }
+        this.fanOutStacked();
         this.sortByRow();
+    }
+
+    /**
+     * Agents that end up on the same cell stack pixel-perfectly, hiding all
+     * but the top sprite. Fan stationary agents out sideways so each stays
+     * visible; moving agents keep their exact interpolated path position.
+     */
+    private fanOutStacked(): void {
+        const byCell = new Map<string, string[]>();
+        for (const [agentId, sprite] of this.sprites) {
+            if (this.animator.hasTween(agentId)) continue;
+            const col = Math.round((sprite.x - 8) / AGENT_TILE_SIZE);
+            const row = Math.round((sprite.y - 12) / AGENT_TILE_SIZE);
+            const key = `${col},${row}`;
+            const list = byCell.get(key);
+            if (list) list.push(agentId);
+            else byCell.set(key, [agentId]);
+        }
+        for (const ids of byCell.values()) {
+            const n = ids.length;
+            if (n < 2) continue;
+            ids.sort();
+            for (let i = 0; i < n; i++) {
+                const sprite = this.sprites.get(ids[i]);
+                if (sprite) sprite.x += (i - (n - 1) / 2) * CELL_FAN_SPACING;
+            }
+        }
     }
 
     clear(): void {

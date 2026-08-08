@@ -59,9 +59,10 @@ function endReasonLabel(reason: string | null): string {
 
 function timeOf(worldTime: number | null): string {
     if (worldTime == null) return '—';
+    const day = Math.floor(worldTime / 1440) + 1;
     const hours = Math.floor(worldTime / 60) % 24;
     const minutes = worldTime % 60;
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+    return `第 ${day} 天 ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 function agentName(agentId: string): string {
