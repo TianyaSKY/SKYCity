@@ -34,7 +34,7 @@ from app.services.conversation_service import (
     MSG_TARGET_MISSING,
     ConversationService,
 )
-from app.config.gameplay import TALK_LOCK_MINUTES
+from app.config.gameplay import TALK_LOCK_MINUTES, TALK_REPLY_GRACE
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
 from tests.test_world_engine import advance_minutes
@@ -763,6 +763,46 @@ def test_lock_queues_actions_and_fires_on_leave(world_config: ParsedWorldConfig)
         linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         assert linxia.action_type == "wait"
         assert linxia.action_data["reason"] == "歇会儿"
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
+def test_talk_lock_decision_reams_schedule(world_config: ParsedWorldConfig) -> None:
+    """Regression: a decision completing while the agent is mid-conversation
+    (action_type == "talk") must re-arm the decide loop at the reply-grace
+    cadence. This previously crashed with UnboundLocalError on `floor`."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("对话锁重排")
+    world_id = runtime.world_id
+
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        linxia.action_type = "talk"
+        linxia.action_started_at = world_time(world_id)
+        linxia.action_ends_at = world_time(world_id) + TALK_LOCK_MINUTES
+        linxia.action_data = {"conversation_id": "conv_demo"}
+        session.commit()
+
+        # the exact call that crashed in production (ok=True, agent locked)
+        eng.decision_service._schedule_next(
+            session, runtime, world_id, "agent_linxia", ok=True
+        )
+        session.commit()
+
+        rearm = list(
+            session.scalars(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == "agent_linxia",
+                    ScheduledAction.action_type == "agent_decide",
+                )
+            )
+        )
+        assert len(rearm) == 1
+        assert rearm[0].payload == {"origin": "talk_lock"}
+        assert rearm[0].due_at == world_time(world_id) + TALK_REPLY_GRACE
     finally:
         session.close()
     eng._runtimes.clear()

@@ -373,6 +373,11 @@ def _parse_map(map_path: Path, map_version: str) -> ParsedWorldConfig:
                         )
                     )
 
+                elif object_type == "spawn_point":
+                    # Decorative only: spawn positions come from the character
+                    # cards (see _load_world_cached); skip without noise.
+                    pass
+
                 else:
                     logger.warning(
                         "Ignoring object '{}' with unknown type '{}' in layer '{}'",

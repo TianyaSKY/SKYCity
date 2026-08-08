@@ -945,6 +945,7 @@ class DecisionService:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
         if agent is None:
             return
+        floor = max(self._settings.decision_min_interval, 1)
         if agent.action_type == "talk":
             # E-full: a conversation lock never completes, so the usual
             # completion-handler re-arm never fires; keep nudging the locked
@@ -957,7 +958,6 @@ class DecisionService:
             return
         if agent.action_type is not None:
             return  # completion handler schedules the next decision
-        floor = max(self._settings.decision_min_interval, 1)
         if ok:
             delay = max(IDLE_DELAY, floor)
         else:
