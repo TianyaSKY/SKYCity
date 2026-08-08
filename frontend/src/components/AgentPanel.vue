@@ -189,10 +189,49 @@ function defaultTeleportTarget(): string {
     );
 }
 
+/**
+ * Collapse state for the overview identity sections (人生经历/性格特点/…).
+ * Sections default to open; the state resets when switching agents.
+ */
+const identityCollapsed = ref<Record<string, boolean>>({});
+
+function isIdentityOpen(section: string): boolean {
+    return !identityCollapsed.value[section];
+}
+
+function toggleIdentitySection(section: string): void {
+    identityCollapsed.value[section] = isIdentityOpen(section);
+}
+
+/** Collapse state for the 对话 tab conversations; default open, reset on agent switch. */
+const convCollapsed = ref<Record<string, boolean>>({});
+
+function isConvOpen(conversationId: string): boolean {
+    return !convCollapsed.value[conversationId];
+}
+
+function toggleConv(conversationId: string): void {
+    convCollapsed.value[conversationId] = isConvOpen(conversationId);
+}
+
+/** Collapse state for the 记忆 tab; default open, reset on agent switch. */
+const memCollapsed = ref<Record<string, boolean>>({});
+
+function isMemOpen(memoryId: string): boolean {
+    return !memCollapsed.value[memoryId];
+}
+
+function toggleMem(memoryId: string): void {
+    memCollapsed.value[memoryId] = isMemOpen(memoryId);
+}
+
 watch(
     () => store.selectedAgentId,
     () => {
         teleportTarget.value = defaultTeleportTarget();
+        identityCollapsed.value = {};
+        convCollapsed.value = {};
+        memCollapsed.value = {};
     },
     {immediate: true},
 );
@@ -341,34 +380,133 @@ function teleportLocations(): WorldLocation[] {
                         }} 岁 · {{ store.agentDetail.identity.occupation }}</span>
                 </div>
                 <p class="ov-background">{{ store.agentDetail.identity.background }}</p>
-                <div v-if="store.agentDetail.identity.life_story" class="ov-section-title">人生经历</div>
-                <p v-if="store.agentDetail.identity.life_story" class="ov-speaking">{{ store.agentDetail.identity.life_story }}</p>
-                <div v-if="store.agentDetail.identity.character_traits" class="ov-section-title">性格特点</div>
-                <p v-if="store.agentDetail.identity.character_traits" class="ov-speaking">{{ store.agentDetail.identity.character_traits }}</p>
-                <div v-if="store.agentDetail.identity.likes?.length" class="ov-section-title">喜好</div>
-                <div v-if="store.agentDetail.identity.likes?.length" class="ov-chips">
-                    <span v-for="v in store.agentDetail.identity.likes" :key="'lk' + v" class="ov-chip">{{ v }}</span>
+                <div v-if="store.agentDetail.identity.life_story" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('life_story')"
+                        @click="toggleIdentitySection('life_story')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('life_story') }">▸</span>人生经历
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('life_story') }">
+                        <p class="ov-speaking">{{ store.agentDetail.identity.life_story }}</p>
+                    </div>
                 </div>
-                <div v-if="store.agentDetail.identity.dislikes?.length" class="ov-section-title">厌恶</div>
-                <div v-if="store.agentDetail.identity.dislikes?.length" class="ov-chips">
-                    <span v-for="v in store.agentDetail.identity.dislikes" :key="'dl' + v" class="ov-chip">{{ v }}</span>
+                <div v-if="store.agentDetail.identity.character_traits" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('character_traits')"
+                        @click="toggleIdentitySection('character_traits')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('character_traits') }">▸</span>性格特点
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('character_traits') }">
+                        <p class="ov-speaking">{{ store.agentDetail.identity.character_traits }}</p>
+                    </div>
                 </div>
-                <div v-if="store.agentDetail.identity.quirks?.length" class="ov-section-title">小癖好</div>
-                <ul v-if="store.agentDetail.identity.quirks?.length" class="ov-goals">
-                    <li v-for="q in store.agentDetail.identity.quirks" :key="q">{{ q }}</li>
-                </ul>
-                <div v-if="store.agentDetail.identity.daily_routine" class="ov-section-title">日常作息</div>
-                <p v-if="store.agentDetail.identity.daily_routine" class="ov-speaking">{{ store.agentDetail.identity.daily_routine }}</p>
-                <div class="ov-section-title">价值观</div>
-                <div class="ov-chips">
-                    <span v-for="v in store.agentDetail.identity.values" :key="v" class="ov-chip">{{ v }}</span>
+                <div v-if="store.agentDetail.identity.likes?.length" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('likes')"
+                        @click="toggleIdentitySection('likes')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('likes') }">▸</span>喜好
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('likes') }">
+                        <div class="ov-chips">
+                            <span v-for="v in store.agentDetail.identity.likes" :key="'lk' + v" class="ov-chip">{{ v }}</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="ov-section-title">长期目标</div>
-                <ul class="ov-goals">
-                    <li v-for="g in store.agentDetail.identity.long_term_goals" :key="g">{{ g }}</li>
-                </ul>
-                <div class="ov-section-title">说话风格</div>
-                <p class="ov-speaking">{{ store.agentDetail.identity.speaking_style }}</p>
+                <div v-if="store.agentDetail.identity.dislikes?.length" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('dislikes')"
+                        @click="toggleIdentitySection('dislikes')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('dislikes') }">▸</span>厌恶
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('dislikes') }">
+                        <div class="ov-chips">
+                            <span v-for="v in store.agentDetail.identity.dislikes" :key="'dl' + v" class="ov-chip">{{ v }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="store.agentDetail.identity.quirks?.length" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('quirks')"
+                        @click="toggleIdentitySection('quirks')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('quirks') }">▸</span>小癖好
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('quirks') }">
+                        <ul class="ov-goals">
+                            <li v-for="q in store.agentDetail.identity.quirks" :key="q">{{ q }}</li>
+                        </ul>
+                    </div>
+                </div>
+                <div v-if="store.agentDetail.identity.daily_routine" class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('daily_routine')"
+                        @click="toggleIdentitySection('daily_routine')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('daily_routine') }">▸</span>日常作息
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('daily_routine') }">
+                        <p class="ov-speaking">{{ store.agentDetail.identity.daily_routine }}</p>
+                    </div>
+                </div>
+                <div class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('values')"
+                        @click="toggleIdentitySection('values')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('values') }">▸</span>价值观
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('values') }">
+                        <div class="ov-chips">
+                            <span v-for="v in store.agentDetail.identity.values" :key="v" class="ov-chip">{{ v }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('long_term_goals')"
+                        @click="toggleIdentitySection('long_term_goals')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('long_term_goals') }">▸</span>长期目标
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('long_term_goals') }">
+                        <ul class="ov-goals">
+                            <li v-for="g in store.agentDetail.identity.long_term_goals" :key="g">{{ g }}</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="ov-section">
+                    <button
+                        type="button"
+                        class="ov-section-title"
+                        :aria-expanded="isIdentityOpen('speaking_style')"
+                        @click="toggleIdentitySection('speaking_style')"
+                    >
+                        <span class="ov-chevron" :class="{ open: isIdentityOpen('speaking_style') }">▸</span>说话风格
+                    </button>
+                    <div class="collapsible-body" :class="{ collapsed: !isIdentityOpen('speaking_style') }">
+                        <p class="ov-speaking">{{ store.agentDetail.identity.speaking_style }}</p>
+                    </div>
+                </div>
             </div>
             <p v-else class="agent-empty">身份信息加载中…</p>
 
@@ -444,7 +582,13 @@ function teleportLocations(): WorldLocation[] {
         <div v-if="activeTab === 'conversations'" class="agent-body">
             <p v-if="store.conversations.length === 0" class="agent-empty">暂无对话记录</p>
             <div v-for="conv in store.conversations" :key="conv.conversation_id" class="conv-item">
-                <div class="conv-item-head">
+                <button
+                    type="button"
+                    class="conv-item-head"
+                    :aria-expanded="isConvOpen(conv.conversation_id)"
+                    @click="toggleConv(conv.conversation_id)"
+                >
+                    <span class="ov-chevron" :class="{ open: isConvOpen(conv.conversation_id) }">▸</span>
                     <span class="other-name">{{ agentName(conv.other_agent_id) }}</span>
                     <span class="conv-times">
             {{ timeOf(conv.started_at) }}<template v-if="conv.ended_at != null"> – {{
@@ -454,11 +598,11 @@ function teleportLocations(): WorldLocation[] {
                     <span :class="conv.ended_at != null ? 'ended' : 'active'" class="badge">
             {{ conv.ended_at != null ? '已结束' : '对话中' }}
           </span>
-                </div>
+                </button>
                 <div v-if="conv.ended_at != null" class="conv-end-reason">
                     {{ endReasonLabel(conv.end_reason) }}
                 </div>
-                <div class="conv-msgs">
+                <div v-show="isConvOpen(conv.conversation_id)" class="conv-msgs">
                     <div v-for="(m, i) in conv.messages" :key="i" class="conv-msg">
             <span :class="{ self: m.from_agent_id === store.selectedAgentId }" class="msg-name">
               {{ agentName(m.from_agent_id) }}
@@ -474,14 +618,20 @@ function teleportLocations(): WorldLocation[] {
         <div v-if="activeTab === 'memories'" class="agent-body">
             <p v-if="store.memories.length === 0" class="agent-empty">还没有记忆</p>
             <div v-for="m in store.memories" :key="m.memory_id" class="mem-item">
-                <div class="mem-item-head">
+                <button
+                    type="button"
+                    class="mem-item-head"
+                    :aria-expanded="isMemOpen(m.memory_id)"
+                    @click="toggleMem(m.memory_id)"
+                >
+                    <span class="ov-chevron" :class="{ open: isMemOpen(m.memory_id) }">▸</span>
                     <span :class="memoryTypeClass(m.memory_type)" class="mem-chip">{{
                             memoryTypeLabel(m.memory_type)
                         }}</span>
                     <span class="mem-time">{{ timeOf(m.created_at) }}</span>
                     <span :title="`重要度 ${m.importance}`" class="mem-stars">{{ importanceStars(m.importance) }}</span>
-                </div>
-                <div class="mem-text">{{ m.text }}</div>
+                </button>
+                <div v-show="isMemOpen(m.memory_id)" class="mem-text">{{ m.text }}</div>
                 <div class="mem-foot">回忆 {{ m.recall_count }} 次</div>
             </div>
         </div>
@@ -697,6 +847,18 @@ function teleportLocations(): WorldLocation[] {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.conv-item-head:hover .other-name {
+    color: #fff;
 }
 
 .other-name {
@@ -789,6 +951,14 @@ function teleportLocations(): WorldLocation[] {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
 }
 
 .mem-chip {
@@ -960,6 +1130,61 @@ function teleportLocations(): WorldLocation[] {
     font-size: 11px;
     color: rgba(205, 232, 213, 0.6);
     font-weight: 600;
+}
+
+/* Identity sections are clickable toggles (总览 tab). */
+button.ov-section-title {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+button.ov-section-title:hover {
+    color: rgba(205, 232, 213, 0.95);
+}
+
+.ov-chevron {
+    display: inline-block;
+    font-size: 10px;
+    line-height: 1;
+    transition: transform 0.15s ease;
+}
+
+.ov-chevron.open {
+    transform: rotate(90deg);
+}
+
+/* Shared: long content scrolls inside its frame; collapsed hides it (总览 identity + 对话). */
+.collapsible-body {
+    max-height: 240px;
+    overflow-y: auto;
+    transition: max-height 0.2s ease;
+}
+
+.collapsible-body.collapsed {
+    max-height: 0;
+    overflow: hidden;
+}
+
+.collapsible-body::-webkit-scrollbar {
+    width: 8px;
+}
+
+.collapsible-body::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 4px;
+}
+
+.collapsible-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 4px;
 }
 
 .ov-chips {

@@ -59,11 +59,18 @@ function savePos(key: string, pos: SavedPos): void {
 
 /** Switch the element to fixed positioning at the given viewport point. */
 function applyPos(el: HTMLElement, left: number, top: number): void {
+    // Read before switching: once fixed, the top/bottom inset pair is dropped
+    // and height collapses to auto, so % children (AgentPanel height:100%)
+    // resolve against an auto-height parent, grow to content, and kill inner
+    // scrolling. Pin the pre-switch height (absolute insets make it definite
+    // even before the panel content mounts).
+    const height = el.offsetHeight;
     el.style.position = 'fixed';
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
     el.style.right = 'auto';
     el.style.bottom = 'auto';
+    el.style.height = `${height}px`;
     el.style.transform = 'none';
     el.style.margin = '0';
 }
@@ -75,8 +82,14 @@ function isScrollFrame(target: HTMLElement): boolean {
 
 function shouldStartDrag(el: HTMLElement, target: EventTarget | null): boolean {
     if (!(target instanceof HTMLElement)) return false;
-    // Clicking an inner scroll container's frame (the scrollbar) keeps scrolling.
-    if (target !== el && isScrollFrame(target)) return false;
+    // Never start a panel drag from inside a scrollable region of the panel
+    // (conversation/memory lists, identity sections…): presses there scroll,
+    // select text or drag the scrollbar instead of moving the panel.
+    let node: HTMLElement | null = target;
+    while (node && node !== el) {
+        if (isScrollFrame(node)) return false;
+        node = node.parentElement;
+    }
     return target.closest(INTERACTIVE_SELECTOR) === null;
 }
 
