@@ -622,6 +622,7 @@ export interface StockHolding {
     agent_id: string;
     stock_id: string;
     shares: number;
+    avg_cost: number;
 }
 
 /** Response of GET .../stocks (M10): all quotes + all holdings. */

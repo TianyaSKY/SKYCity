@@ -64,12 +64,33 @@ def initialize_database() -> None:
             "ALTER TABLE stores ADD COLUMN name VARCHAR(128)",
             # M19: per-job tool bonuses (JSON object {job_id: bonus}).
             "ALTER TABLE items ADD COLUMN work_bonus_jobs VARCHAR(256)",
+            # M10: stock-holding cost basis — legacy rows default 0 and are
+            # backfilled below from the stock_buy ledger.
+            "ALTER TABLE stock_holdings ADD COLUMN avg_cost INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 conn.execute(_text(alter))
                 conn.commit()
             except OperationalError:
                 conn.rollback()  # column already exists (fresh DB) — fine
+        # M10: backfill avg_cost for legacy holdings from the buy ledger
+        # (weighted average over every stock_buy transaction; sells never
+        # change the cost basis, so buys alone are exact). Idempotent.
+        try:
+            conn.execute(_text(
+                "UPDATE stock_holdings SET avg_cost = ("
+                "  SELECT CAST(ROUND(SUM(-t.amount) * 1.0 / NULLIF(SUM(t.quantity), 0)) AS INTEGER)"
+                "  FROM transactions t"
+                "  WHERE t.world_id = stock_holdings.world_id"
+                "    AND t.agent_id = stock_holdings.agent_id"
+                "    AND t.item_id = stock_holdings.stock_id"
+                "    AND t.type = 'stock_buy'"
+                ")"
+            ))
+            conn.commit()
+        except Exception:  # noqa: BLE001 - legacy ledger shape varies; default 0 stays
+            conn.rollback()
+            logger.exception("stock holding avg_cost backfill failed")
         # M18 R39.4: one store per location for personal shops (the unique
         # index is the last line of defence against concurrent stall grabs).
         try:

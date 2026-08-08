@@ -111,6 +111,33 @@ def holding_of(
         session.close()
 
 
+def holding_avg_cost(
+        engine: WorldEngine, world_id: str, agent_id: str, stock_id: str
+) -> int:
+    session = SessionLocal()
+    try:
+        row = session.get(
+            StockHolding,
+            {"world_id": world_id, "agent_id": agent_id, "stock_id": stock_id},
+        )
+        return row.avg_cost if row is not None else 0
+    finally:
+        session.close()
+
+
+def set_stock_price(engine: WorldEngine, world_id: str, stock_id: str, price: int) -> None:
+    session = SessionLocal()
+    try:
+        session.execute(
+            update(Stock)
+            .where(Stock.world_id == world_id, Stock.stock_id == stock_id)
+            .values(price=price)
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
 def set_day_business(engine: WorldEngine, world_id: str, stock_id: str, count: int) -> None:
     session = SessionLocal()
     try:
@@ -188,6 +215,24 @@ def test_buy_stock_success(engine: WorldEngine) -> None:
     assert txs[0].amount == -40
     assert txs[0].item_id == STOCK_SHOP
     assert txs[0].quantity == 2
+
+
+def test_holding_avg_cost_weighted_average(engine: WorldEngine) -> None:
+    """avg_cost tracks the weighted buy price; sells never change it."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    set_agent(engine, world_id, "agent_linxia", money=1000)
+    assert engine.stock_service.buy_stock(world_id, "agent_linxia", STOCK_SHOP, shares=2, reason="买")[0]
+    assert holding_avg_cost(engine, world_id, "agent_linxia", STOCK_SHOP) == 20  # 首笔按市价
+
+    set_stock_price(engine, world_id, STOCK_SHOP, 22)
+    assert engine.stock_service.buy_stock(world_id, "agent_linxia", STOCK_SHOP, shares=2, reason="买")[0]
+    assert holding_of(engine, world_id, "agent_linxia", STOCK_SHOP) == 4
+    assert holding_avg_cost(engine, world_id, "agent_linxia", STOCK_SHOP) == 21  # (40+44)/4
+
+    assert engine.stock_service.sell_stock(world_id, "agent_linxia", STOCK_SHOP, shares=1, reason="用钱")[0]
+    assert holding_of(engine, world_id, "agent_linxia", STOCK_SHOP) == 3
+    assert holding_avg_cost(engine, world_id, "agent_linxia", STOCK_SHOP) == 21  # 卖出不改成本
 
 
 def test_buy_insufficient_funds(engine: WorldEngine) -> None:
@@ -419,7 +464,10 @@ def test_save_restore_preserves_stocks(engine: WorldEngine) -> None:
     assert shop["price"] == stock_row(engine, world_id, STOCK_SHOP).price
     assert shop["day_business"] == stock_row(engine, world_id, STOCK_SHOP).day_business
     assert any(
-        h["agent_id"] == "agent_linxia" and h["stock_id"] == STOCK_SHOP and h["shares"] == 2
+        h["agent_id"] == "agent_linxia"
+        and h["stock_id"] == STOCK_SHOP
+        and h["shares"] == 2
+        and h["avg_cost"] == 20  # 买入价即成本，随存档恢复
         for h in data["holdings"]
     )
 
@@ -512,7 +560,12 @@ def test_http_action_contract(client: TestClient) -> None:
     stocks = client.get(f"/api/worlds/{world_id}/stocks")
     holdings = stocks.json()["holdings"]
     assert holdings == [
-        {"agent_id": "agent_linxia", "stock_id": STOCK_SHOP, "shares": 2}
+        {
+            "agent_id": "agent_linxia",
+            "stock_id": STOCK_SHOP,
+            "shares": 2,
+            "avg_cost": 20,  # 首笔按市价记成本
+        }
     ]
 
 

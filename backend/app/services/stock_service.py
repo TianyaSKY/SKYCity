@@ -334,10 +334,17 @@ class StockService:
                         agent_id=agent_id,
                         stock_id=stock_id,
                         shares=quantity,
+                        avg_cost=stock.price,
                     )
                 )
             else:
-                holding.shares += quantity
+                # Weighted-average cost basis; sells never change it, so the
+                # remaining shares keep the same 均价 (float is rounded).
+                total = holding.shares + quantity
+                holding.avg_cost = round(
+                    (holding.avg_cost * holding.shares + stock.price * quantity) / total
+                )
+                holding.shares = total
             agent.money -= cost  # keep the in-memory agent consistent
             session.add(
                 Transaction(
@@ -521,6 +528,7 @@ class StockService:
                         "agent_id": holding.agent_id,
                         "stock_id": holding.stock_id,
                         "shares": holding.shares,
+                        "avg_cost": holding.avg_cost,
                     }
                     for holding in holdings
                 ],

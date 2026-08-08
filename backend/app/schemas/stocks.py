@@ -20,6 +20,7 @@ class StockHoldingInfo(BaseModel):
     agent_id: str
     stock_id: str
     shares: int
+    avg_cost: int  # 持仓均价（金币/股），浮盈计算基准
 
 
 class StocksResponse(BaseModel):

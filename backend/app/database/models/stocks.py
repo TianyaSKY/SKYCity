@@ -58,6 +58,9 @@ class StockHolding(Base):
     agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     stock_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     shares: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 持仓均价（金币/股）：买入时按加权平均更新，卖出不变；
+    # 观察文本据此给出浮盈/浮亏，供智能体判断止盈止损。
+    avg_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"StockHolding(agent={self.agent_id!r}, stock={self.stock_id!r}, shares={self.shares})"

@@ -488,7 +488,7 @@ def build_observation(
             select(Stock).where(Stock.world_id == world_id).order_by(Stock.stock_id)
         ).all()
         holdings = {
-            h.stock_id: h.shares
+            h.stock_id: h
             for h in session.scalars(
                 select(StockHolding).where(
                     StockHolding.world_id == world_id,
@@ -498,11 +498,20 @@ def build_observation(
         }
         for stock in stocks:
             delta = stock.price - stock.prev_price
-            lines.append(
+            line = (
                 f"- buy_stock({stock.stock_id}, reason, shares=1): {stock.name} 现价{stock.price}金币"
                 f"（昨收{stock.prev_price}，{'涨+' if delta >= 0 else '跌'}{abs(delta)}）"
-                f"——你持有 {holdings.get(stock.stock_id, 0)} 股"
             )
+            holding = holdings.get(stock.stock_id)
+            if holding is None or holding.shares <= 0:
+                line += "——你持有 0 股"
+            else:
+                profit = stock.price - holding.avg_cost
+                line += (
+                    f"——你持有 {holding.shares} 股（成本 {holding.avg_cost}金币/股，"
+                    f"{'浮盈' if profit >= 0 else '浮亏'}{abs(profit)}金币/股）"
+                )
+            lines.append(line)
         lines.append("- sell_stock(stock_id, reason, shares=1): 卖出持股变现（不能超卖）")
         lines.append("- 股价每小时随商店/农场经营变动，每日按业绩分红（分红到账看 money_changed）")
 

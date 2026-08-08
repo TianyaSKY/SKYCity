@@ -49,6 +49,20 @@ const liveAgent = computed(() =>
     store.selectedAgentId ? (store.agentById(store.selectedAgentId) ?? null) : null,
 );
 
+/** Selected agent's stock holdings with live quotes (M10). */
+const agentHoldings = computed(() => {
+    const agentId = store.selectedAgentId;
+    if (!agentId) return [];
+    const byStock = store.holdings[agentId] ?? {};
+    return Object.entries(byStock)
+        .filter(([, shares]) => (shares ?? 0) > 0)
+        .map(([stockId, shares]) => {
+            const stock = store.stocks.find((s) => s.stock_id === stockId);
+            const price = stock?.price ?? 0;
+            return {stockId, name: stock?.name ?? stockId, shares: shares ?? 0, price, value: (shares ?? 0) * price};
+        });
+});
+
 function intentLabel(intent: string): string {
     return INTENT_LABELS[intent] ?? intent;
 }
@@ -393,6 +407,18 @@ function teleportLocations(): WorldLocation[] {
                 <p class="ov-inventory">{{ inventoryText(liveAgent.inventory) }}</p>
                 <div class="ov-section-title">当前行为</div>
                 <p class="ov-action">{{ actionText(liveAgent.action) || '空闲' }}</p>
+            </div>
+
+            <div class="ov-card">
+                <div class="ov-section-title">股票持仓</div>
+                <p v-if="agentHoldings.length === 0" class="ov-inventory">无</p>
+                <ul v-else class="ov-holdings">
+                    <li v-for="h in agentHoldings" :key="h.stockId" class="ov-holding">
+                        <span class="ov-holding-name">{{ h.name }}</span>
+                        <span class="ov-holding-qty">{{ h.shares }} 股</span>
+                        <span class="ov-holding-val">现价 {{ h.price }} · 市值 {{ h.value }}</span>
+                    </li>
+                </ul>
             </div>
 
             <div class="ov-card">
@@ -1033,6 +1059,40 @@ function teleportLocations(): WorldLocation[] {
     color: rgba(255, 255, 255, 0.85);
     line-height: 1.5;
     word-break: break-word;
+}
+
+.ov-holdings {
+    list-style: none;
+    margin: 4px 0 0;
+    padding: 0;
+}
+
+.ov-holding {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.ov-holding-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ov-holding-qty {
+    flex-shrink: 0;
+    color: #aed581;
+}
+
+.ov-holding-val {
+    flex-shrink: 0;
+    margin-left: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: rgba(255, 255, 255, 0.55);
 }
 
 .dec-item {
