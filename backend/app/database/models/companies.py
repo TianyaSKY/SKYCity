@@ -203,6 +203,40 @@ class CompanyInventory(Base):
     reserved_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class ProcurementOrder(Base):
+    """C1: a pending company-to-company purchase waiting for seller stock.
+
+    Created when a procurement attempt hits ``卖方库存不足``; the engine's
+    hourly tick (or the seller's next shift completion) fills open orders as
+    soon as stock and buyer funds are available, instead of the manager
+    blind-retrying every decision.
+    """
+
+    __tablename__ = "procurement_orders"
+    __table_args__ = (
+        Index("ix_procurement_orders_world_status", "world_id", "status"),
+        Index(
+            "ix_procurement_orders_world_buyer_seller_item",
+            "world_id",
+            "buyer_company_id",
+            "seller_company_id",
+            "item_id",
+        ),
+    )
+
+    order_id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: _id("order"))
+    world_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    buyer_company_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    seller_company_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    item_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    unit_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")  # open | filled | cancelled
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    filled_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    trace_id: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+
+
 class CompanyTransaction(Base):
     __tablename__ = "company_transactions"
     __table_args__ = (Index("ix_company_transactions_world_company", "world_id", "company_id"),)

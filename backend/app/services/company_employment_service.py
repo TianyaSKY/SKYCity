@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config.gameplay import (
     ATTENDANCE_ABSENT_PENALTY,
     ATTENDANCE_LATE_PENALTY,
+    MAX_ABSENT_SHIFTS,
     SHIFT_EARLY_WINDOW,
     SHIFT_LATE_LIMIT,
     SHIFT_UPCOMING_REMIND,
@@ -498,7 +499,14 @@ class CompanyEmploymentService:
                 .values(quantity=CompanyInventory.quantity - quantity)
             )
             if result.rowcount == 0:
-                raise CompanyEmploymentError("卖方库存不足")
+                # C1: the seller is out of stock — instead of failing (and
+                # prompting the manager to blind-retry every decision), file a
+                # pending order that the engine's hourly tick fills as soon as
+                # stock and funds are both available.
+                return self._file_order(
+                    session, world, buyer, seller, item_id, quantity,
+                    unit_price, reason, trace_id,
+                )
             buyer.money -= total
             seller.money += total
             self._ensure_inventory(
@@ -578,6 +586,251 @@ class CompanyEmploymentService:
             }
 
         return self._uow.run(_inner)
+
+    def _file_order(
+            self,
+            session: Session,
+            world: World,
+            buyer: Company,
+            seller: Company,
+            item_id: str,
+            quantity: int,
+            unit_price: int,
+            reason: str,
+            trace_id: str | None,
+    ) -> dict[str, Any]:
+        """C1: create (or top up) a pending procurement order for one
+        (buyer, seller, item) tuple when the seller has no stock right now.
+
+        Open orders are merged (quantity accumulates up to the rule's max);
+        the engine's ``fulfill_open_orders`` executes them the moment the
+        seller produces goods. Returns the same payload shape as a completed
+        purchase plus ``ordered: True`` so the manager stops retrying.
+        """
+        from app.database.models.companies import ProcurementOrder
+
+        existing = session.scalars(
+            select(ProcurementOrder).where(
+                ProcurementOrder.world_id == world.world_id,
+                ProcurementOrder.buyer_company_id == buyer.company_id,
+                ProcurementOrder.seller_company_id == seller.company_id,
+                ProcurementOrder.item_id == item_id,
+                ProcurementOrder.status == "open",
+            )
+        ).all()
+        if existing:
+            order = existing[0]
+            order.quantity = min(
+                order.quantity + quantity,
+                int(
+                    next(
+                        (
+                            e.get("max_quantity_per_order", 99)
+                            for cs in load_companies(self._world_data_dir)
+                            if cs["company_id"] == buyer.company_id
+                            for e in cs.get("procurement") or []
+                            if e.get("item_id") == item_id
+                            and e.get("seller_company_id") == seller.company_id
+                        ),
+                        99,
+                    )
+                ),
+            )
+        else:
+            order = ProcurementOrder(
+                world_id=world.world_id,
+                buyer_company_id=buyer.company_id,
+                seller_company_id=seller.company_id,
+                item_id=item_id,
+                quantity=quantity,
+                unit_price=unit_price,
+                status="open",
+                created_at=world.world_time,
+                trace_id=trace_id or "",
+            )
+            session.add(order)
+            session.flush()
+        self._publish(session, world, "procurement_order_filed", {
+            "order_id": order.order_id,
+            "company_id": buyer.company_id,
+            "seller_company_id": seller.company_id,
+            "item_id": item_id,
+            "quantity": order.quantity,
+            "unit_price": unit_price,
+            "reason": reason,
+        }, trace_id)
+        return {
+            "company_id": buyer.company_id,
+            "seller_company_id": seller.company_id,
+            "item_id": item_id,
+            "quantity": order.quantity,
+            "unit_price": unit_price,
+            "total": order.quantity * unit_price,
+            "buyer_balance": buyer.money,
+            "seller_balance": seller.money,
+            "ordered": True,
+            "order_id": order.order_id,
+            "note": "卖方库存不足，已登记订单等待供货",
+        }
+
+    def fulfill_open_orders(
+            self, session: Session, world: World, world_time: int
+    ) -> int:
+        """C1: fill every open procurement order whose seller now has stock
+        and whose buyer can pay (same fixed-price transfer as a direct
+        purchase). Returns how many orders were filled.
+
+        Called by the engine at the hourly tick and after shift completion,
+        so production flows to the buyer without the manager re-trying.
+        """
+        from app.database.models.companies import ProcurementOrder
+
+        filled = 0
+        orders = session.scalars(
+            select(ProcurementOrder).where(
+                ProcurementOrder.world_id == world.world_id,
+                ProcurementOrder.status == "open",
+            )
+        ).all()
+        for order in orders:
+            buyer = session.get(
+                Company,
+                {"world_id": world.world_id, "company_id": order.buyer_company_id},
+            )
+            seller = session.get(
+                Company,
+                {"world_id": world.world_id, "company_id": order.seller_company_id},
+            )
+            if buyer is None or seller is None:
+                order.status = "cancelled"
+                continue
+            if buyer.status != "active" or seller.status != "active":
+                continue
+            total = order.quantity * order.unit_price
+            if buyer.money < total:
+                continue
+            result = session.execute(
+                update(CompanyInventory)
+                .where(
+                    CompanyInventory.world_id == world.world_id,
+                    CompanyInventory.company_id == order.seller_company_id,
+                    CompanyInventory.item_id == order.item_id,
+                    CompanyInventory.quantity
+                    - CompanyInventory.reserved_quantity >= order.quantity,
+                )
+                .values(quantity=CompanyInventory.quantity - order.quantity)
+            )
+            if result.rowcount == 0:
+                continue
+            buyer.money -= total
+            seller.money += total
+            self._ensure_inventory(
+                session, world.world_id, order.buyer_company_id, order.item_id
+            ).quantity += order.quantity
+            item = session.get(
+                Item, {"world_id": world.world_id, "item_id": order.item_id}
+            )
+            item_name = item.name if item is not None else order.item_id
+            session.add(
+                CompanyTransaction(
+                    world_id=world.world_id,
+                    company_id=order.buyer_company_id,
+                    type="material_purchase",
+                    amount=-total,
+                    balance_after=buyer.money,
+                    related_item_id=order.item_id,
+                    quantity=order.quantity,
+                    reference_type="company",
+                    reference_id=order.seller_company_id,
+                    reason=f"订单履约 采购 {item_name}×{order.quantity}",
+                    world_time=world_time,
+                    trace_id=order.trace_id,
+                )
+            )
+            session.add(
+                CompanyTransaction(
+                    world_id=world.world_id,
+                    company_id=order.seller_company_id,
+                    type="wholesale_sale",
+                    amount=total,
+                    balance_after=seller.money,
+                    related_item_id=order.item_id,
+                    quantity=order.quantity,
+                    reference_type="company",
+                    reference_id=order.buyer_company_id,
+                    reason=f"订单履约 批发 {item_name}×{order.quantity} 给 {buyer.name}",
+                    world_time=world_time,
+                    trace_id=order.trace_id,
+                )
+            )
+            order.status = "filled"
+            order.filled_at = world_time
+            filled += 1
+            self._publish(session, world, "company_money_changed", {
+                "company_id": order.buyer_company_id,
+                "amount": -total,
+                "balance": buyer.money,
+                "reason": f"订单履约 采购 {item_name}×{order.quantity}",
+            }, order.trace_id)
+            self._publish(session, world, "company_money_changed", {
+                "company_id": order.seller_company_id,
+                "amount": total,
+                "balance": seller.money,
+                "reason": f"订单履约 批发 {item_name}×{order.quantity} 给 {buyer.name}",
+            }, order.trace_id)
+            self._publish(session, world, "company_inventory_changed", {
+                "company_id": order.buyer_company_id,
+                "items": self._company_inventory_list(
+                    session, world.world_id, order.buyer_company_id
+                ),
+            }, order.trace_id)
+            self._publish(session, world, "company_inventory_changed", {
+                "company_id": order.seller_company_id,
+                "items": self._company_inventory_list(
+                    session, world.world_id, order.seller_company_id
+                ),
+            }, order.trace_id)
+            self._publish(session, world, "procurement_order_filled", {
+                "order_id": order.order_id,
+                "company_id": order.buyer_company_id,
+                "seller_company_id": order.seller_company_id,
+                "item_id": order.item_id,
+                "quantity": order.quantity,
+                "unit_price": order.unit_price,
+                "total": total,
+            }, order.trace_id)
+        return filled
+
+    def list_open_orders(
+            self, world_id: str
+    ) -> list[dict[str, Any]]:
+        """C1: all open procurement orders (manager visibility / debugging)."""
+        from app.database.models.companies import ProcurementOrder
+
+        session = self._session_factory()
+        try:
+            if self.engine.get_runtime(world_id) is None:
+                raise CompanyEmploymentError("世界运行时不存在")
+            rows = session.scalars(
+                select(ProcurementOrder).where(
+                    ProcurementOrder.world_id == world_id,
+                    ProcurementOrder.status == "open",
+                ).order_by(ProcurementOrder.created_at)
+            ).all()
+            return [
+                {
+                    "order_id": row.order_id,
+                    "buyer_company_id": row.buyer_company_id,
+                    "seller_company_id": row.seller_company_id,
+                    "item_id": row.item_id,
+                    "quantity": row.quantity,
+                    "unit_price": row.unit_price,
+                    "status": row.status,
+                }
+                for row in rows
+            ]
+        finally:
+            session.close()
 
     def stock_store(
             self,
@@ -691,6 +944,18 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("岗位已满")
             if session.get(Agent, {"world_id": world_id, "agent_id": agent_id}) is None:
                 raise CompanyEmploymentError("智能体不存在")
+            # E1: one formal job per resident — reject early (mirrors the
+            # review()-time guard) so the applicant knows immediately instead
+            # of waiting for the manager's decision.
+            active = session.scalar(
+                select(EmploymentContract).where(
+                    EmploymentContract.world_id == world_id,
+                    EmploymentContract.agent_id == agent_id,
+                    EmploymentContract.status.in_(ACTIVE_EMPLOYMENT),
+                )
+            )
+            if active is not None:
+                raise CompanyEmploymentError("申请人已经有正式工作")
             application = JobApplication(
                 world_id=world_id,
                 opening_id=opening_id,
@@ -1444,6 +1709,55 @@ class CompanyEmploymentService:
             "company_id": shift.company_id,
             "agent_id": shift.agent_id,
         })
+        # E2: a resident who never shows up forfeits the job — auto-terminate
+        # the contract and reopen the opening so the position can go to
+        # someone who actually works (fixes zombie slots like the bakery).
+        if contract.absent_shifts >= MAX_ABSENT_SHIFTS and contract.status in ACTIVE_EMPLOYMENT:
+            contract.status = "terminated"
+            contract.ended_at = world.world_time
+            contract.termination_reason = f"连续缺勤 {contract.absent_shifts} 次，自动解约"
+            for future in session.scalars(
+                    select(WorkShift).where(
+                        WorkShift.world_id == action.world_id,
+                        WorkShift.employment_id == shift.employment_id,
+                        WorkShift.status == "scheduled",
+                    )
+            ):
+                future.status = "cancelled"
+                self._publish(session, world, "shift_cancelled", {
+                    "shift_id": future.shift_id,
+                    "employment_id": future.employment_id,
+                    "company_id": future.company_id,
+                    "agent_id": future.agent_id,
+                    "reason": "连续缺勤，自动解约",
+                })
+            opening = session.scalar(
+                select(JobOpening).where(
+                    JobOpening.world_id == action.world_id,
+                    JobOpening.position_id == shift.position_id,
+                )
+            )
+            company = session.get(
+                Company,
+                {"world_id": action.world_id, "company_id": shift.company_id},
+            )
+            if opening is not None and company is not None and company.status == "active":
+                opening.vacancies += 1
+                if opening.status != "open":
+                    opening.status = "open"
+                    self._publish(session, world, "job_opening_created", {
+                        "opening_id": opening.opening_id,
+                        "company_id": company.company_id,
+                        "position_id": shift.position_id,
+                        "vacancies": opening.vacancies,
+                    })
+            self._publish(session, world, "employment_terminated", {
+                "employment_id": shift.employment_id,
+                "company_id": shift.company_id,
+                "agent_id": shift.agent_id,
+                "reason": "连续缺勤，自动解约",
+            })
+            return
         position = session.get(Position, {"world_id": action.world_id, "position_id": shift.position_id})
         if position is not None and contract.status == "active":
             company = session.get(
@@ -1650,6 +1964,10 @@ class CompanyEmploymentService:
             )
         if company.status == "active":
             self._create_next_shift(session, world, contract, position)
+        # C1: production just landed in the warehouse — fill any open orders
+        # for this seller's goods right away (same transaction, no manager
+        # retry needed).
+        self.fulfill_open_orders(session, world, world.world_time)
         if self.engine.action_service is not None:
             self.engine.action_service._maybe_schedule_next_decision(session, action)
 

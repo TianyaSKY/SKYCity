@@ -71,7 +71,7 @@
         {
           "item_id": "flower",
           "seller_company_id": "company_flower_garden",
-          "unit_price": 6,
+          "unit_price": 7,
           "max_quantity_per_order": 99
         }
       ],

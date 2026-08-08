@@ -144,7 +144,10 @@
   发布一次 `stock_price_changed`（价格未变也发，前端静默）。
 - R18.3 分红：每日 00:00 按当日经营数 `div_per_share = max(1, day_business // 3)`
   （无经营则 0 不发；M19 门槛由 5 下调至 3）；按持仓发放并记 `dividend` 流水；
-  `prev_price` 更新为 收盘价，`day_business` 清零。
+  `prev_price` 更新为 收盘价，`day_business` 清零。**A2：分红/买入/卖出全部走真实账户**——
+  买入款进入发行企业账户（`stock_equity` 流水，无发行企业的股票进入村庄金库），
+  卖出款由发行企业按现价回购（`stock_buyback`，企业或金库资金不足则拒绝），
+  分红由发行企业或金库实际支付（资金不足当日不发）——货币守恒，不再凭空铸造。
 - R18.4 上帝：可设定任意股价（走 GodActionService 审计 + 事件）。
 - R18.5 存档：股票价格/经营计数/持仓随存档（R17）；旧存档恢复时自动补种市场。
 
@@ -170,6 +173,14 @@
   负债是每日开销超支的唯一结果），记 `upkeep` 流水并发布 `money_changed`（reason=每日生活开销）。负债者
   （余额 < 0）同时扣 `DEBT_MOOD_PENALTY_PER_DAY=8` 心情（下限 0，经 `needs_changed` 发布）；负债期间
   购买/住店/买股票/转账仍被拒绝（R7），且每小时触发一次 `origin=debt` 的高优先级决策，引导其打工赚钱还债。
+- R20.4a **村庄金库回流（A1）**：upkeep 不再销毁——全部进入 `world.treasury`。同日 00:00 后按
+  `TREASURY_UBI_SHARE_PERCENT=50%` **全民平分**（记 `ubi_income` 流水，reason=村庄基本收入；
+  负债者也领——停发福利会制造贫困陷阱：没钱→买不起饭→无法工作→债务加深）；
+  剩余部分按当日各企业实发工资比例补贴企业（`treasury_subsidy` 流水，reason=金库工资补贴）。
+  无人发工资时企业池留在金库作为缓冲。货币只在系统内循环，总量守恒。
+- R20.4b **饥饿强制进食（B1）**：饱食度 ≤ `HUNGER_FORCED_EAT_THRESHOLD=20` 且空闲/等待的智能体，
+  引擎每小时直接调度进食——优先吃背包食物，否则在所在商店买最便宜的食物——不再依赖 LLM 自觉，
+  消费回路强制接通（观察文本同步给出【饥饿警告】）。
 - R20.5 促销：见 R15（确定性 20% 日概率、20% 折扣、恢复基准价）。
 - R20.6 赠物关系：`item_given` 后送礼方对收礼方 affection +3 / familiarity +2， 收礼方对送礼方 familiarity +2（
   `relationship_changed` 自动发布）。
@@ -303,6 +314,11 @@
 - 企业 `suspended` 停止招聘与排班但保留企业（未来 scheduled 班次取消、 进行中班次照常完成但不续排）；恢复后重新招聘并为缺班次的合同续排。
 - `bankrupt`：资不抵薪且满足破产条件（后续定义）；上帝注资（`god_injection`
   流水）可恢复经营并立即补发欠薪。
+- **E2 僵尸清算**：连续亏损 ≥ `ZOMBIE_LOSS_DAYS=3` 天且欠薪 > 0 的企业，在日界自动清算——
+  `status=closed`、合同终止（reason=企业连续亏损，破产清算）、未来班次取消、招聘关闭。
+  释放员工与资本，避免僵尸企业永久占坑。
+- **E2 缺勤解约**：同一合同累计缺勤 ≥ `MAX_ABSENT_SHIFTS=3` 次 → 自动解约并重开招聘
+  （reason=连续缺勤 N 次，自动解约），把岗位让给能真正来上班的人。
 
 ## R33 企业销售
 
@@ -336,6 +352,10 @@
   双方 `material_purchase`/`wholesale_sale` 流水 + 事件。
 - 任一新校验失败整单回滚；并发采购最后可用库存时恰一单成功（同 R4 的
   BEGIN IMMEDIATE + 条件 UPDATE 模式）。
+- **R36a 采购订单（C1）**：卖方库存不足不再失败——自动登记待执行订单
+  （`procurement_orders` 表，同买家/卖家/商品合并数量），引擎每小时与班次完成后
+  自动按订单履约（库存与资金齐备即成交）。经理不再盲试；发布
+  `procurement_order_filed` / `procurement_order_filled` 事件。
 
 ## R37 正式生产原料预留与消耗
 

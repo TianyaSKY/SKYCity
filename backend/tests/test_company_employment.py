@@ -329,9 +329,9 @@ def test_one_active_contract_per_agent(system) -> None:
     )
     app1 = service.apply(runtime.world_id, farm_opening["opening_id"], "agent_linxia", "求职")
     service.review(runtime.world_id, app1["application_id"], "agent_zhangming", "accept", "录用")
-    app2 = service.apply(runtime.world_id, shop_opening["opening_id"], "agent_linxia", "想兼职")
+    # E1: 已有正式工作 → apply 阶段即拒绝（无需等经理审核）
     with pytest.raises(ValueError, match="已经有正式工作"):
-        service.review(runtime.world_id, app2["application_id"], "agent_wangfang", "accept", "录用")
+        service.apply(runtime.world_id, shop_opening["opening_id"], "agent_linxia", "想兼职")
 
 
 def test_closed_opening_cannot_apply(system) -> None:
@@ -876,8 +876,9 @@ def test_formal_work_products_enter_company_inventory(system) -> None:
         inventory = session.get(
             CompanyInventory, {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"}
         )
-        # M16: the farm position now runs the production recipe (10 wheat/shift).
-        assert inventory is not None and inventory.quantity == 10
+        # M16: the farm position now runs the production recipe (12 wheat/shift,
+        # D: output raised so 12×6=72 covers the 60 wage with margin).
+        assert inventory is not None and inventory.quantity == 12
         agent_inv = session.get(
             Inventory, {"world_id": world_id, "agent_id": "agent_linxia", "item_id": "wheat"}
         )
@@ -1249,7 +1250,7 @@ def test_save_restore_v2_company_state(system) -> None:
             CompanyInventory,
             {"world_id": new_world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
         )
-        assert inventory is not None and inventory.quantity == 10
+        assert inventory is not None and inventory.quantity == 12
         max_seq_now = session.scalar(
             select(func.max(WorldEvent.sequence)).where(
                 WorldEvent.world_id == new_world_id
@@ -1452,6 +1453,11 @@ def test_first_version_acceptance_script(system) -> None:
         session.close()
 
     # 13-14. 企业资金不足 → 欠薪；员工看到欠薪后可辞职（欠薪保留）
+    view1 = service.list_agent_employment(world_id, "agent_linxia")
+    shift3 = next(s for s in view1["shifts"] if s["status"] == "scheduled")
+    advance_minutes(engine, world_id, shift3["scheduled_start"] - runtime.clock.world_time)
+    # 先跨过日界（村庄金库按当日实发工资补贴企业——发过工资的企业会拿回补贴），
+    # 再清空资金，验证"发不出工资→欠薪"这条链本身。
     session = SessionLocal()
     try:
         company = session.get(
@@ -1462,9 +1468,6 @@ def test_first_version_acceptance_script(system) -> None:
         session.commit()
     finally:
         session.close()
-    view1 = service.list_agent_employment(world_id, "agent_linxia")
-    shift3 = next(s for s in view1["shifts"] if s["status"] == "scheduled")
-    advance_minutes(engine, world_id, shift3["scheduled_start"] - runtime.clock.world_time)
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
@@ -1615,7 +1618,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
             CompanyInventory,
             {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
         )
-        assert wheat is not None and wheat.quantity == 10
+        assert wheat is not None and wheat.quantity == 12
         assert farm is not None and farm.money == 740
     finally:
         session.close()
@@ -1749,7 +1752,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
         assert wheat.quantity == 10 and wheat.reserved_quantity == 10
     finally:
         session.close()
-    # 完成班次：消耗 10 wheat、产出 20 bread、工资 60
+    # 完成班次：消耗 10 wheat、产出 24 bread、工资 60（D: 产出上调留毛利）
     advance_minutes(engine, world_id, started["scheduled_end"] - runtime.clock.world_time)
     session = SessionLocal()
     try:
@@ -1763,7 +1766,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
             CompanyInventory,
             {"world_id": world_id, "company_id": "company_village_bakery", "item_id": "bread"},
         )
-        assert bread is not None and bread.quantity == 20
+        assert bread is not None and bread.quantity == 24
         wage = session.scalar(
             select(Transaction).where(
                 Transaction.world_id == world_id,
@@ -1782,7 +1785,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
         assert production.payload["company_id"] == "company_village_bakery"
         assert production.payload["shift_id"] == shift["shift_id"]
         assert production.payload["consumed"] == [{"item_id": "wheat", "quantity": 10}]
-        assert production.payload["products"] == [{"item_id": "bread", "quantity": 20}]
+        assert production.payload["products"] == [{"item_id": "bread", "quantity": 24}]
     finally:
         session.close()
 
@@ -1980,7 +1983,7 @@ def test_m16_bread_does_not_auto_restock(system) -> None:
 
 
 def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
-    """M16 R36 并发：最后 10 wheat 双采购，恰一成功且卖方库存不为负."""
+    """M16 R36 + C1：最后 10 wheat 双采购，恰一成交；败者转订单，库存不为负."""
     engine, service = system
     runtime = engine.create_world("M16并发采购测试")
     service.register_runtime(runtime)
@@ -2003,7 +2006,7 @@ def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
     def attempt() -> None:
         barrier.wait()  # 两线程同时发起采购
         try:
-            service.purchase_company_goods(
+            payload = service.purchase_company_goods(
                 world_id,
                 "company_village_bakery",
                 "company_morning_farm",
@@ -2012,7 +2015,7 @@ def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
                 quantity=10,
                 reason="抢货",
             )
-            results.append((True, ""))
+            results.append((True, "filled" if not payload.get("ordered") else "ordered"))
         except ValueError as exc:
             results.append((False, str(exc)))
 
@@ -2023,8 +2026,9 @@ def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
         thread.join()
 
     assert len(results) == 2
-    assert sum(1 for ok, _ in results if ok) == 1, f"expected one winner, got {results}"
-    assert sum(1 for ok, reason in results if not ok and reason == "卖方库存不足") == 1
+    # C1: exactly one immediate fill; the loser files a pending order instead
+    # of failing (卖方库存不足 -> 订单, 引擎按货到履约).
+    assert sorted(r for _, r in results) == ["filled", "ordered"], f"got {results}"
     session = SessionLocal()
     try:
         wheat = session.get(
@@ -2032,6 +2036,15 @@ def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
             {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
         )
         assert wheat is not None and wheat.quantity == 0
+        from app.database.models.companies import ProcurementOrder
+        orders = session.scalars(
+            select(ProcurementOrder).where(
+                ProcurementOrder.world_id == world_id,
+                ProcurementOrder.status == "open",
+            )
+        ).all()
+        assert len(orders) == 1
+        assert orders[0].quantity == 10 and orders[0].unit_price == 6
     finally:
         session.close()
 
@@ -2421,8 +2434,9 @@ def test_manager_profit_share_paid_at_midnight(system) -> None:
     session = SessionLocal()
     try:
         manager = session.get(Agent, {"world_id": world_id, "agent_id": manager_id})
-        # share 100*20//100 = 20, minus the 120 daily upkeep.
-        assert manager.money == manager_before + 20 - 120
+        # share 100*20//100 = 20, minus the 120 daily upkeep, plus the 60
+        # treasury UBI (A1: 50% of the 1080 upkeep, split among 9 residents).
+        assert manager.money == manager_before + 20 - 120 + 60
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
@@ -2500,8 +2514,9 @@ def test_manager_profit_skipped_when_day_lost_money(system) -> None:
     session = SessionLocal()
     try:
         manager = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
-        # Only the daily upkeep moved the balance (-120).
-        assert manager.money == 2880  # 3000 - 120
+        # Only the daily upkeep (-120) and the treasury UBI (+60) moved the
+        # balance (A1).
+        assert manager.money == 2940  # 3000 - 120 + 60
         assert not session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,

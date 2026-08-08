@@ -67,6 +67,10 @@ def initialize_database() -> None:
             # M10: stock-holding cost basis — legacy rows default 0 and are
             # backfilled below from the stock_buy ledger.
             "ALTER TABLE stock_holdings ADD COLUMN avg_cost INTEGER NOT NULL DEFAULT 0",
+            # A1: the village treasury recycles upkeep instead of destroying it.
+            "ALTER TABLE worlds ADD COLUMN treasury INTEGER NOT NULL DEFAULT 0",
+            # A2: stocks are backed by a real company (or the treasury).
+            "ALTER TABLE stocks ADD COLUMN issuer_company_id VARCHAR(64)",
         ):
             try:
                 conn.execute(_text(alter))

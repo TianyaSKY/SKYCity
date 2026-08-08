@@ -28,7 +28,7 @@
       "products": [
         {
           "item_id": "wheat",
-          "quantity": 10
+          "quantity": 12
         }
       ],
       "inputs": [],
@@ -46,7 +46,7 @@
       "products": [
         {
           "item_id": "bread",
-          "quantity": 20
+          "quantity": 24
         }
       ],
       "inputs": [
@@ -144,7 +144,7 @@
       "products": [
         {
           "item_id": "flower",
-          "quantity": 5
+          "quantity": 10
         }
       ],
       "inputs": [],

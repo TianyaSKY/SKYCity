@@ -38,6 +38,7 @@ from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.config.gameplay import (
     HOTEL_NIGHTLY_FEE,
+    HUNGER_FORCED_EAT_THRESHOLD,
     MANAGER_PROFIT_SHARE_PERCENT,
     MINUTES_PER_STEP,
     OBSERVATION_MAX_CHARS,
@@ -92,8 +93,47 @@ def _format_clock(world_time: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _store_product_lines(
+        session: Session,
+        world_id: str,
+        item_names: dict[str, str],
+        store_id: str,
+) -> list[str]:
+    """One ``buy_item`` line per product of ``store_id`` (up to the
+    observation cap), with satiety/mood/work bonuses and promo tags."""
+    lines: list[str] = []
+    products = session.scalars(
+        select(StoreProduct)
+        .where(StoreProduct.world_id == world_id, StoreProduct.store_id == store_id)
+        .order_by(StoreProduct.item_id)
+        .limit(OBSERVATION_MAX_SHOP_PRODUCTS)
+    ).all()
+    for product in products:
+        item = session.get(Item, {"world_id": world_id, "item_id": product.item_id})
+        tags: list[str] = []
+        if item is not None:
+            if item.satiety_restore > 0:
+                tags.append(f"饱食+{item.satiety_restore}")
+            if item.mood_restore > 0:
+                tags.append(f"心情{item.mood_restore}")
+            if item.work_bonus > 0:
+                tags.append(f"工资+{item.work_bonus}%")
+            elif item.work_bonus_jobs:
+                tags.append("专长工具")  # M19: per-job bonus
+            if item.yield_bonus > 0:
+                tags.append("增产")
+        if product.sell_price < product.base_sell_price:
+            tags.append("促销")
+        suffix = f"（{' '.join(tags)}）" if tags else ""
+        lines.append(
+            f"- buy_item({product.item_id}): {item_names.get(product.item_id, product.item_id)} "
+            f"{product.sell_price}金币（库存{product.stock}）{suffix}"
+        )
+    return lines
+
+
 def _action_text(agent: Agent, world_time: int) -> str:
-    """Human-readable description of an agent's current action (or 空闲)."""
+    """Human-readable description of an agent's current action (或 空闲)."""
     if agent.action_type is None:
         return "空闲"
     if agent.action_type == "move":
@@ -213,6 +253,10 @@ def build_observation(
             f"孤单: {agent.loneliness}/100 {money_text} 所在位置: {here}（格 {agent.col},{agent.row}）"
             f" 当前行动: {_action_text(agent, world_time)}{home_text}"
         )
+        # B1: an explicit hunger hint — the forced-eat safety net keeps the
+        # body alive, but the LLM should head to a shop on its own first.
+        if agent.satiety <= HUNGER_FORCED_EAT_THRESHOLD:
+            lines.append("【饥饿警告】你已经很饿了，第一优先：吃背包里的食物，或去村庄杂货店买食物！")
 
         # M5: the agent's backpack, ordered by item id.
         inventory_rows = list(
@@ -384,35 +428,7 @@ def build_observation(
                 )
             ).all()
             for store in stores:
-                products = session.scalars(
-                    select(StoreProduct)
-                    .where(StoreProduct.world_id == world_id, StoreProduct.store_id == store.store_id)
-                    .order_by(StoreProduct.item_id)
-                    .limit(OBSERVATION_MAX_SHOP_PRODUCTS)
-                ).all()
-                for product in products:
-                    item = session.get(
-                        Item, {"world_id": world_id, "item_id": product.item_id}
-                    )
-                    tags: list[str] = []
-                    if item is not None:
-                        if item.satiety_restore > 0:
-                            tags.append(f"饱食+{item.satiety_restore}")
-                        if item.mood_restore > 0:
-                            tags.append(f"心情{item.mood_restore}")
-                        if item.work_bonus > 0:
-                            tags.append(f"工资+{item.work_bonus}%")
-                        elif item.work_bonus_jobs:
-                            tags.append("专长工具")  # M19: per-job bonus
-                        if item.yield_bonus > 0:
-                            tags.append("增产")
-                    if product.sell_price < product.base_sell_price:
-                        tags.append("促销")
-                    suffix = f"（{' '.join(tags)}）" if tags else ""
-                    lines.append(
-                        f"- buy_item({product.item_id}): {item_names.get(product.item_id, product.item_id)} "
-                        f"{product.sell_price}金币（库存{product.stock}）{suffix}"
-                    )
+                lines.extend(_store_product_lines(session, world_id, item_names, store.store_id))
             jobs = session.scalars(
                 select(Job).where(
                     Job.world_id == world_id, Job.location_id == agent.location_id
@@ -429,6 +445,12 @@ def build_observation(
                 )
         lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
         lines.append("- use_item(item_id, reason): 食用背包里的食物提高饱食度")
+
+        # B2: the village shop is town news, like the stock market — its
+        # products are always visible so the LLM can plan purchases (and the
+        # forced-eat path) without physically standing at the counter.
+        lines.append("【村庄杂货店货架】")
+        lines.extend(_store_product_lines(session, world_id, item_names, "village_shop"))
 
         # M14: build blueprints (R22) — always visible, like the stock market:
         # construction changes the town for everyone. Paving blueprints (R24)

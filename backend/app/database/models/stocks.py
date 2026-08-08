@@ -25,6 +25,9 @@ class Stock(Base):
     stock_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     company_id: Mapped[str] = mapped_column(String(64), nullable=False)  # store_id 或 job_id
+    # The real Company whose treasury backs this listing (A2): buy credits it,
+    # sell/dividends debit it. NULL -> backed by the village treasury instead.
+    issuer_company_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String(16), nullable=False)  # "store" | "job"
     base_price: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[int] = mapped_column(Integer, nullable=False)  # 现价, 下限 1

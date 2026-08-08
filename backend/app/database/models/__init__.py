@@ -14,6 +14,7 @@ from app.database.models.companies import (
     JobOpening,
     LeaveRequest,
     Position,
+    ProcurementOrder,
     WorkShift,
 )
 from app.database.models.conversations import Conversation, ConversationMessage
@@ -56,6 +57,7 @@ __all__ = [
     "LeaveRequest",
     "Memory",
     "Position",
+    "ProcurementOrder",
     "Relationship",
     "Save",
     "ScheduledAction",

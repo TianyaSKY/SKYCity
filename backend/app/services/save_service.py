@@ -38,6 +38,7 @@ from app.database.models.companies import (
     JobOpening,
     LeaveRequest,
     Position,
+    ProcurementOrder,
     WorkShift,
 )
 from app.database.models.conversations import Conversation, ConversationMessage
@@ -187,6 +188,7 @@ class SaveService:
                 "paused": world.paused,
                 "weather": world.weather,
                 "autonomous": world.autonomous,
+                "treasury": world.treasury,
             },
             "agents": rows(Agent),
             "items": rows(Item),
@@ -225,6 +227,7 @@ class SaveService:
             "leave_requests": rows(LeaveRequest),
             "company_inventories": rows(CompanyInventory),
             "company_transactions": rows(CompanyTransaction),
+            "procurement_orders": rows(ProcurementOrder),
             "inventories": rows(Inventory),
             "stocks": rows(Stock),
             "stock_holdings": rows(StockHolding),
@@ -313,6 +316,7 @@ class SaveService:
                 paused=False,  # a restored world starts running; user can pause
                 weather=str(world_data.get("weather") or "clear"),
                 autonomous=bool(world_data.get("autonomous") or False),
+                treasury=int(world_data.get("treasury") or 0),
             )
             session.add(world)
             self._reinsert(session, payload, world_id)
@@ -482,6 +486,11 @@ class SaveService:
         for row in payload.get("company_transactions", []):
             data = self._fresh_pk(CompanyTransaction, self._row_data(row))
             session.add(CompanyTransaction(world_id=world_id, **data))
+        # C1: pending procurement orders survive save/restore (fresh PKs —
+        # they carry no cross-references that need remapping).
+        for row in payload.get("procurement_orders", []):
+            data = self._fresh_pk(ProcurementOrder, self._row_data(row))
+            session.add(ProcurementOrder(world_id=world_id, **data))
 
         for row in payload.get("jobs", []):
             session.add(Job(world_id=world_id, **self._row_data(row)))

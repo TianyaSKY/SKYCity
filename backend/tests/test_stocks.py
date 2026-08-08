@@ -389,7 +389,12 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
     assert row.last_div_per_share == 4
     assert row.prev_price == row.price  # close price snapshot
 
-    assert agent_row_money(engine, world_id, "agent_linxia") == 2848  # 3000-40, +8 dividend, -120 M12 daily upkeep
+    # A2: the buy (40) funds the issuer company — in this bare-engine fixture
+    # no company rows are seeded, so the village treasury backs the listing:
+    # treasury = 9*120 upkeep + 40 buy = 1120; the 8 dividend is paid from it
+    # BEFORE the UBI split (50% of the remaining 1112 // 9 = 61).
+    # 3000 - 40 (buy) + 8 (dividend) - 120 (upkeep) + 61 (UBI) = 2909.
+    assert agent_row_money(engine, world_id, "agent_linxia") == 2909
     txs = transaction_rows(engine, world_id, "agent_linxia")
     dividend_tx = [t for t in txs if t.type == "dividend"][-1]
     assert dividend_tx.amount == 8

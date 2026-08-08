@@ -146,7 +146,15 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `company_sale_completed`       | `{company_id, store_id, item_id, quantity, unit_price, total}`                                         | 商店售出入企业账户              | 已实现 |
 | `company_production_completed` | `{company_id, shift_id, consumed: [{item_id, quantity}], products: [{item_id, quantity}]}`             | 正式工作产物入库（含原料消耗）  | 已实现 |
 | `company_purchase_completed`   | `{company_id, seller_company_id, item_id, quantity, unit_price, total}`                                | 跨企业固定价采购                | 已实现 |
+| `procurement_order_filed`      | `{order_id, company_id, seller_company_id, item_id, quantity, unit_price, reason}`                     | 采购缺货转订单（C1）            | 已实现 |
+| `procurement_order_filled`     | `{order_id, company_id, seller_company_id, item_id, quantity, unit_price, total}`                      | 订单自动履约（C1）              | 已实现 |
 | `company_store_stocked`        | `{company_id, store_id, item_id, quantity, stock_after}`                                               | 企业仓库货物上架                | 已实现 |
+
+A1/A2 追加（经济修复批）：`ubi_income` / `treasury_subsidy` 走 `money_changed` /
+`company_money_changed` 事件（reason=村庄基本收入 / 金库工资补贴）；
+股票增资/回购/分红记 `stock_equity` / `stock_buyback` / `dividend` 企业流水。
+B1 饥饿强制进食复用 `item_used` / `item_purchased` / `world_event_created`。
+E2 清算/解约复用 `company_status_changed` / `employment_terminated` / `job_opening_created`。
 
 企业事件 payload 必须包含明确关联 ID（company_id / employment_id / shift_id / agent_id / amount），并保留信封字段
 `world_id` / `world_time` / `sequence` /

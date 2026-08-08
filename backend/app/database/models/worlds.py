@@ -31,6 +31,9 @@ class World(Base):
     weather: Mapped[str] = mapped_column(String(16), nullable=False, default=DEFAULT_WEATHER)
     # M3: LLM-driven agents make their own decisions when True.
     autonomous: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Village treasury: daily upkeep is collected here instead of destroyed,
+    # then recycled as UBI to residents and wage subsidies to companies (A1).
+    treasury: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid

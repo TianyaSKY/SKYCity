@@ -28,6 +28,7 @@ from app.config.gameplay import (
     ENERGY_DRAIN_PER_HOUR,
     HOTEL_LOCATION_ID,
     HOTEL_NIGHTLY_FEE,
+    HUNGER_FORCED_EAT_THRESHOLD,
     INITIAL_ENERGY,
     INITIAL_LONELINESS,
     INITIAL_MONEY,
@@ -50,12 +51,20 @@ from app.config.gameplay import (
     SLEEP_ENERGY_PER_HOUR,
     SLEEP_MOOD_PER_HOUR,
     TICK_INTERVAL,
+    TREASURY_UBI_SHARE_PERCENT,
     UPKEEP_PER_DAY,
     WAIT_ENERGY_PER_HOUR,
     WAIT_MOOD_PER_HOUR,
+    ZOMBIE_LOSS_DAYS,
 )
 from app.database.models.agents import Agent
-from app.database.models.companies import Company, CompanyTransaction
+from app.database.models.companies import (
+    Company,
+    CompanyTransaction,
+    EmploymentContract,
+    JobOpening,
+    WorkShift,
+)
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
@@ -996,7 +1005,9 @@ class WorldEngine:
         hour = world_time // 60
         if runtime.last_hour is not None and hour != runtime.last_hour:
             self._apply_hourly_needs(session, runtime, world, world_time)
+            self._force_hunger_eat(session, runtime, world, world_time)
             self._maybe_restock(session, runtime, world, world_time)
+            self._maybe_fulfill_orders(session, runtime, world, world_time)
             self._tick_stock_prices(session, runtime, world, world_time)
             # M8: daily counters reset at the day boundary (midnight crossing).
             day = world_time // 1440
@@ -1008,9 +1019,27 @@ class WorldEngine:
                 self._pay_dividends(session, runtime, world, world_time)
                 self._pay_manager_profits(session, runtime, world, world_time)
                 self._apply_daily_upkeep(session, runtime, world, world_time)
+                self._disburse_treasury(session, runtime, world, world_time)
+                self._liquidate_zombie_companies(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
         runtime.last_day = world_time // 1440
+
+    def _maybe_fulfill_orders(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
+    ) -> None:
+        """C1: fill pending procurement orders at the hourly tick."""
+        service = getattr(self, "company_employment_service", None)
+        if service is None:
+            return
+        try:
+            service.fulfill_open_orders(session, world, world_time)
+        except Exception:  # noqa: BLE001 - one bad order must not kill the tick
+            logger.exception("Order fulfillment failed world={}", world.world_id)
 
     def _tick_stock_prices(
             self,
@@ -1156,6 +1185,9 @@ class WorldEngine:
         ).all()
         for agent in agents:
             agent.money -= UPKEEP_PER_DAY
+            # A1: the upkeep is collected into the village treasury instead of
+            # being destroyed; _disburse_treasury recycles it the same morning.
+            world.treasury += UPKEEP_PER_DAY
             session.add(
                 Transaction(
                     world_id=world.world_id,
@@ -1206,6 +1238,200 @@ class WorldEngine:
         for agent in agents:
             agent.daily_token_usage = 0
             agent.daily_call_count = 0
+
+    def _liquidate_zombie_companies(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
+    ) -> None:
+        """E2: close zombie companies at 00:00.
+
+        A company that has lost money for ZOMBIE_LOSS_DAYS consecutive days
+        while owing unpaid wages is liquidated: status -> closed, contracts
+        terminated, openings closed, future shifts cancelled. This releases
+        the trapped workers and capital instead of letting the dead company
+        occupy jobs and openings forever.
+        """
+        companies = session.scalars(
+            select(Company).where(
+                Company.world_id == world.world_id,
+                Company.status == "active",
+            )
+        ).all()
+        for company in companies:
+            if company.consecutive_loss_days < ZOMBIE_LOSS_DAYS:
+                continue
+            if company.unpaid_wage_total <= 0:
+                continue
+            company.status = "closed"
+            company.closed_at = world_time
+            contracts = session.scalars(
+                select(EmploymentContract).where(
+                    EmploymentContract.world_id == world.world_id,
+                    EmploymentContract.company_id == company.company_id,
+                    EmploymentContract.status.in_(("active", "on_leave")),
+                )
+            ).all()
+            for contract in contracts:
+                contract.status = "terminated"
+                contract.ended_at = world_time
+                contract.termination_reason = "企业连续亏损，破产清算"
+                session.execute(
+                    update(WorkShift)
+                    .where(
+                        WorkShift.world_id == world.world_id,
+                        WorkShift.employment_id == contract.employment_id,
+                        WorkShift.status == "scheduled",
+                    )
+                    .values(status="cancelled", absence_reason="企业清算，班次取消")
+                )
+            session.execute(
+                update(JobOpening)
+                .where(
+                    JobOpening.world_id == world.world_id,
+                    JobOpening.company_id == company.company_id,
+                    JobOpening.status == "open",
+                )
+                .values(status="closed")
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "company_status_changed",
+                {
+                    "company_id": company.company_id,
+                    "company_name": company.name,
+                    "old_status": "active",
+                    "new_status": "closed",
+                    "reason": "连续亏损，破产清算",
+                },
+            )
+
+    def _disburse_treasury(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
+    ) -> None:
+        """A1: recycle the village treasury at 00:00.
+
+        The treasury holds the day's upkeep (collected in
+        ``_apply_daily_upkeep``). TREASURY_UBI_SHARE_PERCENT goes to every
+        resident equally — a universal basic income. Debtors receive it too:
+        withholding welfare from the poorest created a poverty trap (no money
+        -> cannot buy food -> cannot work -> deeper debt). The debt pressure
+        still exists via the daily mood penalty and the ``origin=debt``
+        decision boost; the UBI just keeps everyone alive and able to work.
+        The remainder is paid to active companies proportional to the wages
+        they paid that day (a wage subsidy that directly covers the
+        company-side wage gap). Money is recycled, never destroyed.
+        """
+        if world.treasury <= 0:
+            return
+        day_start = ((world_time - 1) // 1440) * 1440
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world.world_id)
+        ).all()
+        ubi_total = world.treasury * TREASURY_UBI_SHARE_PERCENT // 100
+        company_pool = world.treasury - ubi_total
+        # UBI: equal split among ALL residents (debtors included).
+        if ubi_total > 0 and agents:
+            per_agent = ubi_total // len(agents)
+            if per_agent > 0:
+                for agent in agents:
+                    agent.money += per_agent
+                    world.treasury -= per_agent
+                    session.add(
+                        Transaction(
+                            world_id=world.world_id,
+                            agent_id=agent.agent_id,
+                            type="ubi_income",
+                            amount=per_agent,
+                            balance_after=agent.money,
+                            item_id=None,
+                            quantity=None,
+                            reason="村庄基本收入",
+                            world_time=world_time,
+                            trace_id="",
+                        )
+                    )
+                    runtime.event_bus.publish(
+                        session,
+                        world_time,
+                        "money_changed",
+                        {
+                            "agent_id": agent.agent_id,
+                            "amount": per_agent,
+                            "balance": agent.money,
+                            "reason": "村庄基本收入",
+                        },
+                    )
+        # Wage subsidy: proportional to each active company's wage payments
+        # in the day that just ended (initial capital and manager shares
+        # excluded). Companies that paid no wages get nothing.
+        if company_pool <= 0:
+            world.treasury = max(world.treasury, 0)
+            return
+        rows = session.scalars(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world.world_id,
+                CompanyTransaction.type == "wage_payment",
+                CompanyTransaction.world_time >= day_start,
+                CompanyTransaction.world_time < world_time,
+            )
+        ).all()
+        by_company: dict[str, int] = {}
+        for row in rows:
+            by_company[row.company_id] = by_company.get(row.company_id, 0) + abs(row.amount)
+        total_wages = sum(by_company.values())
+        if total_wages <= 0:
+            # No wages paid anywhere — the company pool stays in the treasury
+            # as a buffer for future days (money parked, never destroyed).
+            world.treasury = max(world.treasury, 0)
+            return
+        for company in session.scalars(
+                select(Company).where(
+                    Company.world_id == world.world_id,
+                    Company.status == "active",
+                )
+        ).all():
+            wages = by_company.get(company.company_id, 0)
+            if wages <= 0:
+                continue
+            share = company_pool * wages // total_wages
+            if share <= 0:
+                continue
+            company.money += share
+            world.treasury -= share
+            session.add(
+                CompanyTransaction(
+                    world_id=world.world_id,
+                    company_id=company.company_id,
+                    type="treasury_subsidy",
+                    amount=share,
+                    balance_after=company.money,
+                    reference_type="treasury",
+                    reference_id=world.world_id,
+                    reason="村庄金库工资补贴",
+                    world_time=world_time,
+                    trace_id="",
+                )
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "company_money_changed",
+                {
+                    "company_id": company.company_id,
+                    "amount": share,
+                    "balance": company.money,
+                    "reason": "村庄金库工资补贴",
+                },
+            )
+        world.treasury = max(world.treasury, 0)
 
     def _apply_hourly_needs(
             self,
@@ -1273,6 +1499,266 @@ class WorldEngine:
                     {"origin": "debt" if agent.money < 0 else "needs_boost"},
                 )
 
+    def _force_hunger_eat(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            world_time: int,
+    ) -> None:
+        """B1: the engine itself guarantees food consumption.
+
+        An idle agent whose satiety has dropped to HUNGER_FORCED_EAT_THRESHOLD
+        eats from its own inventory, or buys the cheapest food at the store it
+        is standing in (if it can afford it). This runs at the hourly tick,
+        independent of the LLM — the demand circuit stays closed even when the
+        model ignores its own hunger. An agent that has neither food nor a
+        shop nearby falls through to the LLM (whose observation now carries an
+        explicit hunger hint).
+        """
+        if not world.autonomous or self.economy_service is None:
+            return
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world.world_id)
+        ).all()
+        for agent in agents:
+            # B1: eat when idle or merely waiting (a wait can be interrupted
+            # safely; moving/working/sleeping agents finish what they started).
+            if agent.action_type not in (None, "wait"):
+                continue
+            if agent.satiety > HUNGER_FORCED_EAT_THRESHOLD:
+                continue
+            self._feed_agent(session, runtime, world, agent, world_time)
+
+    def _feed_agent(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            world: World,
+            agent: Agent,
+            world_time: int,
+    ) -> None:
+        """One forced-feeding attempt: inventory food first, then a shop buy.
+
+        Mutates rows inside the engine's own transaction (NOT via
+        economy_service, which opens a separate session and would lose the
+        uncommitted hourly satiety drain — the classic lost-update).
+        """
+        # 1) Eat food already in the backpack (first edible item).
+        for inv in session.scalars(
+                select(Inventory).where(
+                    Inventory.world_id == world.world_id,
+                    Inventory.agent_id == agent.agent_id,
+                    Inventory.quantity > 0,
+                )
+        ).all():
+            item = session.get(
+                Item, {"world_id": world.world_id, "item_id": inv.item_id}
+            )
+            if item is None or item.satiety_restore <= 0:
+                continue
+            satiety_before = agent.satiety
+            agent.satiety = min(NEEDS_MAX, agent.satiety + item.satiety_restore)
+            agent.mood = min(NEEDS_MAX, agent.mood + item.mood_restore)
+            inv.quantity -= 1
+            if inv.quantity <= 0:
+                session.delete(inv)
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "item_used",
+                {
+                    "agent_id": agent.agent_id,
+                    "item_id": item.item_id,
+                    "item_name": item.name,
+                    "satiety_before": satiety_before,
+                    "satiety_after": agent.satiety,
+                    "mood_before": agent.mood - item.mood_restore,
+                    "mood_after": agent.mood,
+                },
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "needs_changed",
+                {
+                    "agent_id": agent.agent_id,
+                    "satiety": agent.satiety,
+                    "energy": agent.energy,
+                    "mood": agent.mood,
+                    "loneliness": agent.loneliness,
+                },
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "inventory_changed",
+                {
+                    "agent_id": agent.agent_id,
+                    "items": self.economy_service._inventory_list(
+                        session, world.world_id, agent.agent_id
+                    ),
+                },
+            )
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "world_event_created",
+                {
+                    "agent_id": agent.agent_id,
+                    "text": f"{agent.name} 饿得受不了，吃掉了背包里的食物",
+                    "importance": "normal",
+                },
+            )
+            return
+        # 2) Buy the cheapest food at the store covering the agent.
+        if agent.location_id is None:
+            return
+        stores = session.scalars(
+            select(Store).where(
+                Store.world_id == world.world_id,
+                Store.location_id == agent.location_id,
+            )
+        ).all()
+        candidates: list[tuple[int, str, str]] = []  # (sell_price, item_id, store_id)
+        for store in stores:
+            if not store.company_id and not store.owner_agent_id:
+                continue  # unbound store would destroy money
+            for product in session.scalars(
+                    select(StoreProduct).where(
+                        StoreProduct.world_id == world.world_id,
+                        StoreProduct.store_id == store.store_id,
+                        StoreProduct.stock > 0,
+                    )
+            ).all():
+                item = session.get(
+                    Item, {"world_id": world.world_id, "item_id": product.item_id}
+                )
+                if item is None or item.satiety_restore <= 0:
+                    continue
+                candidates.append((product.sell_price, product.item_id, store.store_id))
+        if not candidates:
+            return
+        candidates.sort()
+        price, item_id, store_id = candidates[0]
+        if agent.money < price:
+            return
+        store = session.get(
+            Store, {"world_id": world.world_id, "store_id": store_id}
+        )
+        product = session.get(
+            StoreProduct,
+            {"world_id": world.world_id, "store_id": store_id, "item_id": item_id},
+        )
+        if store is None or product is None:
+            return
+        result = session.execute(
+            update(StoreProduct)
+            .where(
+                StoreProduct.world_id == world.world_id,
+                StoreProduct.store_id == store_id,
+                StoreProduct.item_id == item_id,
+                StoreProduct.stock >= 1,
+            )
+            .values(stock=StoreProduct.stock - 1)
+        )
+        if result.rowcount == 0:
+            return
+        item = session.get(Item, {"world_id": world.world_id, "item_id": item_id})
+        item_name = item.name if item is not None else item_id
+        agent.money -= price
+        self.economy_service._add_inventory(
+            session, world.world_id, agent.agent_id, item_id, 1
+        )
+        company = (
+            session.get(
+                Company,
+                {"world_id": world.world_id, "company_id": store.company_id},
+            )
+            if store.company_id
+            else None
+        )
+        if company is not None:
+            company.money += price
+            session.add(
+                CompanyTransaction(
+                    world_id=world.world_id,
+                    company_id=company.company_id,
+                    type="sale_income",
+                    amount=price,
+                    balance_after=company.money,
+                    related_agent_id=agent.agent_id,
+                    related_item_id=item_id,
+                    quantity=1,
+                    reference_type="store",
+                    reference_id=store_id,
+                    reason=f"商店售出 {item_name}×1",
+                    world_time=world_time,
+                    trace_id="",
+                )
+            )
+        session.add(
+            Transaction(
+                world_id=world.world_id,
+                agent_id=agent.agent_id,
+                type="expense",
+                amount=-price,
+                balance_after=agent.money,
+                item_id=item_id,
+                quantity=1,
+                reason=f"购买 {item_name}×1",
+                world_time=world_time,
+                trace_id="",
+            )
+        )
+        runtime.event_bus.publish(
+            session,
+            world_time,
+            "item_purchased",
+            {
+                "agent_id": agent.agent_id,
+                "item_id": item_id,
+                "item_name": item_name,
+                "quantity": 1,
+                "unit_price": price,
+                "total": price,
+                "store_id": store_id,
+                "balance": agent.money,
+            },
+        )
+        runtime.event_bus.publish(
+            session,
+            world_time,
+            "money_changed",
+            {
+                "agent_id": agent.agent_id,
+                "amount": -price,
+                "balance": agent.money,
+                "reason": f"饥饿，购买 {item_name}",
+            },
+        )
+        runtime.event_bus.publish(
+            session,
+            world_time,
+            "inventory_changed",
+            {
+                "agent_id": agent.agent_id,
+                "items": self.economy_service._inventory_list(
+                    session, world.world_id, agent.agent_id
+                ),
+            },
+        )
+        runtime.event_bus.publish(
+            session,
+            world_time,
+            "world_event_created",
+            {
+                "agent_id": agent.agent_id,
+                "text": f"{agent.name} 饿得受不了，在商店买了食物",
+                "importance": "normal",
+            },
+        )
+
     def _maybe_restock(
             self,
             session: Session,
@@ -1280,7 +1766,6 @@ class WorldEngine:
             world: World,
             world_time: int,
     ) -> None:
-        # R15: at a store's daily open hour, restock toward stock_cap. M18
         # R40: personal shops (owner_agent_id set) have no magic restock and
         # no promo rolls — their shelf only changes via the owner's tools.
         stores = session.scalars(

@@ -269,18 +269,24 @@ def test_daily_upkeep_deducted(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 961)  # 480 -> 1441: crosses 00:00
 
     # Shortfall is allowed: the balance goes negative (debt), it is not floored.
+    # A1: 120 upkeep goes to the village treasury, which pays back 50% as UBI
+    # (540//9 = 60) the same morning — net -60/day for solvent residents.
     for agent_id in ("agent_linxia", "agent_zhangming"):
         row = agent_row(engine, world_id, agent_id)
-        assert row.money == 2880  # 3000 - 120 upkeep
+        assert row.money == 2940  # 3000 - 120 upkeep + 60 UBI
     row = agent_row(engine, world_id, "agent_touzi")
-    assert row.money == 4880  # 5000 - 120 upkeep (identity initial_money)
+    assert row.money == 4940  # 5000 - 120 upkeep + 60 UBI (identity initial_money)
 
     txs = transaction_rows(engine, world_id, "agent_linxia")
     upkeep = [t for t in txs if t.type == "upkeep"]
     assert len(upkeep) == 1
     assert upkeep[0].amount == -120
     assert upkeep[0].reason == "每日生活开销"
-    assert upkeep[0].balance_after == 2880
+    assert upkeep[0].balance_after == 2880  # before the UBI credit
+    ubi = [t for t in txs if t.type == "ubi_income"]
+    assert len(ubi) == 1
+    assert ubi[0].amount == 60
+    assert ubi[0].reason == "村庄基本收入"
 
     events = engine.events_after(world_id, 0)
     moved = [
@@ -316,10 +322,16 @@ def test_debt_penalizes_mood_daily_until_repaid(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 2)  # 1439 -> 1441: crosses 00:00
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == -70  # 50 - 120: the shortfall becomes debt
+    # 50 - 120 upkeep = -70 debt, then universal UBI +60 -> -10. Still in
+    # debt (mood penalty applies), but the UBI keeps her able to buy food —
+    # no poverty trap.
+    assert row.money == -10
     assert row.mood == 31  # 40 - 1 hourly drain - 8 debt penalty (D6)
     row = agent_row(engine, world_id, "agent_touzi")
-    assert row.money == 380  # 500 - 120: fully covered, no debt
+    # A1: UBI is universal — 9 residents split 50% of the 1080 treasury
+    # (540//9 = 60 each, debtors included — no poverty trap).
+    # touzi: 500 - 120 + 60 = 440.
+    assert row.money == 440
     assert row.mood == 39  # 40 - 1 hourly drain only, no debt penalty
 
     needs = [

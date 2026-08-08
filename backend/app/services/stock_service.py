@@ -27,6 +27,7 @@ from app.config.gameplay import (
     STOCK_NOISE_RANGE,
 )
 from app.database.models.agents import Agent
+from app.database.models.companies import Company, CompanyTransaction
 from app.database.models.stocks import Stock, StockHolding
 from app.database.models.stores import StoreProduct
 from app.database.models.transactions import Transaction
@@ -80,6 +81,9 @@ class StockService:
                     stock_id=seed["stock_id"],
                     name=seed["name"],
                     company_id=seed["company_id"],
+                    # A2: NULL (no issuer) stocks are backed by the village
+                    # treasury instead of a company account.
+                    issuer_company_id=seed.get("issuer_company_id"),
                     source=seed["source"],
                     base_price=seed["base_price"],
                     price=seed["base_price"],
@@ -212,6 +216,40 @@ class StockService:
                     StockHolding.stock_id == stock.stock_id,
                 )
             ).all()
+            held_shares = sum(h.shares for h in holdings if h.shares > 0)
+            if held_shares <= 0:
+                continue
+            total = held_shares * div
+            # A2: dividends are paid from a real account — the issuer company
+            # (or the treasury for unbacked listings). A company that cannot
+            # cover the full payout simply pays nothing that day (real
+            # profitability), instead of conjuring coins from thin air.
+            issuer = self._issuer(session, world, stock)
+            if issuer is not None:
+                if issuer.money < total:
+                    stock.last_div_per_share = 0
+                    continue
+                issuer.money -= total
+                session.add(
+                    CompanyTransaction(
+                        world_id=world.world_id,
+                        company_id=issuer.company_id,
+                        type="dividend",
+                        amount=-total,
+                        balance_after=issuer.money,
+                        quantity=held_shares,
+                        reference_type="stock",
+                        reference_id=stock.stock_id,
+                        reason=f"股票 {stock.name} 分红",
+                        world_time=world_time,
+                        trace_id="",
+                    )
+                )
+            else:
+                if world.treasury < total:
+                    stock.last_div_per_share = 0
+                    continue
+                world.treasury -= total
             payouts: list[dict[str, Any]] = []
             for holding in holdings:
                 if holding.shares <= 0:
@@ -276,6 +314,18 @@ class StockService:
     # ------------------------------------------------------------------ #
     # Trading (R18.1: instant, idle-only, no credit, no price impact)
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _issuer(
+            session: Session, world: World, stock: Stock
+    ) -> Company | None:
+        """A2: the real Company treasury backing ``stock`` (None -> treasury)."""
+        if not stock.issuer_company_id:
+            return None
+        return session.get(
+            Company,
+            {"world_id": world.world_id, "company_id": stock.issuer_company_id},
+        )
 
     def buy_stock(
             self,
@@ -346,6 +396,30 @@ class StockService:
                 )
                 holding.shares = total
             agent.money -= cost  # keep the in-memory agent consistent
+            # A2: the buy proceeds are NOT destroyed — they fund the issuer
+            # company (or the village treasury for unbacked listings). The
+            # company ledger row makes the capital visible and dividend-paying.
+            issuer = self._issuer(session, world, stock)
+            if issuer is not None:
+                issuer.money += cost
+                session.add(
+                    CompanyTransaction(
+                        world_id=world_id,
+                        company_id=issuer.company_id,
+                        type="stock_equity",
+                        amount=cost,
+                        balance_after=issuer.money,
+                        related_agent_id=agent_id,
+                        quantity=quantity,
+                        reference_type="stock",
+                        reference_id=stock_id,
+                        reason=f"股票 {stock.name} 增资",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+            else:
+                world.treasury += cost
             session.add(
                 Transaction(
                     world_id=world_id,
@@ -443,6 +517,35 @@ class StockService:
             if holding is not None and holding.shares <= 0:
                 session.delete(holding)
             proceeds = quantity * stock.price
+            # A2: sell proceeds come from a real account — the issuer company
+            # if it can cover, else the village treasury (unbacked listings).
+            # Nothing is minted from thin air; an issuer that cannot cover the
+            # buyback is refused (illiquid, like a bankrupt company).
+            issuer = self._issuer(session, world, stock)
+            if issuer is not None:
+                if issuer.money < proceeds:
+                    return False, None, "公司资金不足，无法回购"
+                issuer.money -= proceeds
+                session.add(
+                    CompanyTransaction(
+                        world_id=world_id,
+                        company_id=issuer.company_id,
+                        type="stock_buyback",
+                        amount=-proceeds,
+                        balance_after=issuer.money,
+                        related_agent_id=agent_id,
+                        quantity=quantity,
+                        reference_type="stock",
+                        reference_id=stock_id,
+                        reason=f"回购 {stock.name}×{quantity}",
+                        world_time=world.world_time,
+                        trace_id=trace_id or "",
+                    )
+                )
+            else:
+                if world.treasury < proceeds:
+                    return False, None, "金库资金不足，无法回购"
+                world.treasury -= proceeds
             agent.money += proceeds
             session.add(
                 Transaction(

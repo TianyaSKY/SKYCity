@@ -79,6 +79,11 @@ const TX_LABELS: Record<string, string> = {
     wholesale_sale: '批发销售',
     wage_payment: '工资支出',
     god_injection: '神谕注资',
+    stock_equity: '股票增资',
+    stock_buyback: '股票回购',
+    dividend: '股票分红',
+    treasury_subsidy: '金库工资补贴',
+    manager_profit: '经理分成',
 };
 
 function txLabel(type: string): string {

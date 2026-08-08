@@ -230,6 +230,8 @@ def load_stocks(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
             "stock_id": str(entry["stock_id"]),
             "name": str(entry.get("name") or entry["stock_id"]),
             "company_id": str(entry.get("company_id") or ""),
+            # A2: the real Company backing the listing (None -> treasury).
+            "issuer_company_id": entry.get("issuer_company_id"),
             "source": str(entry.get("source") or "store"),
             "base_price": int(entry.get("base_price") or 0),
             "outstanding_shares": int(entry.get("outstanding_shares") or 0),

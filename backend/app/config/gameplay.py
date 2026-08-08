@@ -76,6 +76,19 @@ WEATHER_MULTIPLIERS = {"clear": 1.0, "cloudy": 1.0, "rain": 1.5, "snow": 2.0}
 # M12 日常开销与促销
 # --------------------------------------------------------------------------- #
 UPKEEP_PER_DAY = 120  # 每日 00:00 全额扣除；余额不足自动负债（余额可为负）
+# A1: 村庄金库回流。upkeep 不再销毁，而是进入 world.treasury，次日 00:00 按
+# TREASURY_UBI_SHARE_PERCENT 平分给全体居民（仅不负债者），剩余部分按当日实发
+# 工资比例补贴企业——钱在系统内循环，而不是蒸发（修复货币净销毁）。
+TREASURY_UBI_SHARE_PERCENT = 50
+# B1: 引擎强制进食阈值。饱食度 ≤ 该值且空闲时，引擎直接调度吃背包食物或到店
+# 买食物（不再依赖 LLM 自觉），彻底接通"饥饿→消费"回路。
+HUNGER_FORCED_EAT_THRESHOLD = 20
+# E2: 僵尸企业清算阈值。连续亏损天数 ≥ 该值且欠薪 > 0 的企业，在日界被清算
+# （关闭、解约、停止招聘），释放员工与资本，避免永久占坑。
+ZOMBIE_LOSS_DAYS = 3
+# E2: 缺勤解约阈值。同一合同累计缺勤 ≥ 该值 → 自动解约并重开招聘，把岗位
+# 让给能真正来上班的人（修复"雇了人从不来"型僵尸岗位，如面包坊）。
+MAX_ABSENT_SHIFTS = 3
 # 负债（唯一来源：每日生活开销超支，余额为负）的影响。
 DEBT_MOOD_PENALTY_PER_DAY = 8  # 负债者每日 00:00 心情扣减（焦虑），下限 0
 # 促销掷骰：确定性哈希 % PROMO_ROLL_DENOMINATOR < PROMO_ROLL_HITS ≈ 20%。
@@ -101,7 +114,7 @@ BUDGET_SKIP_DELAY = 30  # 世界 LLM 预算耗尽后的休眠节奏
 TALK_DISTANCE = 3  # 曼哈顿距离（含 0）
 LONELINESS_RELIEF = 1  # 每条送达消息双方孤单的缓解量
 PAIR_COOLDOWN_MINUTES = 60  # 同一对智能体对话冷却
-MAX_TURNS = 6  # 单次对话最大消息轮数
+MAX_TURNS = 15  # 单次对话最大消息轮数
 MAX_MESSAGE_CHARS = 200
 MAX_TALK_CHARS = 200
 # E-full 对话锁：对话开始后双方被锁定（action_type="talk"），期间
@@ -110,7 +123,7 @@ MAX_TALK_CHARS = 200
 # 锁按墙钟计而不是游戏分钟：LLM 回复延迟是墙钟时间，按游戏分钟计会随 speed
 # 缩水（speed=10 时 15 游戏分钟 = 1.5 真实秒，回复必然超时）；每条成功投递
 # 的消息会刷新双方窗口，活跃对话不会被误杀。
-TALK_LOCK_SECONDS = 60  # 静默硬上限（真实秒）；每条消息刷新
+TALK_LOCK_SECONDS = 180  # 静默硬上限（真实秒）；每条消息刷新
 TALK_REPLY_GRACE = 5  # 对话中未回复时的决策复评间隔（游戏分钟）
 
 # --------------------------------------------------------------------------- #
