@@ -6,7 +6,7 @@ pair-cooldown blocking, MAX_TURNS cap, duplicate detection, priority boost,
 and the leave/distance/max_turns/duplicate/timeout end reasons.
 
 E-full conversation lock: starting a conversation occupies both members
-(action_type="talk" with a TALK_LOCK_MINUTES hard cap); while locked,
+(action_type="talk" with a TALK_LOCK_SECONDS wall-clock silence cap); while locked,
 move/wait/sleep/work queue instead of rejecting and fire when the
 conversation ends (or at the cap, via ``queued_action`` / ``talk_expired``
 scheduler rows). Every state change is persisted to the ``conversations`` /
@@ -31,7 +31,7 @@ from app.config.gameplay import (
     MAX_TURNS,
     PAIR_COOLDOWN_MINUTES,
     TALK_DISTANCE,
-    TALK_LOCK_MINUTES,
+    TALK_LOCK_SECONDS,
 )
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
@@ -573,19 +573,31 @@ class ConversationService:
     ) -> None:
         """E-full: occupy both members with the conversation.
 
-        Idempotent: a member already locked into this conversation is left
-        untouched, and a member mid-move/work is never clobbered. Every lock
-        carries a hard cap (TALK_LOCK_MINUTES) enforced by a durable
+        The cap is wall-clock: TALK_LOCK_SECONDS of real time converted to
+        game minutes via the current speed, so LLM reply latency (wall time)
+        does not race a game-minute budget that shrinks at higher speeds.
+        Idempotent refresh: a member already locked into this conversation
+        gets its silence window extended (each delivered message proves the
+        conversation is alive); a member mid-move/work is never clobbered.
+        Every lock carries the hard cap enforced by a durable
         ``talk_expired`` scheduler row.
         """
+        lock_end = world_time + TALK_LOCK_SECONDS * runtime.clock.speed
         for agent in (sender, target):
             if agent.action_type == "talk" and (
                     agent.action_data or {}
             ).get("conversation_id") == conversation.conversation_id:
+                agent.action_ends_at = lock_end
+                runtime.scheduler.schedule(
+                    session,
+                    agent.agent_id,
+                    "talk_expired",
+                    lock_end,
+                    {"conversation_id": conversation.conversation_id},
+                )
                 continue
             if agent.action_type not in (None, "talk"):
                 continue  # mid-move/work: never clobber a real action
-            lock_end = world_time + TALK_LOCK_MINUTES
             agent.action_type = "talk"
             agent.action_started_at = world_time
             agent.action_ends_at = lock_end

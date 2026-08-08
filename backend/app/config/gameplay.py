@@ -105,9 +105,12 @@ MAX_TURNS = 6  # 单次对话最大消息轮数
 MAX_MESSAGE_CHARS = 200
 MAX_TALK_CHARS = 200
 # E-full 对话锁：对话开始后双方被锁定（action_type="talk"），期间
-# move/wait/sleep/work 排队到对话结束执行；TALK_LOCK_MINUTES 是硬上限，
-# 到期（talk_expired）强制结束，防止无人说话时永久锁死。
-TALK_LOCK_MINUTES = 15  # 单次对话锁定硬上限（游戏分钟）
+# move/wait/sleep/work 排队到对话结束执行；TALK_LOCK_SECONDS 是静默硬上限
+# （真实秒），到期（talk_expired）强制结束，防止无人说话时永久锁死。
+# 锁按墙钟计而不是游戏分钟：LLM 回复延迟是墙钟时间，按游戏分钟计会随 speed
+# 缩水（speed=10 时 15 游戏分钟 = 1.5 真实秒，回复必然超时）；每条成功投递
+# 的消息会刷新双方窗口，活跃对话不会被误杀。
+TALK_LOCK_SECONDS = 60  # 静默硬上限（真实秒）；每条消息刷新
 TALK_REPLY_GRACE = 5  # 对话中未回复时的决策复评间隔（游戏分钟）
 
 # --------------------------------------------------------------------------- #

@@ -84,9 +84,10 @@ async def some_action(
 - 防无限对聊（T4-3）：同对冷却、会话最大轮数、需求衰减、目标优先、重复检测。
 - **对话锁（E-full）**：对话开始后双方被锁定（`action_type="talk"`），期间
   move/wait/sleep/work 不执行而是排队，对话结束后自动执行（单队列，后进替换）；
-  想先离开必须先 `talk(intent=leave)`。锁有硬上限 `TALK_LOCK_MINUTES`，静默对话
-  到期以 `timeout` 结束并解锁；崩溃/上帝干预遗留的失效锁会在下一次行动/发言时
-  自动修复。结束原因：`leave | distance | max_turns | duplicate | timeout`。
+  想先离开必须先 `talk(intent=leave)`。锁有硬上限 `TALK_LOCK_SECONDS`（真实秒，
+  每条消息刷新），静默对话到期以 `timeout` 结束并解锁；崩溃/上帝干预遗留的失效
+  锁会在下一次行动/发言时自动修复。结束原因：`leave | distance | max_turns |
+  duplicate | timeout`。
 
 ## 6. LLM 运行记录
 

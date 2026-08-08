@@ -34,7 +34,7 @@ from app.services.conversation_service import (
     MSG_TARGET_MISSING,
     ConversationService,
 )
-from app.config.gameplay import TALK_LOCK_MINUTES, TALK_REPLY_GRACE
+from app.config.gameplay import TALK_LOCK_SECONDS, TALK_REPLY_GRACE
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
 from tests.test_world_engine import advance_minutes
@@ -194,7 +194,7 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
         assert linxia.action_type == "talk"
         assert zhangming.action_type == "talk"
         assert linxia.action_data["conversation_id"] == convo.conversation_id
-        assert linxia.action_ends_at == world_time(world_id) + TALK_LOCK_MINUTES
+        assert linxia.action_ends_at == world_time(world_id) + TALK_LOCK_SECONDS
     finally:
         session.close()
 
@@ -671,7 +671,7 @@ def test_lock_queues_actions_and_fires_on_leave(world_config: ParsedWorldConfig)
         for agent_id in ("agent_linxia", "agent_zhangming"):
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             assert agent.action_type == "talk"
-            assert agent.action_ends_at == started + TALK_LOCK_MINUTES
+            assert agent.action_ends_at == started + TALK_LOCK_SECONDS
             assert agent.action_data["conversation_id"] == convo.conversation_id
             expired = list(
                 session.scalars(
@@ -683,7 +683,7 @@ def test_lock_queues_actions_and_fires_on_leave(world_config: ParsedWorldConfig)
                 )
             )
             assert len(expired) == 1
-            assert expired[0].due_at == started + TALK_LOCK_MINUTES
+            assert expired[0].due_at == started + TALK_LOCK_SECONDS
     finally:
         session.close()
 
@@ -781,7 +781,7 @@ def test_talk_lock_decision_reams_schedule(world_config: ParsedWorldConfig) -> N
         linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         linxia.action_type = "talk"
         linxia.action_started_at = world_time(world_id)
-        linxia.action_ends_at = world_time(world_id) + TALK_LOCK_MINUTES
+        linxia.action_ends_at = world_time(world_id) + TALK_LOCK_SECONDS
         linxia.action_data = {"conversation_id": "conv_demo"}
         session.commit()
 
@@ -808,8 +808,54 @@ def test_talk_lock_decision_reams_schedule(world_config: ParsedWorldConfig) -> N
     eng._runtimes.clear()
 
 
+def test_talk_lock_refreshes_on_message(world_config: ParsedWorldConfig) -> None:
+    """A delivered message extends the silence window — an active conversation
+    never hits the hard cap; only true silence ends it. Regression: the lock
+    used to be a fixed 15-game-minute budget, which slow LLM replies (wall
+    time) always blew through."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("对话刷新")
+    world_id = runtime.world_id
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+    park_at(eng, world_id, "agent_zhangming", "village_plaza")
+    service = eng.conversation_service
+
+    started = world_time(world_id)
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet"
+    )
+    assert ok is True and reason is None
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        first_end = linxia.action_ends_at
+    finally:
+        session.close()
+    # tests run at speed=1: 60 wall seconds == 60 game minutes
+    assert first_end == started + TALK_LOCK_SECONDS
+
+    # a second message inside the window extends it for both members
+    advance_minutes(eng, world_id, 10)
+    ok, reason, _ = service.send_message(
+        world_id, "agent_zhangming", "agent_linxia", "早呀，今天忙吗", "chat"
+    )
+    assert ok is True and reason is None
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        zhangming = session.get(
+            Agent, {"world_id": world_id, "agent_id": "agent_zhangming"}
+        )
+        assert linxia.action_ends_at == world_time(world_id) + TALK_LOCK_SECONDS
+        assert linxia.action_ends_at > first_end
+        assert zhangming.action_ends_at == linxia.action_ends_at
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
 def test_talk_expired_timeout(world_config: ParsedWorldConfig) -> None:
-    """A silent conversation is force-ended at TALK_LOCK_MINUTES so neither
+    """A silent conversation is force-ended at TALK_LOCK_SECONDS so neither
     member stays locked forever; both locks are released."""
     eng = make_engine(world_config)
     runtime = eng.create_world("对话超时")
@@ -826,7 +872,7 @@ def test_talk_expired_timeout(world_config: ParsedWorldConfig) -> None:
     assert convo.ended_at is None
 
     # nobody talks: the lock cap fires and ends the conversation
-    advance_minutes(eng, world_id, TALK_LOCK_MINUTES + 1)
+    advance_minutes(eng, world_id, TALK_LOCK_SECONDS + 1)
     convo = conversations_for(world_id)[0]
     assert convo.ended_at is not None and convo.end_reason == "timeout"
     ended = [e for e in eng.events_after(world_id, 0) if e.type == "conversation_ended"]
