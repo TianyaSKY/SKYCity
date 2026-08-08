@@ -413,6 +413,13 @@ class WorldEngine:
             scheduler.register("crop_grow", self.crop_service.handle_crop_grow)
         if self.decision_service is not None:
             scheduler.register("agent_decide", self.decision_service.handle_agent_decide)
+            # E-full: an action queued behind a conversation lock executes
+            # through the same tool dispatch as a normal decision.
+            scheduler.register("queued_action", self.decision_service.handle_queued_action)
+        if self.conversation_service is not None:
+            # E-full: the conversation lock's hard cap ends silent chats so
+            # neither member stays locked forever.
+            scheduler.register("talk_expired", self.conversation_service.handle_talk_expired)
         scheduler.register("daily_reflection", self.memory_service.handle_daily_reflection)
         self._runtimes[world_id] = runtime
         return runtime

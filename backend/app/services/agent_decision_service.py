@@ -37,6 +37,7 @@ from app.config.gameplay import (
     SKIP_DECIDE_DELAY,
     SLEEP_MAX_MINUTES,
     SLEEP_MIN_MINUTES,
+    TALK_REPLY_GRACE,
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
 )
@@ -136,6 +137,46 @@ class DecisionService:
         else:  # pragma: no cover - exercised by sync test drivers
             asyncio.run(coro)
 
+    def handle_queued_action(self, session: Session, action: ScheduledAction) -> None:
+        """Execute an action queued while the agent was locked in a conversation.
+
+        Fires at the lock's hard cap, or right after the conversation ends
+        (the unlock path reschedules it to now). Re-dispatches through
+        ``_execute_tool`` so the world rule gates run once more against the
+        agent's current state; a rejection is remembered and the decision
+        loop re-armed.
+        """
+        runtime = self.engine.get_runtime(action.world_id)
+        if runtime is None:
+            return
+        payload = action.payload or {}
+        tool_name = payload.get("tool")
+        if not tool_name:
+            return
+        result = DecisionResult(
+            tool_name=tool_name,
+            tool_arguments=payload.get("arguments") or {},
+            model="queued",
+            input_tokens=0,
+            output_tokens=0,
+            latency_ms=0,
+            raw_summary="queued_action",
+        )
+        ok, _, reason = self._execute_tool(
+            result, action.world_id, action.agent_id, str(payload.get("trace_id") or "")
+        )
+        agent = session.get(Agent, {"world_id": action.world_id, "agent_id": action.agent_id})
+        if agent is None:
+            return
+        if not ok and reason:
+            self.engine.memory_recorder.record_llm_failure(
+                session, action.world_id, action.agent_id, reason or "排队行动执行失败"
+            )
+        if agent.action_type is None:
+            # the action did not start (rejected) or finished instantly:
+            # re-arm the loop exactly like a normal decision.
+            self._schedule_next(session, runtime, action.world_id, action.agent_id, ok=ok)
+
     # ------------------------------------------------------------------ #
     # One decision cycle
     # ------------------------------------------------------------------ #
@@ -151,7 +192,9 @@ class DecisionService:
             if runtime is None:
                 return
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
-            if agent is None or agent.action_type is not None:
+            if agent is None or agent.action_type not in (None, "talk"):
+                # E-full: a talk lock still needs decisions (reply cadence);
+                # every other action defers to its completion handler.
                 return
             # Atomic claim. The ORM read-then-write below used to race: two
             # pending agent_decide rows (decision loop + action-completion
@@ -901,6 +944,16 @@ class DecisionService:
         )
         agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
         if agent is None:
+            return
+        if agent.action_type == "talk":
+            # E-full: a conversation lock never completes, so the usual
+            # completion-handler re-arm never fires; keep nudging the locked
+            # agent (reply cadence) instead of dropping out of the loop.
+            delay = max(TALK_REPLY_GRACE, floor)
+            runtime.scheduler.schedule(
+                session, agent_id, "agent_decide", world_time + delay,
+                {"origin": "talk_lock"},
+            )
             return
         if agent.action_type is not None:
             return  # completion handler schedules the next decision

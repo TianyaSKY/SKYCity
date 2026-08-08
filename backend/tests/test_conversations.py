@@ -28,11 +28,13 @@ from app.services.conversation_service import (
     MSG_DUPLICATE,
     MSG_MAX_TURNS,
     MSG_NOT_NEAR,
+    MSG_QUEUED,
     MSG_SENDER_BUSY,
     MSG_TARGET_BUSY,
     MSG_TARGET_MISSING,
     ConversationService,
 )
+from app.config.gameplay import TALK_LOCK_MINUTES
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
 from tests.test_world_engine import advance_minutes
@@ -131,23 +133,6 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
     park_at(eng, world_id, "agent_zhangming", "village_plaza")
     service = eng.conversation_service
 
-    # nearby idle pair -> success, conversation_message event + row stored
-    ok, reason, envelope = service.send_message(
-        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet", "trc_t1"
-    )
-    assert ok is True and reason is None
-    assert envelope is not None and envelope.type == "conversation_message"
-    assert envelope.payload["from_agent_id"] == "agent_linxia"
-    assert envelope.payload["message"] == "你好呀"
-    rows = messages_for(world_id)
-    assert len(rows) == 1
-    assert rows[0].read is False
-    convo = conversations_for(world_id)[0]
-    assert convo.turns == 1
-    event_types = [e.type for e in eng.events_after(world_id, 0)]
-    assert "conversation_started" in event_types
-    assert "conversation_message" in event_types
-
     # far (wangfang at spawn, distance > 3) -> rejected
     ok, reason, envelope = service.send_message(
         world_id, "agent_wangfang", "agent_linxia", "你好", "chat"
@@ -181,6 +166,72 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
     )
     assert ok is False and envelope is None
     assert reason == MSG_SENDER_BUSY
+
+    # let both waits finish, then the nearby idle pair can talk
+    advance_minutes(eng, world_id, 31)
+
+    ok, reason, envelope = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet", "trc_t1"
+    )
+    assert ok is True and reason is None
+    assert envelope is not None and envelope.type == "conversation_message"
+    assert envelope.payload["from_agent_id"] == "agent_linxia"
+    assert envelope.payload["message"] == "你好呀"
+    rows = messages_for(world_id)
+    assert len(rows) == 1
+    assert rows[0].read is False
+    convo = conversations_for(world_id)[0]
+    assert convo.turns == 1
+    event_types = [e.type for e in eng.events_after(world_id, 0)]
+    assert "conversation_started" in event_types
+    assert "conversation_message" in event_types
+
+    # E-full: the conversation locks both members with a hard cap
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        zhangming = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
+        assert linxia.action_type == "talk"
+        assert zhangming.action_type == "talk"
+        assert linxia.action_data["conversation_id"] == convo.conversation_id
+        assert linxia.action_ends_at == world_time(world_id) + TALK_LOCK_MINUTES
+    finally:
+        session.close()
+
+    # in-conversation replies still work (the lock is not busy for itself)
+    ok, reason, envelope = service.send_message(
+        world_id, "agent_zhangming", "agent_linxia", "嗨", "chat"
+    )
+    assert ok is True and reason is None
+    assert len(messages_for(world_id)) == 2
+
+    # E-full: a locked member is busy for third parties
+    ok, reason, envelope = service.send_message(
+        world_id, "agent_linxia", "agent_wangfang", "你好", "chat"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_SENDER_BUSY
+    ok, reason, envelope = service.send_message(
+        world_id, "agent_wangfang", "agent_linxia", "你好", "chat"
+    )
+    assert ok is False and envelope is None
+    assert reason == MSG_TARGET_BUSY
+
+    # leave ends the conversation and unlocks both members
+    ok, reason, envelope = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "再见", "leave"
+    )
+    assert ok is True and reason is None
+    convo = conversations_for(world_id)[0]
+    assert convo.ended_at is not None and convo.end_reason == "leave"
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        zhangming = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
+        assert linxia.action_type is None
+        assert zhangming.action_type is None
+    finally:
+        session.close()
     eng._runtimes.clear()
 
 
@@ -362,6 +413,13 @@ def test_duplicate_ends(world_config: ParsedWorldConfig) -> None:
 
 
 def test_distance_break(world_config: ParsedWorldConfig) -> None:
+    """R9: moving out of earshot ends the conversation.
+
+    E-full: a locked mover cannot walk (the move is queued), so the distance
+    end is exercised through the active-but-unlocked state a god interrupt
+    leaves behind — the lock is cleared, the conversation stays open, and the
+    mover walking away ends it at arrival.
+    """
     eng = make_engine(world_config)
     runtime = eng.create_world("距离打断")
     world_id = runtime.world_id
@@ -376,14 +434,50 @@ def test_distance_break(world_config: ParsedWorldConfig) -> None:
     convo = conversations_for(world_id)[0]
     assert convo.ended_at is None
 
-    # chenyu walks to the town hall (> 3 cells from the plaza)
+    # E-full: while locked the move is queued, not executed
+    ok, envelope, reason = eng.action_service.execute_move(
+        world_id, "agent_chenyu", "village_hotel", reason="去旅店"
+    )
+    assert ok is True and envelope is None
+    assert reason == MSG_QUEUED
+    session = SessionLocal()
+    try:
+        chenyu = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert chenyu.action_type == "talk"  # still locked, position unchanged
+        queued = list(
+            session.scalars(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == "agent_chenyu",
+                    ScheduledAction.action_type == "queued_action",
+                )
+            )
+        )
+        assert len(queued) == 1 and queued[0].payload["tool"] == "move"
+    finally:
+        session.close()
+
+    # god-style interrupt: clear the lock, conversation stays active
+    session = SessionLocal()
+    try:
+        chenyu = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        chenyu.action_type = None
+        chenyu.action_started_at = None
+        chenyu.action_ends_at = None
+        chenyu.action_data = None
+        session.commit()
+    finally:
+        session.close()
+
+    # chenyu walks to the hotel (5 cells, 10 min < the 15-min lock cap, but
+    # > 3 cells from the plaza) -> arrival ends the conversation by distance
     assert (
             eng.action_service.execute_move(
-                world_id, "agent_chenyu", "town_hall", reason="去镇公所"
+                world_id, "agent_chenyu", "village_hotel", reason="去旅店"
             )[0]
             is True
     )
-    advance_minutes(eng, world_id, 60)
+    advance_minutes(eng, world_id, 11)
 
     convo = conversations_for(world_id)[0]
     assert convo.ended_at is not None and convo.end_reason == "distance"
@@ -485,6 +579,19 @@ def test_manual_talk_api(client: TestClient) -> None:
     _teleport(world_id, "agent_linxia", *PLAZA, "village_plaza")
     _teleport(world_id, "agent_zhangming", *PLAZA, "village_plaza")
 
+    # bad distance -> 409 (before any conversation: wangfang far, both idle)
+    response = client.post(
+        f"/api/worlds/{world_id}/agents/agent_wangfang/actions",
+        json={
+            "action_type": "talk",
+            "target_agent_id": "agent_linxia",
+            "message": "在吗",
+            "intent": "chat",
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert response.json() == {"success": False, "reason": MSG_NOT_NEAR}
+
     # nearby talk -> 200 with the conversation_message event
     response = client.post(
         f"/api/worlds/{world_id}/agents/agent_linxia/actions",
@@ -501,7 +608,7 @@ def test_manual_talk_api(client: TestClient) -> None:
     assert body["event"]["type"] == "conversation_message"
     assert body["event"]["payload"]["to_agent_id"] == "agent_zhangming"
 
-    # bad distance -> 409
+    # E-full: the locked member now rejects outsiders with busy (was distance)
     response = client.post(
         f"/api/worlds/{world_id}/agents/agent_wangfang/actions",
         json={
@@ -512,7 +619,7 @@ def test_manual_talk_api(client: TestClient) -> None:
         },
     )
     assert response.status_code == 409, response.text
-    assert response.json() == {"success": False, "reason": MSG_NOT_NEAR}
+    assert response.json() == {"success": False, "reason": MSG_TARGET_BUSY}
 
     # missing message -> 422 (schema)
     response = client.post(
@@ -533,3 +640,200 @@ def test_manual_talk_api(client: TestClient) -> None:
     assert item["ended_at"] is None and item["end_reason"] is None
     assert item["messages"][0]["message"] == "你好呀"
     assert item["messages"][0]["intent"] == "greet"
+
+
+# --------------------------------------------------------------------------- #
+# E-full: conversation lock + queued actions
+# --------------------------------------------------------------------------- #
+
+
+def test_lock_queues_actions_and_fires_on_leave(world_config: ParsedWorldConfig) -> None:
+    """The core E-full lifecycle: starting a conversation locks both members;
+    move/wait/sleep/work queue (newest wins) instead of rejecting; leave
+    unlocks and expedites the queued action to the next tick."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("对话锁")
+    world_id = runtime.world_id
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+    park_at(eng, world_id, "agent_zhangming", "village_plaza")
+    service = eng.conversation_service
+
+    started = world_time(world_id)
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet"
+    )
+    assert ok is True and reason is None
+    convo = conversations_for(world_id)[0]
+
+    # lock + hard cap scheduled for both members
+    session = SessionLocal()
+    try:
+        for agent_id in ("agent_linxia", "agent_zhangming"):
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            assert agent.action_type == "talk"
+            assert agent.action_ends_at == started + TALK_LOCK_MINUTES
+            assert agent.action_data["conversation_id"] == convo.conversation_id
+            expired = list(
+                session.scalars(
+                    select(ScheduledAction).where(
+                        ScheduledAction.world_id == world_id,
+                        ScheduledAction.agent_id == agent_id,
+                        ScheduledAction.action_type == "talk_expired",
+                    )
+                )
+            )
+            assert len(expired) == 1
+            assert expired[0].due_at == started + TALK_LOCK_MINUTES
+    finally:
+        session.close()
+
+    # move while locked -> queued (ok, no move started)
+    ok, envelope, reason = eng.action_service.execute_move(
+        world_id, "agent_linxia", "village_hotel", reason="去旅店"
+    )
+    assert ok is True and envelope is None
+    assert reason == MSG_QUEUED
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert linxia.action_type == "talk"  # still locked in place
+        queued = list(
+            session.scalars(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == "agent_linxia",
+                    ScheduledAction.action_type == "queued_action",
+                )
+            )
+        )
+        assert len(queued) == 1
+        assert queued[0].payload["tool"] == "move"
+        assert queued[0].payload["arguments"]["destination_id"] == "village_hotel"
+    finally:
+        session.close()
+
+    # a second queued action replaces the first (one queued per agent)
+    ok, envelope, reason = eng.action_service.execute_wait(
+        world_id, "agent_linxia", minutes=10, reason="歇会儿"
+    )
+    assert ok is True and envelope is None
+    assert reason == MSG_QUEUED
+    session = SessionLocal()
+    try:
+        queued = list(
+            session.scalars(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == "agent_linxia",
+                    ScheduledAction.action_type == "queued_action",
+                )
+            )
+        )
+        assert len(queued) == 1 and queued[0].payload["tool"] == "wait"
+    finally:
+        session.close()
+
+    # leave -> conversation ends, locks cleared, queued wait expedited
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "我先走了", "leave"
+    )
+    assert ok is True
+    convo = conversations_for(world_id)[0]
+    assert convo.ended_at is not None and convo.end_reason == "leave"
+    session = SessionLocal()
+    try:
+        for agent_id in ("agent_linxia", "agent_zhangming"):
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            assert agent.action_type is None, f"{agent_id} still locked"
+        queued = session.scalars(
+            select(ScheduledAction).where(
+                ScheduledAction.world_id == world_id,
+                ScheduledAction.agent_id == "agent_linxia",
+                ScheduledAction.action_type == "queued_action",
+            )
+        ).one()
+        assert queued.due_at == world_time(world_id)
+    finally:
+        session.close()
+
+    # the next tick executes the queued wait
+    advance_minutes(eng, world_id, 1)
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert linxia.action_type == "wait"
+        assert linxia.action_data["reason"] == "歇会儿"
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
+def test_talk_expired_timeout(world_config: ParsedWorldConfig) -> None:
+    """A silent conversation is force-ended at TALK_LOCK_MINUTES so neither
+    member stays locked forever; both locks are released."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("对话超时")
+    world_id = runtime.world_id
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+    park_at(eng, world_id, "agent_zhangming", "village_plaza")
+    service = eng.conversation_service
+
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet"
+    )
+    assert ok is True
+    convo = conversations_for(world_id)[0]
+    assert convo.ended_at is None
+
+    # nobody talks: the lock cap fires and ends the conversation
+    advance_minutes(eng, world_id, TALK_LOCK_MINUTES + 1)
+    convo = conversations_for(world_id)[0]
+    assert convo.ended_at is not None and convo.end_reason == "timeout"
+    ended = [e for e in eng.events_after(world_id, 0) if e.type == "conversation_ended"]
+    assert ended and ended[0].payload["reason"] == "timeout"
+    session = SessionLocal()
+    try:
+        for agent_id in ("agent_linxia", "agent_zhangming"):
+            agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
+            assert agent.action_type is None, f"{agent_id} still locked"
+    finally:
+        session.close()
+    eng._runtimes.clear()
+
+
+def test_stale_talk_lock_repaired(world_config: ParsedWorldConfig) -> None:
+    """A talk lock pointing at a nonexistent/ended conversation (crash, god
+    interrupt, manual edit) is lazily repaired instead of wedging the agent."""
+    eng = make_engine(world_config)
+    runtime = eng.create_world("锁修复")
+    world_id = runtime.world_id
+    park_at(eng, world_id, "agent_linxia", "village_plaza")
+    park_at(eng, world_id, "agent_zhangming", "village_plaza")
+    service = eng.conversation_service
+
+    ok, reason, _ = service.send_message(
+        world_id, "agent_linxia", "agent_zhangming", "你好呀", "greet"
+    )
+    assert ok is True
+
+    # corrupt the lock: point linxia at a conversation that does not exist
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        linxia.action_data = {"conversation_id": "conv_ghost"}
+        session.commit()
+    finally:
+        session.close()
+
+    # the stale lock is repaired on the action gate: move proceeds normally
+    ok, envelope, reason = eng.action_service.execute_move(
+        world_id, "agent_linxia", "village_hotel", reason="去旅店"
+    )
+    assert ok is True and reason is None and envelope is not None
+    session = SessionLocal()
+    try:
+        linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert linxia.action_type == "move"
+    finally:
+        session.close()
+    eng._runtimes.clear()

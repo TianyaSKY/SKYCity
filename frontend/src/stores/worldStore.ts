@@ -127,6 +127,7 @@ export const CONVERSATION_END_REASONS: Record<string, string> = {
     distance: '距离过远',
     max_turns: '已达上限',
     duplicate: '内容重复',
+    timeout: '对话超时',
     cooldown_expired: '冷却结束',
     both_busy: '双方忙碌',
 };

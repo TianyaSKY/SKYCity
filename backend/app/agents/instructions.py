@@ -79,6 +79,8 @@ _TOOL_CONVENTIONS = f"""工具约定：
   intent 取 greet/chat/ask/offer/leave 之一；对方忙碌或太远时会被拒绝；聊天能缓解孤单。
   收到【收到的消息】里的消息时应当回复（intent 用 chat/ask/offer）；如果不想继续聊，
   用 intent=leave 礼貌告别并结束对话。
+  对话进行期间你们彼此都被"锁定"：move/work/sleep/wait 会被排队到对话结束才执行（工具会提示已排队），
+  想先去做别的事就用 talk(intent=leave) 结束对话，排队的行动随后自动执行。
 - work(job_id, reason)：在当前地点开始【可做的事】里列出的工作；完成后结算工资与产物。
 - buy_item(item_id, reason, quantity=1)：在商店购买商品；钱不够会被拒绝。
 - sell_item(item_id, reason, quantity=1)：把背包里的物品卖给商店换钱。

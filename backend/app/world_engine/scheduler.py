@@ -64,11 +64,19 @@ class Scheduler:
         return row
 
     def cancel_for_agent(self, session: Session, agent_id: str) -> None:
-        """Drop every pending callback for an agent (e.g. wait interrupted)."""
+        """Drop every pending action callback for an agent (e.g. wait
+        interrupted).
+
+        Conversation-scoped rows are excluded: ``queued_action`` (an action
+        parked behind a conversation lock) and ``talk_expired`` (the lock's
+        hard cap) belong to the conversation lifecycle, not to whatever
+        action is being replaced.
+        """
         session.execute(
             delete(ScheduledAction).where(
                 ScheduledAction.world_id == self.world_id,
                 ScheduledAction.agent_id == agent_id,
+                ScheduledAction.action_type.notin_(("queued_action", "talk_expired")),
             )
         )
 

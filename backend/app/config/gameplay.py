@@ -101,6 +101,11 @@ PAIR_COOLDOWN_MINUTES = 60  # 同一对智能体对话冷却
 MAX_TURNS = 6  # 单次对话最大消息轮数
 MAX_MESSAGE_CHARS = 200
 MAX_TALK_CHARS = 200
+# E-full 对话锁：对话开始后双方被锁定（action_type="talk"），期间
+# move/wait/sleep/work 排队到对话结束执行；TALK_LOCK_MINUTES 是硬上限，
+# 到期（talk_expired）强制结束，防止无人说话时永久锁死。
+TALK_LOCK_MINUTES = 15  # 单次对话锁定硬上限（游戏分钟）
+TALK_REPLY_GRACE = 5  # 对话中未回复时的决策复评间隔（游戏分钟）
 
 # --------------------------------------------------------------------------- #
 # R22/R23 建造与种植

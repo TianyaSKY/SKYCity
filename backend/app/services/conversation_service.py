@@ -3,11 +3,16 @@
 Validates talk requests against the world rules (R1 idle, R2 both idle, R9
 manhattan distance <= 3, paused) and runs the conversation lifecycle:
 pair-cooldown blocking, MAX_TURNS cap, duplicate detection, priority boost,
-and the leave/distance/max_turns/duplicate end reasons. Every state change is
-persisted to the ``conversations`` / ``conversation_messages`` tables and
-emitted as a world event (conversation_started / conversation_message /
-conversation_ended) through the runtime's event bus, exactly like the action
-service.
+and the leave/distance/max_turns/duplicate/timeout end reasons.
+
+E-full conversation lock: starting a conversation occupies both members
+(action_type="talk" with a TALK_LOCK_MINUTES hard cap); while locked,
+move/wait/sleep/work queue instead of rejecting and fire when the
+conversation ends (or at the cap, via ``queued_action`` / ``talk_expired``
+scheduler rows). Every state change is persisted to the ``conversations`` /
+``conversation_messages`` tables and emitted as a world event
+(conversation_started / conversation_message / conversation_ended) through
+the runtime's event bus, exactly like the action service.
 
 The service is wired onto WorldEngine.conversation_service (see main.py) so
 tools and the decision service reach it through the engine.
@@ -17,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.gameplay import (
@@ -26,6 +31,7 @@ from app.config.gameplay import (
     MAX_TURNS,
     PAIR_COOLDOWN_MINUTES,
     TALK_DISTANCE,
+    TALK_LOCK_MINUTES,
 )
 from app.database.models.agents import Agent
 from app.database.models.conversations import Conversation, ConversationMessage
@@ -41,6 +47,7 @@ REASON_LEAVE = "leave"
 REASON_DISTANCE = "distance"
 REASON_MAX_TURNS = "max_turns"
 REASON_DUPLICATE = "duplicate"
+REASON_TIMEOUT = "timeout"
 REASON_COOLDOWN_EXPIRED = "cooldown_expired"
 REASON_BOTH_BUSY = "both_busy"
 
@@ -55,6 +62,7 @@ MSG_PAUSED = "世界已暂停"
 MSG_COOLDOWN = "对话冷却中，请稍后再试"
 MSG_MAX_TURNS = "对话已达到最大轮数"
 MSG_DUPLICATE = "内容重复，对话结束"
+MSG_QUEUED = "已排队：对话结束后自动执行"
 
 
 def manhattan_distance(
@@ -102,12 +110,18 @@ class ConversationService:
             sender = session.get(Agent, {"world_id": world_id, "agent_id": from_agent_id})
             if sender is None:
                 return False, MSG_AGENT_MISSING, None
-            if sender.action_type is not None:  # R1: one action at a time
-                return False, MSG_SENDER_BUSY, None
             target = session.get(Agent, {"world_id": world_id, "agent_id": to_agent_id})
             if target is None:
                 return False, MSG_TARGET_MISSING, None
-            if target.action_type is not None:  # R2: both parties must be idle
+            # E-full: repair stale talk locks (crash / god interrupt) before
+            # judging busy-ness, then resolve the pair's active conversation.
+            self._repair_stale_locks(session, world_id, sender)
+            self._repair_stale_locks(session, world_id, target)
+            agent_a, agent_b = sorted([from_agent_id, to_agent_id])
+            conversation = self._active_between(session, world_id, agent_a, agent_b)
+            if self._busy_reason(sender, conversation) is not None:  # R1
+                return False, MSG_SENDER_BUSY, None
+            if self._busy_reason(target, conversation) is not None:  # R2
                 return False, MSG_TARGET_BUSY, None
             if (
                     manhattan_distance(sender.col, sender.row, target.col, target.row)
@@ -120,9 +134,7 @@ class ConversationService:
             message = (message or "").strip()[:MAX_MESSAGE_CHARS]
             intent = (intent or "chat").strip() or "chat"
             world_time = world.world_time
-            agent_a, agent_b = sorted([from_agent_id, to_agent_id])
 
-            conversation = self._active_between(session, world_id, agent_a, agent_b)
             created = conversation is None
             if created:
                 if self._in_cooldown(session, world_id, agent_a, agent_b, world_time):
@@ -145,6 +157,13 @@ class ConversationService:
                     self._end(session, runtime, conversation, REASON_DUPLICATE, world_time, trace_id)
                     session.commit()
                     return False, MSG_DUPLICATE, None
+
+            # E-full: occupy both members with the conversation. A fresh start
+            # locks them; a continuing conversation re-asserts the lock so a
+            # god interrupt that cleared it is healed on the next message.
+            self._lock_conversation(
+                session, runtime, conversation, sender, target, world_time
+            )
 
             session.add(
                 ConversationMessage(
@@ -458,6 +477,9 @@ class ConversationService:
             {"conversation_id": conversation.conversation_id, "reason": reason},
             trace_id,
         )
+        # E-full: release both members' locks and expedite queued actions so
+        # the next tick executes them (leave/max_turns/duplicate/timeout).
+        self._unlock_and_fire_queued(session, conversation, world_time)
 
     def _boost_target(
             self,
@@ -478,7 +500,7 @@ class ConversationService:
         ``leave`` — wedging the conversation open.
         """
         if (
-                target.action_type is not None
+                target.action_type not in (None, "talk")  # E-full: locked targets still reply
                 or not world.autonomous
                 or world.paused
         ):
@@ -499,4 +521,164 @@ class ConversationService:
             "agent_decide",
             world_time + 1,
             {"origin": "conversation_boost"},
+        )
+
+    # ------------------------------------------------------------------ #
+    # E-full: conversation lock (occupies both members) + queued actions
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _busy_reason(agent: Agent, conversation: Conversation | None) -> str | None:
+        """Why ``agent`` cannot talk right now (None = free).
+
+        A member locked into ``conversation`` (action_type="talk" with the
+        matching conversation_id) is free to keep talking inside it, but busy
+        for everyone else — including a brand-new pair (R1/R2).
+        """
+        if agent.action_type is None:
+            return None
+        if agent.action_type == "talk":
+            conv_id = (agent.action_data or {}).get("conversation_id")
+            if conversation is not None and conv_id == conversation.conversation_id:
+                return None
+        return "busy"
+
+    @staticmethod
+    def _clear_talk_lock(agent: Agent) -> None:
+        agent.action_type = None
+        agent.action_started_at = None
+        agent.action_ends_at = None
+        agent.action_data = None
+
+    @staticmethod
+    def _repair_stale_locks(session: Session, world_id: str, agent: Agent) -> None:
+        """Drop a talk lock whose conversation no longer exists or has ended
+        (crash, god interrupt, manual DB edit). Keeps the invariant that
+        ``action_type="talk"`` always points at an active conversation."""
+        if agent.action_type != "talk":
+            return
+        conv_id = (agent.action_data or {}).get("conversation_id")
+        conv = session.get(Conversation, conv_id) if conv_id else None
+        if conv is None or conv.ended_at is not None or conv.world_id != world_id:
+            ConversationService._clear_talk_lock(agent)
+
+    def _lock_conversation(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            conversation: Conversation,
+            sender: Agent,
+            target: Agent,
+            world_time: int,
+    ) -> None:
+        """E-full: occupy both members with the conversation.
+
+        Idempotent: a member already locked into this conversation is left
+        untouched, and a member mid-move/work is never clobbered. Every lock
+        carries a hard cap (TALK_LOCK_MINUTES) enforced by a durable
+        ``talk_expired`` scheduler row.
+        """
+        for agent in (sender, target):
+            if agent.action_type == "talk" and (
+                    agent.action_data or {}
+            ).get("conversation_id") == conversation.conversation_id:
+                continue
+            if agent.action_type not in (None, "talk"):
+                continue  # mid-move/work: never clobber a real action
+            lock_end = world_time + TALK_LOCK_MINUTES
+            agent.action_type = "talk"
+            agent.action_started_at = world_time
+            agent.action_ends_at = lock_end
+            agent.action_data = {
+                "conversation_id": conversation.conversation_id,
+                "reason": "对话中",
+            }
+            runtime.scheduler.schedule(
+                session,
+                agent.agent_id,
+                "talk_expired",
+                lock_end,
+                {"conversation_id": conversation.conversation_id},
+            )
+
+    def _unlock_and_fire_queued(
+            self, session: Session, conversation: Conversation, world_time: int
+    ) -> None:
+        """Release both members' talk locks and expedite every action queued
+        while locked so the next tick executes it."""
+        for agent_id in (conversation.agent_a, conversation.agent_b):
+            agent = session.get(
+                Agent, {"world_id": conversation.world_id, "agent_id": agent_id}
+            )
+            if (
+                    agent is not None
+                    and agent.action_type == "talk"
+                    and (agent.action_data or {}).get("conversation_id")
+                    == conversation.conversation_id
+            ):
+                self._clear_talk_lock(agent)
+            session.execute(
+                update(ScheduledAction)
+                .where(
+                    ScheduledAction.world_id == conversation.world_id,
+                    ScheduledAction.agent_id == agent_id,
+                    ScheduledAction.action_type == "queued_action",
+                )
+                .values(due_at=world_time)
+            )
+
+    def queue_or_reject(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            agent: Agent,
+            tool_name: str,
+            arguments: dict,
+    ) -> tuple[bool, str | None]:
+        """E-full R1 gate for duration actions (move/wait/sleep/work).
+
+        Locked in a conversation -> the action is queued (one per agent,
+        newest replaces oldest) and returns ``(True, MSG_QUEUED)``; it fires
+        at the lock's hard cap, or immediately when the conversation ends.
+        A stale talk lock is repaired and the caller proceeds normally
+        ``(False, None)``.
+        """
+        if agent.action_type != "talk":
+            return False, None
+        conv_id = (agent.action_data or {}).get("conversation_id")
+        conv = session.get(Conversation, conv_id) if conv_id else None
+        if conv is None or conv.ended_at is not None or conv.world_id != agent.world_id:
+            self._clear_talk_lock(agent)
+            return False, None
+        session.execute(
+            delete(ScheduledAction).where(
+                ScheduledAction.world_id == agent.world_id,
+                ScheduledAction.agent_id == agent.agent_id,
+                ScheduledAction.action_type == "queued_action",
+            )
+        )
+        due_at = (agent.action_ends_at or runtime.clock.world_time) + 1
+        runtime.scheduler.schedule(
+            session,
+            agent.agent_id,
+            "queued_action",
+            due_at,
+            {"tool": tool_name, "arguments": arguments},
+        )
+        return True, MSG_QUEUED
+
+    def handle_talk_expired(self, session: Session, action: ScheduledAction) -> None:
+        """Scheduler callback for the conversation lock's hard cap: end the
+        conversation (if still active) so neither member stays locked forever
+        when the LLM goes silent mid-chat."""
+        runtime = self.engine.get_runtime(action.world_id)
+        if runtime is None:
+            return
+        conversation = session.get(
+            Conversation, action.payload.get("conversation_id") or ""
+        )
+        if conversation is None or conversation.ended_at is not None:
+            return  # already ended via leave/max_turns/duplicate: nothing to do
+        self._end(
+            session, runtime, conversation, REASON_TIMEOUT, runtime.clock.world_time, None
         )

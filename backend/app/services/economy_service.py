@@ -98,6 +98,15 @@ class EconomyService:
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
+                conversation_service = self.engine.conversation_service
+                if conversation_service is not None:
+                    queued, qreason = conversation_service.queue_or_reject(
+                        session, runtime, agent, "work",
+                        {"job_id": job_id, "reason": reason},
+                    )
+                    if queued:
+                        session.commit()  # persist the queued_action row
+                        return True, None, qreason
                 return False, None, MSG_BUSY  # R1/R3: work is exclusive
             job = session.get(Job, {"world_id": world_id, "job_id": job_id})
             if job is None:

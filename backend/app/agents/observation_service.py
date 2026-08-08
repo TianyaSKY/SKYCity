@@ -111,6 +111,11 @@ def _action_text(agent: Agent, world_time: int) -> str:
         data = agent.action_data or {}
         remaining = (agent.action_ends_at or world_time) - world_time
         return f"正在建造（{data.get('blueprint_id') or '建筑'}，剩余 {max(remaining, 0)} 分钟）"
+    if agent.action_type == "talk":
+        # E-full: the conversation lock occupies the agent; the label shows
+        # the remaining lock budget so the LLM knows it cannot act yet.
+        remaining = (agent.action_ends_at or world_time) - world_time
+        return f"对话中（剩余 {max(remaining, 0)} 分钟）"
     return agent.action_type
 
 

@@ -282,6 +282,25 @@ class ActionExecutionService:
     # Manual actions
     # ------------------------------------------------------------------ #
 
+    def _queue_if_locked(
+            self,
+            session: Session,
+            runtime: WorldRuntime,
+            agent: Agent,
+            tool_name: str,
+            arguments: dict,
+    ) -> tuple[bool, str | None]:
+        """E-full R1 gate: a conversation-locked agent's duration action is
+        queued (fires when the conversation ends) instead of rejected.
+        Returns ``(True, MSG_QUEUED)`` when queued, ``(False, None)`` to
+        proceed normally (unlocked, or a stale lock was repaired)."""
+        conversation_service = self.engine.conversation_service
+        if conversation_service is None:
+            return False, None
+        return conversation_service.queue_or_reject(
+            session, runtime, agent, tool_name, arguments
+        )
+
     def execute_move(
             self,
             world_id: str,
@@ -305,6 +324,13 @@ class ActionExecutionService:
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
+                queued, qreason = self._queue_if_locked(
+                    session, runtime, agent, "move",
+                    {"destination_id": destination_id, "reason": reason},
+                )
+                if queued:
+                    session.commit()  # persist the queued_action row
+                    return True, None, qreason
                 if agent.action_type == "move":
                     # R1: move is exclusive; a second move is rejected.
                     return False, None, MSG_BUSY
@@ -406,6 +432,13 @@ class ActionExecutionService:
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
+                queued, qreason = self._queue_if_locked(
+                    session, runtime, agent, "wait",
+                    {"minutes": minutes, "reason": reason},
+                )
+                if queued:
+                    session.commit()  # persist the queued_action row
+                    return True, None, qreason
                 if agent.action_type == "move":
                     return False, None, MSG_BUSY
                 runtime.scheduler.cancel_for_agent(session, agent_id)
@@ -466,6 +499,14 @@ class ActionExecutionService:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
+            if agent.action_type is not None:
+                queued, qreason = self._queue_if_locked(
+                    session, runtime, agent, "sleep",
+                    {"minutes": minutes, "reason": reason},
+                )
+                if queued:
+                    session.commit()  # persist the queued_action row
+                    return True, None, qreason
             if agent.action_type == "move":
                 return False, None, MSG_BUSY
             # Sleep place validation happens BEFORE the wait/sleep replacement
