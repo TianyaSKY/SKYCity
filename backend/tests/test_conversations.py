@@ -340,8 +340,8 @@ def test_max_turns_and_cooldown(world_config: ParsedWorldConfig) -> None:
     park_at(eng, world_id, "agent_zhangming", "village_plaza")
     service = eng.conversation_service
 
-    # 6 messages all accepted
-    for i in range(6):
+    # 15 messages all accepted
+    for i in range(15):
         ok, reason, envelope = service.send_message(
             world_id,
             "agent_linxia" if i % 2 == 0 else "agent_zhangming",
@@ -351,12 +351,12 @@ def test_max_turns_and_cooldown(world_config: ParsedWorldConfig) -> None:
         )
         assert ok is True, f"message {i + 1}: {reason}"
     convo = conversations_for(world_id)[0]
-    assert convo.turns == 6
+    assert convo.turns == 15
     assert convo.ended_at is None
 
-    # the 7th message is rejected and ends the conversation (max_turns)
+    # the 16th message is rejected and ends the conversation (max_turns)
     ok, reason, envelope = service.send_message(
-        world_id, "agent_linxia", "agent_zhangming", "消息7", "chat"
+        world_id, "agent_linxia", "agent_zhangming", "消息16", "chat"
     )
     assert ok is False and envelope is None
     assert reason == MSG_MAX_TURNS
@@ -831,7 +831,7 @@ def test_talk_lock_refreshes_on_message(world_config: ParsedWorldConfig) -> None
         first_end = linxia.action_ends_at
     finally:
         session.close()
-    # tests run at speed=1: 60 wall seconds == 60 game minutes
+    # tests run at speed=1: 180 wall seconds == 180 game minutes
     assert first_end == started + TALK_LOCK_SECONDS
 
     # a second message inside the window extends it for both members

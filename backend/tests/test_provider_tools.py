@@ -94,3 +94,35 @@ def test_llm_tool_choice_accepts_auto_for_thinking_models() -> None:
 def test_llm_tool_choice_rejects_unknown_values() -> None:
     with pytest.raises(ValidationError):
         Settings(llm_tool_choice="always")
+
+
+def test_llm_reasoning_effort_defaults_to_unset() -> None:
+    settings = Settings(_env_file=None)
+    assert settings.llm_reasoning_effort is None
+
+
+def test_llm_reasoning_effort_accepts_sdk_enum_values() -> None:
+    for effort in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+        assert Settings(llm_reasoning_effort=effort).llm_reasoning_effort == effort
+
+
+def test_llm_reasoning_effort_rejects_unknown_values() -> None:
+    with pytest.raises(ValidationError):
+        Settings(llm_reasoning_effort="ultra")
+
+
+def test_llm_reasoning_effort_reaches_provider_model_settings() -> None:
+    provider = OpenAIProvider(
+        Settings(
+            openai_api_key="sk-dummy",
+            llm_provider="openai",
+            llm_reasoning_effort="high",
+        )
+    )
+    assert provider._reasoning_settings() is not None
+    assert provider._reasoning_settings().effort == "high"
+    # Unset -> None so the SDK omits the param entirely (provider default).
+    provider_default = OpenAIProvider(
+        Settings(openai_api_key="sk-dummy", llm_provider="openai")
+    )
+    assert provider_default._reasoning_settings() is None

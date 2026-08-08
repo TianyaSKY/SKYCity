@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # "auto"/"none" let the model reply in text, which the provider degrades
     # into a wait action so the world keeps ticking.
     llm_tool_choice: str = "required"  # "required" | "auto" | "none"
+    # Direct reasoning intensity knob, forwarded as chat-completions
+    # reasoning_effort (openai-agents ModelSettings.reasoning.effort). None =
+    # not sent (provider default). Only effort is portable: mode/context need
+    # the Responses API and are rejected by chat completions.
+    llm_reasoning_effort: str | None = None  # none|minimal|low|medium|high|xhigh|max
     # Third-party OpenAI-compatible endpoints usually only implement
     # /chat/completions; the SDK's default Responses API would 404. Keep
     # chat completions unless the endpoint explicitly supports /responses.
@@ -70,6 +75,19 @@ class Settings(BaseSettings):
         if value not in {"required", "auto", "none"}:
             raise ValueError(
                 f"llm_tool_choice must be required|auto|none, got {value!r}"
+            )
+        return value
+
+    @field_validator("llm_reasoning_effort")
+    @classmethod
+    def _validate_llm_reasoning_effort(cls, value: str | None) -> str | None:
+        """Accept only values the SDK's Reasoning.effort enum understands."""
+        if value is None:
+            return value
+        if value not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+            raise ValueError(
+                f"llm_reasoning_effort must be none|minimal|low|medium|high|"
+                f"xhigh|max or empty, got {value!r}"
             )
         return value
 

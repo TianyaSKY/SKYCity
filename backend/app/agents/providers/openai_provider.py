@@ -24,6 +24,7 @@ from typing import Any
 from agents import Agent, ModelSettings, OpenAIProvider as SdkOpenAIProvider, RunContextWrapper, Runner
 from agents.items import ToolCallItem
 from loguru import logger
+from openai.types.shared.reasoning import Reasoning
 
 from app.agents.context import AgentToolContext
 from app.agents.instructions import build_system_prompt
@@ -106,6 +107,7 @@ class OpenAIProvider:
             model_settings=ModelSettings(
                 tool_choice=self._settings.llm_tool_choice,
                 parallel_tool_calls=False,
+                reasoning=self._reasoning_settings(),
             ),
         )
         result = await Runner.run(
@@ -200,6 +202,7 @@ class OpenAIProvider:
             ),
             tools=[],
             model=self._sdk_provider.get_model(self._settings.llm_reflect_model),
+            model_settings=ModelSettings(reasoning=self._reasoning_settings()),
         )
         result = await Runner.run(agent, digest, max_turns=1)
         return (result.final_output or "").strip()
@@ -207,6 +210,16 @@ class OpenAIProvider:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def _reasoning_settings(self) -> Reasoning | None:
+        """Reasoning.effort from settings, or None to keep the provider default.
+
+        Chat completions only honors ``effort`` (mode/context need the
+        Responses API); the SDK warns and drops the others.
+        """
+        if not self._settings.llm_reasoning_effort:
+            return None
+        return Reasoning(effort=self._settings.llm_reasoning_effort)
 
     @staticmethod
     def _first_tool_call(new_items: list[Any]) -> ToolCallItem | None:
