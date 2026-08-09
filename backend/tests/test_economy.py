@@ -332,7 +332,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
 
     row = agent_row(engine, world_id, "agent_linxia")
     assert row.action_type is None
-    assert row.money == 3030  # 3000 + wage 30 (R10)
+    assert row.money == 3000  # independent work mints no wage
     # energy: -1/h x2 (hourly) then -8 work drain (4/h x 2h) = 90
     assert row.energy == 90
     assert row.satiety == 98  # -1/h x2 (R14)
@@ -347,30 +347,21 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
         )
         assert employment is not None
         assert employment.hours_worked == pytest.approx(2.0)
-        assert employment.total_earned == 30
+        assert employment.total_earned == 0
     finally:
         session.close()
 
-    txs = transaction_rows(engine, world_id, "agent_linxia")
-    assert len(txs) == 1
-    assert txs[0].type == "work_wage"
-    assert txs[0].amount == 30
-    assert txs[0].balance_after == 3030
 
     types = [e.type for e in engine.events_after(world_id, 0)]
     assert "work_started" in types
     completed = [e for e in engine.events_after(world_id, 0) if e.type == "work_completed"]
     assert completed
-    assert completed[0].payload["wage"] == 30
+    assert completed[0].payload["work_kind"] == "independent"
+    assert completed[0].payload["payment_source"] == "goods_sale"
+    assert completed[0].payload["wage"] == 0
     assert completed[0].payload["products"] == [{"item_id": "wheat", "quantity": 1}]
     assert completed[0].payload["energy_spent"] == 8
-    money_events = [e for e in engine.events_after(world_id, 0) if e.type == "money_changed"]
-    assert money_events[-1].payload == {
-        "agent_id": "agent_linxia",
-        "amount": 30,
-        "balance": 3030,
-        "reason": "完成工作 农场劳作 获得工资",
-    }
+    assert not [e for e in engine.events_after(world_id, 0) if e.type == "money_changed"]
     inv_events = [e for e in engine.events_after(world_id, 0) if e.type == "inventory_changed"]
     assert inv_events and inv_events[-1].payload["items"] == [{"item_id": "wheat", "quantity": 1}]
 
@@ -742,22 +733,15 @@ def test_restock_at_next_day_open_hour(engine: WorldEngine) -> None:
         product = session.get(
             StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "apple"}
         )
-        assert product.stock == 15  # min(cap, 14 + restock_daily 8)
+        assert product.stock == 14  # unseeded company account cannot procure imports
         bread = session.get(
             StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
         )
-        assert bread is not None and bread.stock == 20  # bread never restocks
+        assert bread is not None and bread.stock == 20
     finally:
         session.close()
-
     restock = [e for e in engine.events_after(world_id, 0) if e.type == "store_restocked"]
-    assert restock
-    assert restock[0].payload["store_id"] == "village_shop"
-    restocked = {
-        item["item_id"]: item["quantity"] for item in restock[0].payload["restocked"]
-    }
-    # apple 回补 1（14 → 15）；wood 从初始 5 回补到 15（restock_daily 10）
-    assert restocked == {"apple": 1, "wood": 10}
+    assert not restock
 
 
 # --------------------------------------------------------------------------- #
@@ -808,11 +792,9 @@ def test_exhausted_agent_forced_to_rest(world_config: ParsedWorldConfig) -> None
 
 
 def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
-    """Linxia: shop -> 4x buy bread (50-48=2) -> 5th buy fails 余额不足 ->
-    farm work (+30 wage, +wheat) -> sell wheat (+4, M19 buy price) -> buy
-    bread (-12) -> eat it. Final balance 24, bread left 4. The low balance
-    is pinned explicitly: since M19 the default INITIAL_MONEY is 3000, which
-    would make the 5th buy succeed and distort the chain."""
+    """Linxia buys four breads, fails a fifth purchase, independently harvests
+    wheat, sells it, buys another bread, then eats. Independent work contributes
+    goods rather than a minted wage."""
     eng = make_engine(
         world_config,
         scripts={"agent_linxia": DEFAULT_SCRIPTS["agent_linxia"]},
@@ -822,20 +804,20 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     world_id = runtime.world_id
     # The shop starts at full wheat stock (30/30); make room so the sell lands.
     set_stock(eng, world_id, "wheat", 29)
-    set_agent(eng, world_id, "agent_linxia", money=50)
+    set_agent(eng, world_id, "agent_linxia", money=60)
 
     done = False
     for _ in range(20):  # up to 1200 game minutes
         advance_minutes(eng, world_id, 60)
         row = agent_row(eng, world_id, "agent_linxia")
         used = any(e.type == "item_used" for e in eng.events_after(world_id, 0))
-        if row.money == 24 and used:
+        if row.money == 4 and used:
             done = True
             break
     assert done, "economic chain did not complete in time"
 
     row = agent_row(eng, world_id, "agent_linxia")
-    assert row.money == 24  # 50 - 4*12 + 30 + 4 - 12
+    assert row.money == 4  # 60 - 4*12 + 4 - 12
     assert inventory_of(eng, world_id, "agent_linxia") == {"bread": 4}
 
     # item_used carried satiety before/after and actually restored satiety
@@ -865,13 +847,13 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
     finally:
         session.close()
 
-    # ledger: 5 expenses + 1 income (wheat) + 1 work_wage
+    # Ledger: five purchases and the wheat sale; independent work has no wage.
     txs = transaction_rows(eng, world_id, "agent_linxia")
-    assert len(txs) == 7
-    assert sum(1 for t in txs if t.type == "expense") == 5
-    assert sum(1 for t in txs if t.type == "income") == 1
-    assert sum(1 for t in txs if t.type == "work_wage") == 1
-    assert txs[-1].balance_after == 24
+    assert len(txs) == 6
+    assert sum(1 for tx in txs if tx.type == "expense") == 5
+    assert sum(1 for tx in txs if tx.type == "income") == 1
+    assert not any(tx.type == "work_wage" for tx in txs)
+    assert txs[-1].balance_after == 4
 
     session = SessionLocal()
     try:
@@ -881,20 +863,20 @@ def test_full_autonomous_economy_chain(world_config: ParsedWorldConfig) -> None:
         )
         assert employment is not None
         assert employment.hours_worked == pytest.approx(2.0)
-        assert employment.total_earned == 30
+        assert employment.total_earned == 0
     finally:
         session.close()
 
     completed = [
         e for e in eng.events_after(world_id, 0) if e.type == "work_completed"
     ]
-    assert completed and completed[0].payload["wage"] == 30
+    assert completed and completed[0].payload["wage"] == 0
     assert completed[0].payload["products"] == [{"item_id": "wheat", "quantity": 1}]
 
     # snapshot contract: inventory array + money visible
     snapshot = eng.snapshot(world_id)
     linxia = next(a for a in snapshot["agents"] if a["agent_id"] == "agent_linxia")
-    assert linxia["money"] == 24
+    assert linxia["money"] == 4
     assert linxia["inventory"] == [{"item_id": "bread", "quantity": 4}]
 
     eng._runtimes.clear()

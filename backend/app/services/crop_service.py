@@ -245,23 +245,21 @@ class CropService:
             if crop_def is None or crop.stage != len(crop_def.stages) - 1:
                 return False, None, MSG_NOT_RIPE  # R23.6
 
-            # R23.6 yield: config + held fertilizer yield_bonus (M12 C4).
-            items = {
-                item.item_id: item
-                for item in session.scalars(
-                    select(Item).where(Item.world_id == world_id)
-                ).all()
-            }
+            # One fertilizer improves one harvest. It is consumed, so keeping
+            # a stack cannot turn every future crop into unbounded output.
+            fertilizer = session.get(
+                Inventory,
+                {"world_id": world_id, "agent_id": agent_id, "item_id": "fertilizer"},
+            )
             yield_extra = 0
-            for row_inv in session.scalars(
-                    select(Inventory).where(
-                        Inventory.world_id == world_id,
-                        Inventory.agent_id == agent_id,
-                    )
-            ).all():
-                item = items.get(row_inv.item_id)
-                if item is not None:
-                    yield_extra += item.yield_bonus * row_inv.quantity
+            if fertilizer is not None and fertilizer.quantity > 0:
+                fertilizer_item = session.get(
+                    Item, {"world_id": world_id, "item_id": "fertilizer"}
+                )
+                yield_extra = fertilizer_item.yield_bonus if fertilizer_item is not None else 0
+                fertilizer.quantity -= 1
+                if fertilizer.quantity == 0:
+                    session.delete(fertilizer)
             products: list[dict[str, Any]] = []
             for product_item_id, quantity in crop_def.yield_items:
                 quantity = quantity + yield_extra

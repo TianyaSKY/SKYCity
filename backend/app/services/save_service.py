@@ -61,7 +61,7 @@ from app.database.models.worlds import World
 from app.world_engine.clock import WorldClock
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 MSG_WORLD_MISSING = "世界不存在"
 MSG_SAVE_MISSING = "存档不存在"
@@ -189,6 +189,9 @@ class SaveService:
                 "weather": world.weather,
                 "autonomous": world.autonomous,
                 "treasury": world.treasury,
+                "public_work_budget_day": world.public_work_budget_day,
+                "public_work_budget_remaining": world.public_work_budget_remaining,
+                "public_work_escrow": world.public_work_escrow,
             },
             "agents": rows(Agent),
             "items": rows(Item),
@@ -256,12 +259,14 @@ class SaveService:
         }
 
     def normalize_save_payload(self, payload: dict) -> dict:
-        """Accept schema v1 (pre-company) and v2 payloads; reject the rest."""
+        """Upgrade supported save payloads to the current schema."""
         version = payload.get("schema_version")
         if version == SCHEMA_VERSION:
             return payload
+        if version == 2:
+            return self._migrate_v2_to_v3(payload)
         if version == 1:
-            return self._migrate_v1_to_v2(payload)
+            return self._migrate_v2_to_v3(self._migrate_v1_to_v2(payload))
         raise HTTPException(
             status_code=400,
             detail=f"{MSG_SCHEMA_UNSUPPORTED}: {version}",
@@ -284,6 +289,18 @@ class SaveService:
             store.setdefault("company_id", None)
             store.setdefault("owner_agent_id", None)
             store.setdefault("name", None)
+        return migrated
+
+    @staticmethod
+    def _migrate_v2_to_v3(payload: dict) -> dict:
+        """V2 -> V3: retain treasury reserves and add public-work accounting."""
+        migrated = dict(payload)
+        migrated["schema_version"] = 3
+        world = dict(migrated.get("world") or {})
+        world.setdefault("public_work_budget_day", -1)
+        world.setdefault("public_work_budget_remaining", 0)
+        world.setdefault("public_work_escrow", 0)
+        migrated["world"] = world
         return migrated
 
     # ------------------------------------------------------------------ #
@@ -317,6 +334,11 @@ class SaveService:
                 weather=str(world_data.get("weather") or "clear"),
                 autonomous=bool(world_data.get("autonomous") or False),
                 treasury=int(world_data.get("treasury") or 0),
+                public_work_budget_day=int(world_data.get("public_work_budget_day", -1)),
+                public_work_budget_remaining=int(
+                    world_data.get("public_work_budget_remaining") or 0
+                ),
+                public_work_escrow=int(world_data.get("public_work_escrow") or 0),
             )
             session.add(world)
             self._reinsert(session, payload, world_id)

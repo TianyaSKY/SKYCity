@@ -178,10 +178,10 @@ def test_work_completed_records_memory(world_config: ParsedWorldConfig) -> None:
 
     memories = memories_for(world_id, "agent_linxia")
     work = [m for m in memories if m.memory_type == "episodic" and "工作" in m.text]
-    assert any("完成了 农场劳作 工作，获得 30 金币" in m.text for m in work)
+    assert any("完成了 农场劳作 工作，获得 0 金币" in m.text for m in work)
     assert any(m.entities_json == ["job_farm_field"] for m in work)
-    # The wage (30) also clears the money_changed threshold (|amount| >= 30).
-    assert any("金钱变化" in m.text for m in memories)
+    # Independent work creates goods; it does not mint a wage transaction.
+    assert not any("金钱变化" in m.text for m in memories)
     eng._runtimes.clear()
 
 

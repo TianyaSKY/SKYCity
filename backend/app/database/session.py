@@ -67,8 +67,15 @@ def initialize_database() -> None:
             # M10: stock-holding cost basis — legacy rows default 0 and are
             # backfilled below from the stock_buy ledger.
             "ALTER TABLE stock_holdings ADD COLUMN avg_cost INTEGER NOT NULL DEFAULT 0",
-            # A1: the village treasury recycles upkeep instead of destroying it.
+            # Treasury and job-kind cutover: historical reserves stay public,
+            # and casual/public/formal work settle from distinct sources.
             "ALTER TABLE worlds ADD COLUMN treasury INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE worlds ADD COLUMN public_work_budget_day INTEGER NOT NULL DEFAULT -1",
+            "ALTER TABLE worlds ADD COLUMN public_work_budget_remaining INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE worlds ADD COLUMN public_work_escrow INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE jobs ADD COLUMN work_kind VARCHAR(16) NOT NULL DEFAULT 'independent'",
+            "ALTER TABLE store_products ADD COLUMN supply_kind VARCHAR(16) NOT NULL DEFAULT 'local'",
+            "ALTER TABLE store_products ADD COLUMN import_unit_cost INTEGER NOT NULL DEFAULT 0",
             # A2: stocks are backed by a real company (or the treasury).
             "ALTER TABLE stocks ADD COLUMN issuer_company_id VARCHAR(64)",
             "ALTER TABLE agents ADD COLUMN goals JSON NOT NULL DEFAULT '[]'",

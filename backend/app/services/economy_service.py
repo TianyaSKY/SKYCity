@@ -60,6 +60,8 @@ MSG_OWNER_POOR = "店主资金不足"
 MSG_STORE_FULL = "商店收不下"
 MSG_ITEM_MISSING = "物品不存在"
 MSG_NOT_FOOD = "该物品不是食物"
+MSG_PUBLIC_BUDGET_EXHAUSTED = "当日公共工作预算不足"
+MSG_PUBLIC_WORK_DAY_END = "公共工作必须在当日预算结束前完成"
 
 
 class EconomyService:
@@ -83,7 +85,12 @@ class EconomyService:
             reason: str | None = None,
             trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Validate + start a work action (R1/R3/R8/R11/R12)."""
+        """Validate and start independent or public work.
+
+        Formal work is exclusively a company shift. Independent work creates
+        sellable goods but no wage; public work reserves its wage from the
+        current day's bounded public budget before the action begins.
+        """
         session = self._session_factory()
         try:
             runtime = self.engine.get_runtime(world_id)
@@ -105,18 +112,13 @@ class EconomyService:
                         {"job_id": job_id, "reason": reason},
                     )
                     if queued:
-                        session.commit()  # persist the queued_action row
+                        session.commit()
                         return True, None, qreason
-                return False, None, MSG_BUSY  # R1/R3: work is exclusive
+                return False, None, MSG_BUSY
             job = session.get(Job, {"world_id": world_id, "job_id": job_id})
             if job is None:
                 return False, None, MSG_JOB_MISSING
-            # M16: formal-only jobs (production recipes) reject the casual
-            # work() path — they run exclusively as formal shifts.
-            if any(
-                seed["job_id"] == job_id and seed.get("formal_only")
-                for seed in load_jobs()
-            ):
+            if job.work_kind == "formal":
                 return False, None, MSG_FORMAL_ONLY
             if agent.location_id != job.location_id:
                 return False, None, MSG_NOT_AT_JOB
@@ -126,23 +128,42 @@ class EconomyService:
             if location is not None and not is_location_open(
                     location.location_type, location.open_hour, location.close_hour, world.world_time
             ):
-                return False, None, MSG_LOCATION_CLOSED  # R8
+                return False, None, MSG_LOCATION_CLOSED
             if agent.satiety <= 0:
-                return False, None, MSG_SATIETY_EMPTY  # R11
+                return False, None, MSG_SATIETY_EMPTY
             if agent.energy <= 0:
-                return False, None, MSG_EXHAUSTED  # R12
+                return False, None, MSG_EXHAUSTED
 
             ends_at = world.world_time + job.duration_minutes
+            public_wage = 0
+            if job.work_kind == "public":
+                if ends_at // 1440 != world.world_time // 1440:
+                    return False, None, MSG_PUBLIC_WORK_DAY_END
+                if not self.engine.reserve_public_work_funds(world, job.wage):
+                    return False, None, MSG_PUBLIC_BUDGET_EXHAUSTED
+                public_wage = job.wage
+
             agent.action_type = "work"
             agent.action_started_at = world.world_time
             agent.action_ends_at = ends_at
-            agent.action_data = {"job_id": job_id, "reason": reason}
+            action_data: dict[str, Any] = {"job_id": job_id, "reason": reason}
+            completion_payload: dict[str, Any] = {
+                "job_id": job_id,
+                "reason": reason,
+                "trace_id": trace_id,
+                "work_kind": job.work_kind,
+            }
+            if public_wage:
+                reservation_day = world.public_work_budget_day
+                action_data.update(
+                    public_wage=public_wage, public_budget_day=reservation_day
+                )
+                completion_payload.update(
+                    public_wage=public_wage, public_budget_day=reservation_day
+                )
+            agent.action_data = action_data
             runtime.scheduler.schedule(
-                session,
-                agent_id,
-                "work_completed",
-                ends_at,
-                {"job_id": job_id, "reason": reason, "trace_id": trace_id},
+                session, agent_id, "work_completed", ends_at, completion_payload
             )
             envelope = runtime.event_bus.publish(
                 session,
@@ -152,6 +173,7 @@ class EconomyService:
                     "agent_id": agent_id,
                     "job_id": job_id,
                     "job_name": job.name,
+                    "work_kind": job.work_kind,
                     "duration_minutes": job.duration_minutes,
                     "ends_at": ends_at,
                     "reason": reason,
@@ -164,63 +186,96 @@ class EconomyService:
             session.close()
 
     def handle_work_completed(self, session: Session, action: ScheduledAction) -> None:
-        """Scheduler handler for "work_completed": settle wage + products.
-
-        R10: one-shot settlement at the due world_time — energy drained by the
-        job's intensity (R14), wage credited, products into the inventory,
-        employment history updated, and a work_wage transaction recorded.
-        """
+        """Settle a completed non-formal work action without minting wages."""
         runtime = self.engine.get_runtime(action.world_id)
         if runtime is None:
             return
+        payload = action.payload or {}
+        world = session.get(World, action.world_id)
         agent = session.get(Agent, {"world_id": action.world_id, "agent_id": action.agent_id})
         if agent is None or agent.action_type != "work":
-            return  # stale or already replaced
-        payload = action.payload or {}
+            if world is not None:
+                self.release_public_work_reservation(world, payload)
+            return
         job_id = payload.get("job_id")
         job = session.get(Job, {"world_id": action.world_id, "job_id": job_id})
         trace_id = payload.get("trace_id")
-        if job is None:
+        if job is None or world is None:
+            if world is not None:
+                self.release_public_work_reservation(world, payload)
             self.engine.action_service._clear_action(agent)
             return
         world_time = runtime.clock.world_time
+        work_kind = str(payload.get("work_kind") or job.work_kind)
 
-        # M12 C4: held tools/inputs boost wage and yield (sum by held
-        # quantity across the agent's inventory; no held items -> 0 bonus).
+        # Equipment is a single best applicable tool, not a stack multiplier.
+        # Fertilizer is intentionally excluded here; it is consumed by crop
+        # harvests only.
         items = {
             item.item_id: item
             for item in session.scalars(
                 select(Item).where(Item.world_id == action.world_id)
             ).all()
         }
-        bonus_pct = 0
-        yield_extra = 0
-        inventory_rows = session.scalars(
-            select(Inventory).where(
-                Inventory.world_id == action.world_id,
-                Inventory.agent_id == action.agent_id,
-            )
-        ).all()
-        for row in inventory_rows:
+        equipment_bonus = 0
+        for row in session.scalars(
+                select(Inventory).where(
+                    Inventory.world_id == action.world_id,
+                    Inventory.agent_id == action.agent_id,
+                )
+        ).all():
             item = items.get(row.item_id)
-            if item is None:
-                continue
-            bonus_pct += self._item_work_bonus(item, job_id) * row.quantity
-            yield_extra += item.yield_bonus * row.quantity
+            if item is not None and item.category == "tool":
+                equipment_bonus = max(equipment_bonus, self._item_work_bonus(item, job_id))
 
         energy_spent = max(int(job.energy_cost_per_hour * job.duration_minutes / 60), 0)
-        agent.energy = max(0, agent.energy - energy_spent)  # R14
-        wage = job.wage * (100 + bonus_pct) // 100  # R10 + M12 work bonus
-        agent.money += wage
+        agent.energy = max(0, agent.energy - energy_spent)
+
+        wage = 0
+        payment_source = "goods_sale"
+        transaction_type = ""
+        transaction_reason = ""
+        if work_kind == "public":
+            reserved_wage = int(payload.get("public_wage") or 0)
+            if reserved_wage and self.engine.settle_public_work_funds(world, reserved_wage):
+                wage = reserved_wage
+                payment_source = "public_budget"
+                transaction_type = "public_work_payment"
+                transaction_reason = f"完成公共工作 {job.name} 获得公共报酬"
+        elif payload.get("legacy_casual_wage"):
+            # Existing in-flight casual jobs pre-date the source-of-money
+            # split. Complete exactly once with an explicit migration ledger
+            # row rather than silently erasing work already underway.
+            wage = int(payload["legacy_casual_wage"])
+            payment_source = "economy_migration"
+            transaction_type = "economy_transition_credit"
+            transaction_reason = f"经济规则切换：结算已开始的 {job.name}"
+
+        if wage > 0:
+            agent.money += wage
+            session.add(
+                Transaction(
+                    world_id=action.world_id,
+                    agent_id=action.agent_id,
+                    type=transaction_type,
+                    amount=wage,
+                    balance_after=agent.money,
+                    item_id=None,
+                    quantity=None,
+                    reason=transaction_reason,
+                    world_time=world_time,
+                    trace_id=trace_id or "",
+                )
+            )
 
         produced: list[dict[str, Any]] = []
         for product in job.products_json or []:
             item_id = str(product.get("item_id") or "")
-            quantity = int(product.get("quantity") or 0) + yield_extra
+            quantity = int(product.get("quantity") or 0) * (100 + equipment_bonus) // 100
             if not item_id or quantity <= 0:
                 continue
             if session.get(Item, {"world_id": action.world_id, "item_id": item_id}) is None:
-                continue  # products only materialise for known items
+                continue
             self._add_inventory(session, action.world_id, action.agent_id, item_id, quantity)
             produced.append({"item_id": item_id, "quantity": quantity})
 
@@ -240,21 +295,6 @@ class EconomyService:
         employment.hours_worked += job.duration_minutes / 60.0
         employment.total_earned += wage
 
-        session.add(
-            Transaction(
-                world_id=action.world_id,
-                agent_id=action.agent_id,
-                type="work_wage",
-                amount=wage,
-                balance_after=agent.money,
-                item_id=None,
-                quantity=None,
-                reason=f"完成工作 {job.name} 获得工资",
-                world_time=world_time,
-                trace_id=trace_id or "",
-            )
-        )
-
         runtime.event_bus.publish(
             session,
             world_time,
@@ -263,24 +303,27 @@ class EconomyService:
                 "agent_id": action.agent_id,
                 "job_id": job_id,
                 "job_name": job.name,
+                "work_kind": work_kind,
+                "payment_source": payment_source,
                 "wage": wage,
                 "products": produced,
                 "energy_spent": energy_spent,
             },
             trace_id,
         )
-        runtime.event_bus.publish(
-            session,
-            world_time,
-            "money_changed",
-            {
-                "agent_id": action.agent_id,
-                "amount": wage,
-                "balance": agent.money,
-                "reason": f"完成工作 {job.name} 获得工资",
-            },
-            trace_id,
-        )
+        if wage > 0:
+            runtime.event_bus.publish(
+                session,
+                world_time,
+                "money_changed",
+                {
+                    "agent_id": action.agent_id,
+                    "amount": wage,
+                    "balance": agent.money,
+                    "reason": transaction_reason,
+                },
+                trace_id,
+            )
         runtime.event_bus.publish(
             session,
             world_time,
@@ -292,7 +335,6 @@ class EconomyService:
             trace_id,
         )
         self.engine.action_service._clear_action(agent)
-        # M3: autonomous worlds re-arm the LLM loop now that work ended.
         self.engine.action_service._maybe_schedule_next_decision(session, action)
 
     # ------------------------------------------------------------------ #
@@ -853,6 +895,16 @@ class EconomyService:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def release_public_work_reservation(
+            self, world: World, payload: dict[str, Any]
+    ) -> bool:
+        """Return a stale public-work reservation exactly once."""
+        amount = int(payload.get("public_wage") or 0)
+        reservation_day = int(payload.get("public_budget_day") or -1)
+        return self.engine.release_public_work_funds(
+            world, amount, reservation_day
+        )
 
     def _find_product(
             self, session: Session, world_id: str, item_id: str,

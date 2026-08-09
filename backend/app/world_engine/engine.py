@@ -46,6 +46,7 @@ from app.config.gameplay import (
     PROMO_DISCOUNT_PERCENT,
     PROMO_ROLL_DENOMINATOR,
     PROMO_ROLL_HITS,
+    PUBLIC_WORK_DAILY_BUDGET,
     SATIETY_DRAIN_PER_HOUR,
     SATIETY_EMPTY_EXTRA_ENERGY_DRAIN,
     SLEEP_ENERGY_PER_HOUR,
@@ -766,6 +767,8 @@ class WorldEngine:
                         stock=product.get("initial_stock", product["stock_cap"]),  # R15
                         stock_cap=product["stock_cap"],
                         restock_daily=product["restock_daily"],
+                        supply_kind=product.get("supply_kind", "local"),
+                        import_unit_cost=product.get("import_unit_cost", 0),
                     )
                 )
         for job_seed in load_jobs(self.world_data_dir):
@@ -780,6 +783,7 @@ class WorldEngine:
                     wage=job_seed["wage"],
                     energy_cost_per_hour=job_seed["energy_cost_per_hour"],
                     products_json=job_seed["products"],
+                    work_kind=job_seed.get("work_kind", "independent"),
                 )
             )
         if self.stock_service is not None:
@@ -1039,8 +1043,13 @@ class WorldEngine:
                 # is deducted between dividends and the counter reset.
                 self._pay_dividends(session, runtime, world, world_time)
                 self._pay_manager_profits(session, runtime, world, world_time)
-                self._apply_daily_upkeep(session, runtime, world, world_time)
-                self._disburse_treasury(session, runtime, world, world_time)
+                daily_upkeep_collected = self._apply_daily_upkeep(
+                    session, runtime, world, world_time
+                )
+                self._disburse_treasury(
+                    session, runtime, world, world_time, daily_upkeep_collected
+                )
+                self.ensure_public_work_budget(world)
                 self._liquidate_zombie_companies(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
@@ -1189,7 +1198,7 @@ class WorldEngine:
             runtime: WorldRuntime,
             world: World,
             world_time: int,
-    ) -> None:
+    ) -> int:
         """M12 D6: daily cost of living at 00:00.
 
         Every agent pays the full UPKEEP_PER_DAY out of money. A balance
@@ -1204,11 +1213,13 @@ class WorldEngine:
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
+        collected = 0
         for agent in agents:
             agent.money -= UPKEEP_PER_DAY
             # A1: the upkeep is collected into the village treasury instead of
             # being destroyed; _disburse_treasury recycles it the same morning.
             world.treasury += UPKEEP_PER_DAY
+            collected += UPKEEP_PER_DAY
             session.add(
                 Transaction(
                     world_id=world.world_id,
@@ -1250,6 +1261,7 @@ class WorldEngine:
                             "loneliness": agent.loneliness,
                         },
                     )
+        return collected
 
     def _reset_daily_counters(self, session: Session, world_id: str) -> None:
         """M8: zero every agent's daily LLM call/token counters (day change)."""
@@ -1336,29 +1348,25 @@ class WorldEngine:
             runtime: WorldRuntime,
             world: World,
             world_time: int,
+            daily_upkeep_collected: int,
     ) -> None:
-        """A1: recycle the village treasury at 00:00.
+        """Distribute only the upkeep collected at this day boundary.
 
-        The treasury holds the day's upkeep (collected in
-        ``_apply_daily_upkeep``). TREASURY_UBI_SHARE_PERCENT goes to every
-        resident equally — a universal basic income. Debtors receive it too:
-        withholding welfare from the poorest created a poverty trap (no money
-        -> cannot buy food -> cannot work -> deeper debt). The debt pressure
-        still exists via the daily mood penalty and the ``origin=debt``
-        decision boost; the UBI just keeps everyone alive and able to work.
-        The remainder is paid to active companies proportional to the wages
-        they paid that day (a wage subsidy that directly covers the
-        company-side wage gap). Money is recycled, never destroyed.
+        Historical treasury reserves are deliberately excluded from the UBI
+        and payroll-subsidy formula. They remain public funds for bounded
+        public work, projects, and explicitly authorised treasury expenses.
         """
-        if world.treasury <= 0:
+        if daily_upkeep_collected <= 0:
             return
         day_start = ((world_time - 1) // 1440) * 1440
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
-        ubi_total = world.treasury * TREASURY_UBI_SHARE_PERCENT // 100
-        company_pool = world.treasury - ubi_total
-        # UBI: equal split among ALL residents (debtors included).
+        ubi_total = daily_upkeep_collected * TREASURY_UBI_SHARE_PERCENT // 100
+        company_pool = daily_upkeep_collected - ubi_total
+
+        # UBI remains universal, including residents in debt. Integer remainder
+        # remains in the public treasury rather than being created or lost.
         if ubi_total > 0 and agents:
             per_agent = ubi_total // len(agents)
             if per_agent > 0:
@@ -1390,11 +1398,19 @@ class WorldEngine:
                             "reason": "村庄基本收入",
                         },
                     )
-        # Wage subsidy: proportional to each active company's wage payments
-        # in the day that just ended (initial capital and manager shares
-        # excluded). Companies that paid no wages get nothing.
+
         if company_pool <= 0:
-            world.treasury = max(world.treasury, 0)
+            return
+        active_companies = {
+            company.company_id: company
+            for company in session.scalars(
+                select(Company).where(
+                    Company.world_id == world.world_id,
+                    Company.status == "active",
+                )
+            ).all()
+        }
+        if not active_companies:
             return
         rows = session.scalars(
             select(CompanyTransaction).where(
@@ -1404,39 +1420,35 @@ class WorldEngine:
                 CompanyTransaction.world_time < world_time,
             )
         ).all()
-        by_company: dict[str, int] = {}
+        wages_by_company: dict[str, int] = {}
         for row in rows:
-            by_company[row.company_id] = by_company.get(row.company_id, 0) + abs(row.amount)
-        total_wages = sum(by_company.values())
-        if total_wages <= 0:
-            # No wages paid anywhere — the company pool stays in the treasury
-            # as a buffer for future days (money parked, never destroyed).
-            world.treasury = max(world.treasury, 0)
-            return
-        for company in session.scalars(
-                select(Company).where(
-                    Company.world_id == world.world_id,
-                    Company.status == "active",
+            if row.company_id in active_companies:
+                wages_by_company[row.company_id] = (
+                    wages_by_company.get(row.company_id, 0) + abs(row.amount)
                 )
-        ).all():
-            wages = by_company.get(company.company_id, 0)
-            if wages <= 0:
+        total_wages = sum(wages_by_company.values())
+        if total_wages <= 0:
+            return
+
+        # A subsidy is a reimbursement, never a windfall: each issuer receives
+        # its proportional share of today's pool, capped at wages actually paid.
+        for company_id, wages in wages_by_company.items():
+            subsidy = min(company_pool * wages // total_wages, wages)
+            if subsidy <= 0:
                 continue
-            share = company_pool * wages // total_wages
-            if share <= 0:
-                continue
-            company.money += share
-            world.treasury -= share
+            company = active_companies[company_id]
+            company.money += subsidy
+            world.treasury -= subsidy
             session.add(
                 CompanyTransaction(
                     world_id=world.world_id,
                     company_id=company.company_id,
                     type="treasury_subsidy",
-                    amount=share,
+                    amount=subsidy,
                     balance_after=company.money,
                     reference_type="treasury",
                     reference_id=world.world_id,
-                    reason="村庄金库工资补贴",
+                    reason="当日工资补贴",
                     world_time=world_time,
                     trace_id="",
                 )
@@ -1447,12 +1459,64 @@ class WorldEngine:
                 "company_money_changed",
                 {
                     "company_id": company.company_id,
-                    "amount": share,
+                    "amount": subsidy,
                     "balance": company.money,
-                    "reason": "村庄金库工资补贴",
+                    "reason": "当日工资补贴",
                 },
             )
-        world.treasury = max(world.treasury, 0)
+
+    def ensure_public_work_budget(self, world: World) -> None:
+        """Open one bounded public-work budget for the current game day."""
+        day = world.world_time // 1440
+        if world.public_work_budget_day == day:
+            return
+        # A public job must finish on its reservation day. Keep a rare stale
+        # escrow intact rather than overwriting its accounting on a day change.
+        if world.public_work_escrow > 0:
+            return
+        world.public_work_budget_day = day
+        world.public_work_budget_remaining = min(
+            max(world.treasury, 0), PUBLIC_WORK_DAILY_BUDGET
+        )
+
+    def reserve_public_work_funds(self, world: World, amount: int) -> bool:
+        """Move one public-job wage from treasury into auditable escrow."""
+        self.ensure_public_work_budget(world)
+        if (
+                amount <= 0
+                or world.public_work_budget_day != world.world_time // 1440
+                or world.public_work_budget_remaining < amount
+                or world.treasury < amount
+        ):
+            return False
+        world.public_work_budget_remaining -= amount
+        world.treasury -= amount
+        world.public_work_escrow += amount
+        return True
+
+    @staticmethod
+    def settle_public_work_funds(world: World, amount: int) -> bool:
+        """Release a completed public-job wage from escrow to its worker."""
+        if amount <= 0 or world.public_work_escrow < amount:
+            return False
+        world.public_work_escrow -= amount
+        return True
+
+    @staticmethod
+    def release_public_work_funds(
+            world: World, amount: int, reservation_day: int
+    ) -> bool:
+        """Return a cancelled public-job reservation to the public treasury."""
+        if amount <= 0 or world.public_work_escrow < amount:
+            return False
+        world.public_work_escrow -= amount
+        world.treasury += amount
+        if (
+                reservation_day == world.world_time // 1440
+                and world.public_work_budget_day == reservation_day
+        ):
+            world.public_work_budget_remaining += amount
+        return True
 
     def _apply_hourly_needs(
             self,
@@ -1838,11 +1902,26 @@ class WorldEngine:
                             "promo": promo,
                         },
                     )
-                target = min(product.stock_cap, product.stock + product.restock_daily)
-                gained = target - product.stock
-                if gained > 0:
-                    product.stock = target
-                    restocked.append({"item_id": product.item_id, "quantity": gained})
+                if product.supply_kind != "imported" or product.restock_daily <= 0:
+                    continue
+                gained = min(product.stock_cap - product.stock, product.restock_daily)
+                company = (
+                    session.get(Company, {"world_id": world.world_id, "company_id": store.company_id})
+                    if store.company_id else None
+                )
+                cost = gained * product.import_unit_cost
+                if gained <= 0 or company is None or company.money < cost:
+                    continue
+                company.money -= cost
+                product.stock += gained
+                session.add(CompanyTransaction(
+                    world_id=world.world_id, company_id=company.company_id,
+                    type="external_procurement", amount=-cost, balance_after=company.money,
+                    related_item_id=product.item_id, quantity=gained, reference_type="store",
+                    reference_id=store.store_id, reason=f"外部采购 {product.item_id}×{gained}",
+                    world_time=world_time, trace_id="",
+                ))
+                restocked.append({"item_id": product.item_id, "quantity": gained})
             if restocked:
                 runtime.event_bus.publish(
                     session,

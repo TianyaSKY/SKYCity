@@ -56,7 +56,7 @@ from app.config.gameplay import (
     WEATHER_MULTIPLIERS,
 )
 from app.services.action_execution_service import find_path
-from app.services.seed_loader import load_blueprints, load_companies, load_crops, load_jobs
+from app.services.seed_loader import load_blueprints, load_companies, load_crops
 from app.world_engine.engine import is_location_open
 
 _WEATHER_NAMES = {
@@ -434,14 +434,15 @@ def build_observation(
                     Job.world_id == world_id, Job.location_id == agent.location_id
                 )
             ).all()
-            formal_only = {
-                seed["job_id"] for seed in load_jobs() if seed.get("formal_only")
-            }
             for job in jobs:
-                if job.job_id in formal_only:
-                    continue  # M16: production recipes run as formal shifts only
+                if job.work_kind == "formal":
+                    continue
+                if job.work_kind == "public":
+                    settlement = f"公共预算报酬{job.wage}金币"
+                else:
+                    settlement = "自雇产出，需卖给商店换钱"
                 lines.append(
-                    f"- work({job.job_id}): {job.name}，{job.duration_minutes}分钟，工资{job.wage}金币"
+                    f"- work({job.job_id}): {job.name}，{job.duration_minutes}分钟，{settlement}"
                 )
         lines.append("- sell_item(item_id, quantity, reason): 把背包里的物品卖给商店换钱")
         lines.append("- use_item(item_id, reason): 食用背包里的食物提高饱食度")

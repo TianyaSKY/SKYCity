@@ -7,7 +7,8 @@
       "location_id": "village_farm",
       "interactable_id": "farm_field",
       "duration_minutes": 120,
-      "wage": 30,
+      "wage": 0,
+      "work_kind": "independent",
       "energy_cost_per_hour": 4,
       "products": [
         {
@@ -24,6 +25,7 @@
       "interactable_id": "farm_field",
       "duration_minutes": 240,
       "wage": 60,
+      "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
         {
@@ -32,7 +34,6 @@
         }
       ],
       "inputs": [],
-      "formal_only": true,
       "description": "正式班次：在晨露农场按班生产小麦，产物进入农场企业库存"
     },
     {
@@ -42,6 +43,7 @@
       "interactable_id": "bakery_oven",
       "duration_minutes": 240,
       "wage": 60,
+      "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
         {
@@ -55,7 +57,6 @@
           "quantity": 10
         }
       ],
-      "formal_only": true,
       "description": "正式班次：消耗小麦烘烤面包，产物进入面包坊企业库存"
     },
     {
@@ -65,9 +66,10 @@
       "interactable_id": "shop_counter",
       "duration_minutes": 480,
       "wage": 90,
+      "work_kind": "formal",
       "energy_cost_per_hour": 2,
       "products": [],
-      "description": "在杂货店柜台招呼客人、整理货架（8 小时班，与正式岗位同薪）"
+      "description": "正式班次：在杂货店柜台招呼客人、整理货架和维持营业"
     },
     {
       "job_id": "job_delivery",
@@ -76,6 +78,7 @@
       "interactable_id": "fountain",
       "duration_minutes": 90,
       "wage": 24,
+      "work_kind": "public",
       "energy_cost_per_hour": 3,
       "products": [],
       "description": "把货物从广场送到各家各户"
@@ -87,6 +90,7 @@
       "interactable_id": "town_hall_desk",
       "duration_minutes": 180,
       "wage": 48,
+      "work_kind": "public",
       "energy_cost_per_hour": 1,
       "products": [],
       "description": "在政务厅整理档案、登记公告"
@@ -98,9 +102,9 @@
       "interactable_id": "hotel_counter",
       "duration_minutes": 240,
       "wage": 80,
+      "work_kind": "formal",
       "energy_cost_per_hour": 2,
       "products": [],
-      "formal_only": true,
       "description": "正式班次：在小镇旅店整理客房、接待住客"
     },
     {
@@ -110,6 +114,7 @@
       "interactable_id": "carpenter_bench",
       "duration_minutes": 240,
       "wage": 60,
+      "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
         {
@@ -130,7 +135,6 @@
         }
       ],
       "inputs": [],
-      "formal_only": true,
       "description": "正式班次：在巧木工坊打造耙子、斧头、渔竿、镰刀等农具，产物进入工坊企业库存"
     },
     {
@@ -140,6 +144,7 @@
       "interactable_id": "garden_bed",
       "duration_minutes": 240,
       "wage": 60,
+      "work_kind": "formal",
       "energy_cost_per_hour": 3,
       "products": [
         {
@@ -148,7 +153,6 @@
         }
       ],
       "inputs": [],
-      "formal_only": true,
       "description": "正式班次：在晨露花圃照料鲜花，产物进入花圃企业库存"
     },
     {
@@ -157,7 +161,8 @@
       "location_id": "forest",
       "interactable_id": "forest_trees",
       "duration_minutes": 180,
-      "wage": 12,
+      "wage": 0,
+      "work_kind": "independent",
       "energy_cost_per_hour": 4,
       "products": [
         {
@@ -173,7 +178,8 @@
       "location_id": "river_bank",
       "interactable_id": "fishing_spot",
       "duration_minutes": 180,
-      "wage": 12,
+      "wage": 0,
+      "work_kind": "independent",
       "energy_cost_per_hour": 3,
       "products": [
         {
@@ -189,7 +195,8 @@
       "location_id": "flower_garden",
       "interactable_id": "bee_garden",
       "duration_minutes": 120,
-      "wage": 10,
+      "wage": 0,
+      "work_kind": "independent",
       "energy_cost_per_hour": 2,
       "products": [
         {

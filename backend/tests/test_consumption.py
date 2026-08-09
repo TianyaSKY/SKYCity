@@ -210,7 +210,7 @@ def test_non_effect_item_still_rejected(engine: WorldEngine) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_tool_rake_boosts_wage(engine: WorldEngine) -> None:
+def test_tool_rake_boosts_independent_output_without_wage(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "village_farm", *FARM_ANCHOR)
@@ -224,18 +224,18 @@ def test_tool_rake_boosts_wage(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 121)  # 480 -> 601: completes at 600
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3036  # 3000 + wage 30 * 1.2 = 36
+    assert row.money == 3000
     txs = transaction_rows(engine, world_id, "agent_linxia")
-    assert txs[-1].type == "work_wage"
-    assert txs[-1].amount == 36
+    assert not any(tx.type == "work_wage" for tx in txs)
     completed = [
         e for e in engine.events_after(world_id, 0) if e.type == "work_completed"
     ]
     assert completed
-    assert completed[0].payload["wage"] == 36
+    assert completed[0].payload["wage"] == 0
+    assert completed[0].payload["products"] == [{"item_id": "wheat", "quantity": 1}]
 
 
-def test_fertilizer_boosts_yield(engine: WorldEngine) -> None:
+def test_fertilizer_is_not_consumed_by_independent_work(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "village_farm", *FARM_ANCHOR)
@@ -245,16 +245,9 @@ def test_fertilizer_boosts_yield(engine: WorldEngine) -> None:
         world_id, "agent_linxia", "job_farm_field", reason="施肥干活"
     )
     assert ok is True and reason is None
-
     advance_minutes(engine, world_id, 121)
 
-    completed = [
-        e for e in engine.events_after(world_id, 0) if e.type == "work_completed"
-    ]
-    assert completed
-    assert completed[0].payload["products"] == [{"item_id": "wheat", "quantity": 2}]
-    # the fertilizer input itself stays in the backpack
-    assert inventory_of(engine, world_id, "agent_linxia") == {"fertilizer": 1, "wheat": 2}
+    assert inventory_of(engine, world_id, "agent_linxia") == {"fertilizer": 1, "wheat": 1}
 
 
 # --------------------------------------------------------------------------- #

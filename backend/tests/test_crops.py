@@ -409,9 +409,10 @@ def test_harvest_with_fertilizer_bonus(engine: WorldEngine) -> None:
     )
     assert ok, err
     products = envelope.payload["products"]
-    # Base wheat×4 (M19) + fertilizer yield_bonus(1)×2 held = ×6.
-    assert products == [{"item_id": "wheat", "quantity": 6}]
-    assert held_quantity(engine, world_id, agent_id, "wheat") == 6
+    # One fertilizer is consumed for this one harvest: base wheat×4 + 1.
+    assert products == [{"item_id": "wheat", "quantity": 5}]
+    assert held_quantity(engine, world_id, agent_id, "wheat") == 5
+    assert held_quantity(engine, world_id, agent_id, "fertilizer") == 1
 
 
 # --------------------------------------------------------------------------- #

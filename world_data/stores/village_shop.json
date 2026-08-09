@@ -83,7 +83,7 @@
       "sell_price": 12,
       "buy_price": 6,
       "stock_cap": 30,
-      "restock_daily": 10,
+      "restock_daily": 0,
       "initial_stock": 5
     },
     {

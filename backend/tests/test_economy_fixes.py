@@ -42,7 +42,7 @@ from app.database.models.worlds import World
 from app.database.session import SessionLocal
 from app.services.action_execution_service import ActionExecutionService
 from app.services.company_employment_service import CompanyEmploymentService
-from app.services.economy_service import EconomyService
+from app.services.economy_service import EconomyService, MSG_FORMAL_ONLY
 from app.services.stock_service import StockService
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
@@ -175,6 +175,118 @@ def test_treasury_subsidizes_wage_paying_companies(engine: WorldEngine) -> None:
         assert farm is not None and farm.money > 800 - 60  # 800 initial - wage + subsidy
     finally:
         session.close()
+
+
+def test_daily_fiscal_distribution_excludes_historical_treasury(
+        engine: WorldEngine,
+) -> None:
+    """Only fresh upkeep funds UBI/subsidies, and subsidy cannot exceed wages."""
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    service = engine.company_employment_service
+    service.ensure_seeded(world_id)
+    session = SessionLocal()
+    try:
+        world = session.get(World, world_id)
+        company = session.get(
+            Company, {"world_id": world_id, "company_id": "company_morning_farm"}
+        )
+        assert world is not None and company is not None
+        world.treasury = 10_000
+        company.money -= 20
+        session.add(
+            CompanyTransaction(
+                world_id=world_id,
+                company_id=company.company_id,
+                type="wage_payment",
+                amount=-20,
+                balance_after=company.money,
+                related_agent_id="agent_linxia",
+                reason="测试正式工资",
+                world_time=600,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    advance_minutes(engine, world_id, 961)
+
+    session = SessionLocal()
+    try:
+        ubi = session.scalars(
+            select(Transaction).where(
+                Transaction.world_id == world_id,
+                Transaction.type == "ubi_income",
+            )
+        ).all()
+        subsidy = session.scalars(
+            select(CompanyTransaction).where(
+                CompanyTransaction.world_id == world_id,
+                CompanyTransaction.type == "treasury_subsidy",
+            )
+        ).all()
+        world = session.get(World, world_id)
+        assert len(ubi) == 9 and {row.amount for row in ubi} == {60}
+        assert len(subsidy) == 1 and subsidy[0].amount == 20
+        assert world is not None and world.treasury == 10_520
+    finally:
+        session.close()
+
+
+def test_public_work_reserves_and_settles_bounded_budget(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    set_agent(engine, world_id, "agent_linxia", location_id="village_plaza")
+    session = SessionLocal()
+    try:
+        world = session.get(World, world_id)
+        assert world is not None
+        world.treasury = 1_000
+        session.commit()
+    finally:
+        session.close()
+
+    ok, _, reason = engine.economy_service.work_start(
+        world_id, "agent_linxia", "job_delivery", reason="公共配送"
+    )
+    assert ok is True and reason is None
+    session = SessionLocal()
+    try:
+        world = session.get(World, world_id)
+        assert world is not None
+        assert (world.public_work_budget_remaining, world.public_work_escrow) == (216, 24)
+        assert world.treasury == 976
+    finally:
+        session.close()
+
+    advance_minutes(engine, world_id, 91)
+
+    session = SessionLocal()
+    try:
+        world = session.get(World, world_id)
+        payment = session.scalar(
+            select(Transaction).where(
+                Transaction.world_id == world_id,
+                Transaction.agent_id == "agent_linxia",
+                Transaction.type == "public_work_payment",
+            )
+        )
+        assert world is not None
+        assert (world.treasury, world.public_work_escrow) == (976, 0)
+        assert payment is not None and payment.amount == 24
+        assert agent_money(engine, world_id, "agent_linxia") == 3024
+    finally:
+        session.close()
+
+
+def test_shop_attendant_requires_company_shift(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    set_agent(engine, runtime.world_id, "agent_linxia", location_id="village_shop")
+    ok, _, reason = engine.economy_service.work_start(
+        runtime.world_id, "agent_linxia", "job_shop_attendant", reason="柜台值班"
+    )
+    assert ok is False and reason == MSG_FORMAL_ONLY
 
 
 # --------------------------------------------------------------------------- #

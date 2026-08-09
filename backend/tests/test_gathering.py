@@ -112,7 +112,7 @@ def work_completed(engine: WorldEngine, world_id: str) -> list:
 # --------------------------------------------------------------------------- #
 
 
-def test_woodcutting_yields_wood_and_wage(engine: WorldEngine) -> None:
+def test_woodcutting_yields_wood_for_sale(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_linxia", "forest", *FOREST_ANCHOR)
@@ -125,14 +125,14 @@ def test_woodcutting_yields_wood_and_wage(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 181)  # 480 -> 661: completes at 660
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3012  # 3000 + wage 12
+    assert row.money == 3000  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "wood", "quantity": 3}]
     assert inventory_of(engine, world_id, "agent_linxia") == {"wood": 3}
 
 
-def test_fishing_yields_fish_and_wage(engine: WorldEngine) -> None:
+def test_fishing_yields_fish_for_sale(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_zhangming", "river_bank", *RIVER_ANCHOR)
@@ -145,14 +145,14 @@ def test_fishing_yields_fish_and_wage(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 181)
 
     row = agent_row(engine, world_id, "agent_zhangming")
-    assert row.money == 3012  # 3000 + wage 12
+    assert row.money == 3000  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "fish", "quantity": 2}]
     assert inventory_of(engine, world_id, "agent_zhangming") == {"fish": 2}
 
 
-def test_honey_collect_yields_honey(engine: WorldEngine) -> None:
+def test_honey_collect_yields_honey_for_sale(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     place_agent(engine, world_id, "agent_chenyu", "flower_garden", *GARDEN_ANCHOR)
@@ -165,7 +165,7 @@ def test_honey_collect_yields_honey(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 121)  # completes at 600
 
     row = agent_row(engine, world_id, "agent_chenyu")
-    assert row.money == 3010  # 3000 + wage 10
+    assert row.money == 3000  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "honey", "quantity": 1}]
@@ -215,7 +215,7 @@ def test_axe_boosts_woodcutting_only(engine: WorldEngine) -> None:
 
     completed = work_completed(engine, world_id)
     assert completed
-    assert completed[0].payload["wage"] == 16  # 12 * 1.4 (axe +40%)
+    assert completed[0].payload["wage"] == 0
 
 
 def test_axe_does_not_boost_unrelated_jobs(engine: WorldEngine) -> None:
@@ -235,7 +235,7 @@ def test_axe_does_not_boost_unrelated_jobs(engine: WorldEngine) -> None:
 
     completed = work_completed(engine, world_id)
     assert completed
-    assert completed[0].payload["wage"] == 30  # no bonus: 30 * 1.0
+    assert completed[0].payload["wage"] == 0
 
 
 def test_sickle_boosts_farm_field(engine: WorldEngine) -> None:
@@ -253,7 +253,7 @@ def test_sickle_boosts_farm_field(engine: WorldEngine) -> None:
 
     completed = work_completed(engine, world_id)
     assert completed
-    assert completed[0].payload["wage"] == 42  # 30 * 1.4 (sickle +40%)
+    assert completed[0].payload["wage"] == 0
 
 
 def test_rod_boosts_fishing(engine: WorldEngine) -> None:
@@ -271,7 +271,7 @@ def test_rod_boosts_fishing(engine: WorldEngine) -> None:
 
     completed = work_completed(engine, world_id)
     assert completed
-    assert completed[0].payload["wage"] == 16  # 12 * 1.4
+    assert completed[0].payload["wage"] == 0
 
 
 def test_flat_work_bonus_still_applies(engine: WorldEngine) -> None:
@@ -290,4 +290,4 @@ def test_flat_work_bonus_still_applies(engine: WorldEngine) -> None:
 
     completed = work_completed(engine, world_id)
     assert completed
-    assert completed[0].payload["wage"] == 36  # 30 * 1.2
+    assert completed[0].payload["wage"] == 0

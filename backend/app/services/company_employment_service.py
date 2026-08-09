@@ -174,15 +174,16 @@ class CompanyEmploymentService:
             session.close()
 
     def _backfill_static_data(self, session: Session, world_id: str) -> None:
-        """Idempotently bring a world's static rows in line with world_data.
+        """Synchronize seeded jobs and preserve in-flight pre-cutover work.
 
-        M16: backfills WorldLocation / Job rows that world_data gained (the
-        bakery, the formal production recipes), upgrades the farm worker
-        position + active contracts to the production job, and stops the
-        bread shelf from auto-restocking. Every step is existence-gated, so
-        repeated calls (fresh world, V1 restore, V2 restore) are no-ops.
+        A resumed world may contain job rows created before work kinds existed.
+        Seed values are authoritative for the shared town economy; actions
+        already underway keep an explicit one-time transition settlement so
+        this migration never silently drops their previously promised wage.
         """
-        # 1) Locations the map gained since the world was created.
+        world = session.get(World, world_id)
+        if world is None:
+            return
         config_by_id = {loc.location_id: loc for loc in self.engine.world_config.locations}
         for location_id, loc in config_by_id.items():
             if session.get(WorldLocation, {"world_id": world_id, "location_id": location_id}) is None:
@@ -199,11 +200,17 @@ class CompanyEmploymentService:
                         close_hour=loc.close_hour,
                     )
                 )
-        # 2) Jobs the jobs.json gained (recipes are looked up statically at
-        # shift time, so the row only carries the legacy seed columns).
+
+        previous_jobs = {
+            job.job_id: job.wage
+            for job in session.scalars(
+                select(Job).where(Job.world_id == world_id)
+            ).all()
+        }
         for job_seed in load_jobs(self._world_data_dir):
             job_id = str(job_seed["job_id"])
-            if session.get(Job, {"world_id": world_id, "job_id": job_id}) is None:
+            job = session.get(Job, {"world_id": world_id, "job_id": job_id})
+            if job is None:
                 session.add(
                     Job(
                         world_id=world_id,
@@ -215,10 +222,22 @@ class CompanyEmploymentService:
                         wage=int(job_seed["wage"]),
                         energy_cost_per_hour=int(job_seed["energy_cost_per_hour"]),
                         products_json=list(job_seed["products"]),
+                        work_kind=str(job_seed.get("work_kind") or "independent"),
                     )
                 )
-        # 3) Targeted upgrade: the farm worker position now runs the formal
-        # production recipe (old job_farm_field stays as a casual job).
+                continue
+            job.name = str(job_seed["name"])
+            job.location_id = str(job_seed["location_id"])
+            job.interactable_id = str(job_seed["interactable_id"])
+            job.duration_minutes = int(job_seed["duration_minutes"])
+            job.wage = int(job_seed["wage"])
+            job.energy_cost_per_hour = int(job_seed["energy_cost_per_hour"])
+            job.products_json = list(job_seed["products"])
+            job.work_kind = str(job_seed.get("work_kind") or "independent")
+
+        # The farm's former casual position now runs the company production
+        # recipe. Existing active contracts follow the role in the same
+        # transaction; casual field work remains independent.
         upgraded = session.scalar(
             select(Position).where(
                 Position.world_id == world_id,
@@ -237,14 +256,63 @@ class CompanyEmploymentService:
                 )
         ):
             contract.job_id = "job_farm_production"
-        # 4) The village shop's bread shelf is stocked by the bakery now; the
-        # seed no longer auto-restocks it (stock levels stay untouched).
+
         bread = session.get(
             StoreProduct,
             {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"},
         )
         if bread is not None and bread.restock_daily != 0:
             bread.restock_daily = 0
+
+        # A casual action that began before the source-of-money cutover must
+        # carry its original terms through its already scheduled completion.
+        for agent in session.scalars(
+                select(Agent).where(
+                    Agent.world_id == world_id,
+                    Agent.action_type == "work",
+                )
+        ).all():
+            action_data = dict(agent.action_data or {})
+            if action_data.get("settlement_migrated"):
+                continue
+            job_id = str(action_data.get("job_id") or "")
+            job = session.get(Job, {"world_id": world_id, "job_id": job_id})
+            if job is None:
+                continue
+            completion = session.scalar(
+                select(ScheduledAction).where(
+                    ScheduledAction.world_id == world_id,
+                    ScheduledAction.agent_id == agent.agent_id,
+                    ScheduledAction.action_type == "work_completed",
+                )
+            )
+            if completion is None:
+                continue
+            completion_payload = dict(completion.payload or {})
+            completion_payload["work_kind"] = job.work_kind
+            if (
+                    job.work_kind == "public"
+                    and agent.action_ends_at is not None
+                    and agent.action_ends_at // 1440 == world.world_time // 1440
+                    and self.engine.reserve_public_work_funds(world, job.wage)
+            ):
+                action_data.update(
+                    settlement_migrated=True,
+                    public_wage=job.wage,
+                    public_budget_day=world.public_work_budget_day,
+                )
+                completion_payload.update(
+                    public_wage=job.wage,
+                    public_budget_day=world.public_work_budget_day,
+                )
+            else:
+                action_data.update(
+                    settlement_migrated=True,
+                    legacy_casual_wage=previous_jobs.get(job_id, job.wage),
+                )
+                completion_payload["legacy_casual_wage"] = action_data["legacy_casual_wage"]
+            agent.action_data = action_data
+            completion.payload = completion_payload
 
     def list_companies(self, world_id: str) -> list[dict[str, Any]]:
         session = self._session_factory()

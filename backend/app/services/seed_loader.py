@@ -129,8 +129,7 @@ def load_blueprints(world_data_dir: Path | None = None) -> tuple[BlueprintDef, .
 
 @lru_cache(maxsize=4)
 def load_jobs(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
-    """Job seeds: (job_id, name, location_id, interactable_id, duration, wage,
-    energy cost, products)."""
+    """Job seeds including their exclusive settlement source."""
     base = world_data_dir or Path(get_settings().world_data_dir)
     data = _load_json(base / "jobs" / "jobs.json")
     jobs = tuple(
@@ -141,11 +140,9 @@ def load_jobs(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
             "interactable_id": str(entry.get("interactable_id") or ""),
             "duration_minutes": int(entry.get("duration_minutes") or 0),
             "wage": int(entry.get("wage") or 0),
+            "work_kind": str(entry.get("work_kind") or "independent"),
             "energy_cost_per_hour": int(entry.get("energy_cost_per_hour") or 0),
             "products": list(entry.get("products") or []),
-            # M16: formal-only jobs reject the casual work() path; inputs are
-            # the production recipe consumed by formal shifts.
-            "formal_only": bool(entry.get("formal_only") or False),
             "inputs": list(entry.get("inputs") or []),
         }
         for entry in data.get("jobs", [])
@@ -199,9 +196,13 @@ def load_stores(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
                         "buy_price": int(product.get("buy_price") or 0),
                         "stock_cap": int(product.get("stock_cap") or 0),
                         "restock_daily": int(product.get("restock_daily") or 0),
-                        # M15: pure agent-produce sinks (e.g. wheat) start
-                        # empty so the shop can actually absorb sales; shop
-                        # goods default to full stock (R15).
+                        "supply_kind": str(
+                            product.get("supply_kind")
+                            or ("imported" if int(product.get("restock_daily") or 0) else "local")
+                        ),
+                        "import_unit_cost": int(
+                            product.get("import_unit_cost") or max(1, int(product.get("buy_price") or 0))
+                        ),
                         "initial_stock": (
                             int(product["initial_stock"])
                             if "initial_stock" in product

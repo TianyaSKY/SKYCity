@@ -25,6 +25,12 @@ class Job(Base):
     wage: Mapped[int] = mapped_column(Integer, nullable=False)
     energy_cost_per_hour: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     products_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # ``independent`` produces goods for later sale; ``public`` is paid from
+    # the bounded public budget; ``formal`` is payable only through a company
+    # employment shift.
+    work_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="independent"
+    )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"Job(world_id={self.world_id!r}, job_id={self.job_id!r})"

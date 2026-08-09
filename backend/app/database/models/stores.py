@@ -63,6 +63,8 @@ class StoreProduct(Base):
     stock: Mapped[int] = mapped_column(Integer, nullable=False)
     stock_cap: Mapped[int] = mapped_column(Integer, nullable=False)
     restock_daily: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    supply_kind: Mapped[str] = mapped_column(String(16), nullable=False, default="local")
+    import_unit_cost: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"StoreProduct(store={self.store_id!r}, item={self.item_id!r}, stock={self.stock})"

@@ -42,12 +42,10 @@ SHOP_ANCHOR = (23, 12)
 
 STOCK_SHOP = "stock_village_shop"
 STOCK_FARM = "stock_village_farm"
-STOCK_DELIVERY = "stock_delivery"
 
 BASE_PRICES = {
     STOCK_SHOP: 20,
     STOCK_FARM: 15,
-    STOCK_DELIVERY: 12,
 }
 
 
@@ -160,7 +158,7 @@ def test_seed_stocks_at_base_price(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     data = engine.stock_service.list_stocks(runtime.world_id)
     assert data is not None
-    assert [s["stock_id"] for s in data["stocks"]] == [STOCK_DELIVERY, STOCK_FARM, STOCK_SHOP]
+    assert [s["stock_id"] for s in data["stocks"]] == [STOCK_FARM, STOCK_SHOP]
     for stock in data["stocks"]:
         assert stock["price"] == BASE_PRICES[stock["stock_id"]]
         assert stock["prev_price"] == BASE_PRICES[stock["stock_id"]]
@@ -389,12 +387,9 @@ def test_daily_dividend_paid(engine: WorldEngine) -> None:
     assert row.last_div_per_share == 4
     assert row.prev_price == row.price  # close price snapshot
 
-    # A2: the buy (40) funds the issuer company — in this bare-engine fixture
-    # no company rows are seeded, so the village treasury backs the listing:
-    # treasury = 9*120 upkeep + 40 buy = 1120; the 8 dividend is paid from it
-    # BEFORE the UBI split (50% of the remaining 1112 // 9 = 61).
-    # 3000 - 40 (buy) + 8 (dividend) - 120 (upkeep) + 61 (UBI) = 2909.
-    assert agent_row_money(engine, world_id, "agent_linxia") == 2909
+    # The issuer company funds the dividend; current-day UBI remains 60.
+    # 3000 - 40 + 8 - 120 + 60 = 2908.
+    assert agent_row_money(engine, world_id, "agent_linxia") == 2908
     txs = transaction_rows(engine, world_id, "agent_linxia")
     dividend_tx = [t for t in txs if t.type == "dividend"][-1]
     assert dividend_tx.amount == 8
@@ -502,7 +497,7 @@ def test_restore_old_save_without_stocks(engine: WorldEngine) -> None:
     restored = engine.save_service.restore(saved.save_id)
     data = engine.stock_service.list_stocks(restored.world_id)
     assert data is not None
-    assert [s["stock_id"] for s in data["stocks"]] == [STOCK_DELIVERY, STOCK_FARM, STOCK_SHOP]
+    assert [s["stock_id"] for s in data["stocks"]] == [STOCK_FARM, STOCK_SHOP]
     for stock in data["stocks"]:
         assert stock["price"] == BASE_PRICES[stock["stock_id"]]
     assert data["holdings"] == []
@@ -521,8 +516,8 @@ def test_http_action_contract(client: TestClient) -> None:
     stocks = client.get(f"/api/worlds/{world_id}/stocks")
     assert stocks.status_code == 200
     body = stocks.json()
-    assert [s["stock_id"] for s in body["stocks"]] == [STOCK_DELIVERY, STOCK_FARM, STOCK_SHOP]
-    assert body["stocks"][0]["price"] == 12
+    assert [s["stock_id"] for s in body["stocks"]] == [STOCK_FARM, STOCK_SHOP]
+    assert body["stocks"][0]["price"] == 15
     assert body["holdings"] == []
 
     # Pin the balance down so the second buy overdraws (initial money is

@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.gameplay import (
@@ -40,12 +40,14 @@ from app.services.economy_service import (
     MSG_PAUSED,
     MSG_WORLD_MISSING,
 )
-from app.services.seed_loader import load_stocks
+from app.services.seed_loader import load_companies, load_stocks
 from app.world_engine.engine import WorldEngine
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
 MSG_STOCK_MISSING = "股票不存在"
 MSG_NOT_ENOUGH_SHARES = "持股不足"
+MSG_ISSUANCE_EXHAUSTED = "可发行股份不足"
+MSG_UNBACKED_STOCK = "股票没有有效发行企业"
 
 
 def _hourly_noise(world_id: str, stock_id: str, hour: int) -> int:
@@ -70,10 +72,49 @@ class StockService:
 
     # ------------------------------------------------------------------ #
     # Seeding (per world)
-    # ------------------------------------------------------------------ #
-
     def seed(self, session: Session, world_id: str) -> None:
-        """Insert the 3 listed stocks at their base price (M10)."""
+        """Seed issuer companies before their backed listings."""
+        session.flush()
+        company_seeds = {
+            str(seed["company_id"]): seed for seed in load_companies(self.engine.world_data_dir)
+        }
+        for stock_seed in load_stocks(self.engine.world_data_dir):
+            issuer_id = stock_seed.get("issuer_company_id")
+            company_seed = company_seeds.get(str(issuer_id))
+            if (
+                    not issuer_id
+                    or company_seed is None
+                    or session.get(Company, {"world_id": world_id, "company_id": issuer_id}) is not None
+            ):
+                continue
+            initial_money = int(company_seed.get("initial_money") or 0)
+            session.add(
+                Company(
+                    world_id=world_id,
+                    company_id=str(issuer_id),
+                    name=str(company_seed["name"]),
+                    company_type=str(company_seed["company_type"]),
+                    location_id=str(company_seed["location_id"]),
+                    owner_agent_id=company_seed.get("owner_agent_id"),
+                    manager_agent_id=company_seed.get("manager_agent_id"),
+                    money=initial_money,
+                    status="active",
+                    founded_at=480,
+                )
+            )
+            session.add(
+                CompanyTransaction(
+                    world_id=world_id,
+                    company_id=str(issuer_id),
+                    type="initial_capital",
+                    amount=initial_money,
+                    balance_after=initial_money,
+                    reference_type="company",
+                    reference_id=str(issuer_id),
+                    reason="企业初始资金",
+                    world_time=480,
+                )
+            )
         for seed in load_stocks(self.engine.world_data_dir):
             session.add(
                 Stock(
@@ -355,8 +396,18 @@ class StockService:
             stock = session.get(Stock, {"world_id": world_id, "stock_id": stock_id})
             if stock is None:
                 return False, None, MSG_STOCK_MISSING
-
+            issuer = self._issuer(session, world, stock)
+            if issuer is None:
+                return False, None, MSG_UNBACKED_STOCK
             quantity = max(1, min(int(shares), MAX_SHARES))
+            issued = session.scalar(
+                select(func.coalesce(func.sum(StockHolding.shares), 0)).where(
+                    StockHolding.world_id == world_id,
+                    StockHolding.stock_id == stock_id,
+                )
+            ) or 0
+            if issued + quantity > stock.outstanding_shares:
+                return False, None, MSG_ISSUANCE_EXHAUSTED
             cost = quantity * stock.price
             if agent.money < cost:
                 return False, None, MSG_NO_MONEY  # R7: no credit
@@ -397,29 +448,24 @@ class StockService:
                 holding.shares = total
             agent.money -= cost  # keep the in-memory agent consistent
             # A2: the buy proceeds are NOT destroyed — they fund the issuer
-            # company (or the village treasury for unbacked listings). The
-            # company ledger row makes the capital visible and dividend-paying.
-            issuer = self._issuer(session, world, stock)
-            if issuer is not None:
-                issuer.money += cost
-                session.add(
-                    CompanyTransaction(
-                        world_id=world_id,
-                        company_id=issuer.company_id,
-                        type="stock_equity",
-                        amount=cost,
-                        balance_after=issuer.money,
-                        related_agent_id=agent_id,
-                        quantity=quantity,
-                        reference_type="stock",
-                        reference_id=stock_id,
-                        reason=f"股票 {stock.name} 增资",
-                        world_time=world.world_time,
-                        trace_id=trace_id or "",
-                    )
+            # Issuance proceeds fund the issuer and are ledgered as equity.
+            issuer.money += cost
+            session.add(
+                CompanyTransaction(
+                    world_id=world_id,
+                    company_id=issuer.company_id,
+                    type="stock_equity",
+                    amount=cost,
+                    balance_after=issuer.money,
+                    related_agent_id=agent_id,
+                    quantity=quantity,
+                    reference_type="stock",
+                    reference_id=stock_id,
+                    reason=f"股票 {stock.name} 增资",
+                    world_time=world.world_time,
+                    trace_id=trace_id or "",
                 )
-            else:
-                world.treasury += cost
+            )
             session.add(
                 Transaction(
                     world_id=world_id,

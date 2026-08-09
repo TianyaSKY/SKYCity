@@ -18,14 +18,6 @@
       "source": "job",
       "base_price": 15,
       "outstanding_shares": 1000
-    },
-    {
-      "stock_id": "stock_delivery",
-      "name": "镇运输队",
-      "company_id": "job_delivery",
-      "source": "job",
-      "base_price": 12,
-      "outstanding_shares": 1000
     }
   ]
 }

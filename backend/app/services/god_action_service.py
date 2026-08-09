@@ -523,6 +523,11 @@ class GodActionService:
         agent.col = location.col
         agent.row = location.row
         agent.location_id = location_id
+        if agent.action_type == "work":
+            economy_service = self.engine.economy_service
+            if economy_service is not None:
+                economy_service.release_public_work_reservation(world, agent.action_data or {})
+            runtime.scheduler.cancel_for_agent(session, agent.agent_id)
         # Cancel the current action (move/wait/work) — stale completions are
         # guarded by action_type in the scheduler handlers.
         agent.action_type = None
