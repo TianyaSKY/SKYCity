@@ -32,6 +32,10 @@ defineEmits<{ (e: 'open-dashboard'): void }>();
 /** World-space anchor (px) per location for the label overlay: the static
  * map locations plus any M18 runtime stall locations (wild-cell shops). */
 const locationAnchors = ref<{ location_id: string; x: number; y: number }[]>([]);
+const zoom = ref(1);
+const showTasks = ref(false);
+const showCompany = ref(false);
+const showStocks = ref(false);
 
 function rebuildLocationAnchors(): void {
     if (!worldConfig) return;
@@ -123,9 +127,10 @@ onMounted(async () => {
     }
 });
 
-/** Frame loop: advance agent tweens against the store's game time. */
+/** Frame loop: advance overlays against the store's game time and camera. */
 function tick(): void {
     if (!agentLayer) return;
+    zoom.value = camera?.zoom ?? 1;
     bobTime += 1 / 60;
     agentLayer.update(store.worldTime, bobTime);
     store.pruneBubbles();
@@ -291,13 +296,18 @@ onBeforeUnmount(() => {
         <div v-draggable="'tile-readout'" class="hud hud-top-right">
             <span class="tile-readout">tile {{ tileLabel }}</span>
         </div>
-        <div v-draggable="'task-board'" class="hud hud-top-left" style="top: 44px">
+        <div class="overview-controls" aria-label="世界概览面板">
+            <button type="button" @click="showTasks = !showTasks">任务</button>
+            <button type="button" @click="showCompany = !showCompany">企业</button>
+            <button type="button" @click="showStocks = !showStocks">股票</button>
+        </div>
+        <div v-if="showTasks" v-draggable="'task-board'" class="hud hud-top-left" style="top: 44px">
             <TaskBoard/>
         </div>
-        <div v-draggable="'company'" class="hud hud-top-left hud-company" style="top: calc(44px + min(46vh, 460px) + 12px)">
+        <div v-if="showCompany" v-draggable="'company'" class="hud hud-top-left hud-company" style="top: calc(44px + min(46vh, 460px) + 12px)">
             <CompanyPanel/>
         </div>
-        <div v-draggable="'stock'" class="hud hud-top-right" style="top: 44px">
+        <div v-if="showStocks" v-draggable="'stock'" class="hud hud-top-right" style="top: 44px">
             <StockPanel/>
         </div>
         <div v-draggable="'events'" class="hud hud-bottom">
@@ -308,6 +318,7 @@ onBeforeUnmount(() => {
             :anchors="locationAnchors"
             :locations="store.locations"
             :world-to-screen="(x, y) => (renderer ? renderer.worldToScreen(x, y) : { x, y })"
+            :zoom="zoom"
         />
         <AgentNameplates
             :agent-screen-pos="bubbleScreenPos"
@@ -401,6 +412,24 @@ onBeforeUnmount(() => {
     color: #cde8d5;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px;
+}
+
+.overview-controls {
+    position: absolute;
+    z-index: 20;
+    top: 12px;
+    left: 12px;
+    display: flex;
+    gap: 6px;
+}
+
+.overview-controls button {
+    border: 1px solid rgba(205, 232, 213, 0.35);
+    border-radius: 999px;
+    background: rgba(8, 24, 16, 0.82);
+    color: #cde8d5;
+    cursor: pointer;
+    padding: 4px 9px;
 }
 
 .status-banner {

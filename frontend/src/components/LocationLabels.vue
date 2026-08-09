@@ -18,6 +18,7 @@ const props = defineProps<{
     locations: WorldLocation[];
     /** World px -> canvas CSS px. */
     worldToScreen: (x: number, y: number) => { x: number; y: number };
+    zoom: number;
 }>();
 
 const store = useWorldStore();
@@ -58,6 +59,10 @@ function select(loc: WorldLocation): void {
     store.selectAgent(null);
     store.selectLocation(loc);
 }
+
+function visibleAtOverview(loc: WorldLocation): boolean {
+    return props.zoom >= 0.9 || !['house', 'stall'].includes(loc.location_type);
+}
 </script>
 
 <template>
@@ -66,6 +71,7 @@ function select(loc: WorldLocation): void {
             v-for="loc in locations"
             :key="loc.location_id"
             :ref="(el) => setEl(loc.location_id, el)"
+            v-show="visibleAtOverview(loc) || store.selectedLocation?.location_id === loc.location_id"
             :class="[
         `type-${loc.location_type}`,
         { selected: store.selectedLocation?.location_id === loc.location_id },
