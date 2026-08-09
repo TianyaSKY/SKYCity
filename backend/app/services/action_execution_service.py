@@ -331,12 +331,14 @@ class ActionExecutionService:
                 if queued:
                     session.commit()  # persist the queued_action row
                     return True, None, qreason
-                if agent.action_type == "move":
-                    # R1: move is exclusive; a second move is rejected.
-                    return False, None, MSG_BUSY
-                # R1: wait is interruptible -> cancel pending and replace it.
-                runtime.scheduler.cancel_for_agent(session, agent_id)
-                self._clear_action(agent)
+                # A stale talk lock can have been repaired by the gate.
+                if agent.action_type is not None:
+                    # Only wait/sleep is replaceable. Work, formal shifts,
+                    # building and movement are exclusive until completion.
+                    if agent.action_type not in ("wait", "sleep"):
+                        return False, None, MSG_BUSY
+                    runtime.scheduler.cancel_for_agent(session, agent_id)
+                    self._clear_action(agent)
             if not destination_id:
                 return False, None, MSG_NO_DESTINATION
             destination = session.get(
@@ -439,7 +441,7 @@ class ActionExecutionService:
                 if queued:
                     session.commit()  # persist the queued_action row
                     return True, None, qreason
-                if agent.action_type == "move":
+                if agent.action_type not in ("wait", "sleep"):
                     return False, None, MSG_BUSY
                 runtime.scheduler.cancel_for_agent(session, agent_id)
                 self._clear_action(agent)
@@ -507,7 +509,7 @@ class ActionExecutionService:
                 if queued:
                     session.commit()  # persist the queued_action row
                     return True, None, qreason
-            if agent.action_type == "move":
+            if agent.action_type is not None and agent.action_type not in ("wait", "sleep"):
                 return False, None, MSG_BUSY
             # Sleep place validation happens BEFORE the wait/sleep replacement
             # below so a rejected sleep never destroys an in-flight wait.
