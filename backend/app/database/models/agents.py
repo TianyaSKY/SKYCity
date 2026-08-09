@@ -38,6 +38,8 @@ class Agent(Base):
     background: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     values: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
     long_term_goals: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # Measurable resident ambitions.  Each entry is {id, kind, target, status}.
+    goals: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     speaking_style: Mapped[str] = mapped_column(String(128), nullable=False, default="")
     personality: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 

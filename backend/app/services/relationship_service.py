@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database.models.agents import Agent
+from app.database.models.companies import Company
 from app.database.models.conversations import Conversation
 from app.database.models.relationships import Relationship
 from app.database.models.worlds import World
@@ -106,9 +107,34 @@ class RelationshipService:
                 session, world_id, to_id, from_id,
                 {"familiarity": 2}, world_time=envelope.world_time,
             )
-        # Everything else (money_changed income, work_completed,
-        # world_event_created incl. talk rejections, ...) leaves
-        # relationships untouched in M6.
+        elif event_type == "shift_completed":
+            company = session.get(
+                Company,
+                {"world_id": world_id, "company_id": payload.get("company_id")},
+            )
+            worker_id = payload.get("agent_id")
+            manager_id = company.manager_agent_id if company is not None else None
+            if worker_id and manager_id and worker_id != manager_id:
+                self.apply_deltas(
+                    session, world_id, worker_id, manager_id, {"trust": 1},
+                    world_time=envelope.world_time,
+                )
+                self.apply_deltas(
+                    session, world_id, manager_id, worker_id, {"trust": 1},
+                    world_time=envelope.world_time,
+                )
+        elif event_type == "employment_terminated":
+            company = session.get(
+                Company,
+                {"world_id": world_id, "company_id": payload.get("company_id")},
+            )
+            worker_id = payload.get("agent_id")
+            manager_id = company.manager_agent_id if company is not None else None
+            if worker_id and manager_id and worker_id != manager_id:
+                self.apply_deltas(
+                    session, world_id, worker_id, manager_id, {"resentment": 5},
+                    world_time=envelope.world_time,
+                )
 
     # ------------------------------------------------------------------ #
     # Delta application

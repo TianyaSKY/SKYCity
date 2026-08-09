@@ -71,6 +71,7 @@ def initialize_database() -> None:
             "ALTER TABLE worlds ADD COLUMN treasury INTEGER NOT NULL DEFAULT 0",
             # A2: stocks are backed by a real company (or the treasury).
             "ALTER TABLE stocks ADD COLUMN issuer_company_id VARCHAR(64)",
+            "ALTER TABLE agents ADD COLUMN goals JSON NOT NULL DEFAULT '[]'",
         ):
             try:
                 conn.execute(_text(alter))

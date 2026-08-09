@@ -707,6 +707,7 @@ class WorldEngine:
             background=str(identity.get("background") or ""),
             values=list(identity.get("values") or []),
             long_term_goals=list(identity.get("long_term_goals") or []),
+            goals=self._seed_goals(identity),
             speaking_style=str(identity.get("speaking_style") or ""),
             personality=dict(identity.get("personality") or {}),
             col=spawn.col,
@@ -797,6 +798,26 @@ class WorldEngine:
         except json.JSONDecodeError:
             logger.warning("Identity card invalid JSON: {}", path)
             return {}
+
+    @staticmethod
+    def _seed_goals(identity: dict[str, Any]) -> list[dict[str, Any]]:
+        """Turn legacy narrative goals into authoritative, measurable state."""
+        explicit = identity.get("goals")
+        if isinstance(explicit, list):
+            return [dict(goal) for goal in explicit if isinstance(goal, dict)]
+        goals: list[dict[str, Any]] = []
+        for index, text in enumerate(identity.get("long_term_goals") or []):
+            text = str(text)
+            target: int | str = 0
+            kind = "project"
+            if "金币" in text:
+                digits = "".join(char for char in text if char.isdigit())
+                target, kind = (int(digits), "money") if digits else (0, "money")
+            goals.append(
+                {"id": f"legacy_{index}", "kind": kind, "target": target,
+                 "label": text, "status": "active"}
+            )
+        return goals
 
     # ------------------------------------------------------------------ #
     # Publish (used by HTTP routes; queues + persists, caller flushes)
@@ -2078,6 +2099,7 @@ class WorldEngine:
                 "daily_routine": card.get("daily_routine") or "",
                 "values": card.get("values") or agent.values or [],
                 "long_term_goals": card.get("long_term_goals") or agent.long_term_goals or [],
+                "goals": self._goal_status(agent),
                 "speaking_style": card.get("speaking_style") or agent.speaking_style,
                 "personality": card.get("personality") or agent.personality or {},
             }
@@ -2086,6 +2108,19 @@ class WorldEngine:
             return detail
         finally:
             session.close()
+
+    @staticmethod
+    def _goal_status(agent: Agent) -> list[dict[str, Any]]:
+        """Evaluate money ambitions from the authoritative agent balance."""
+        result: list[dict[str, Any]] = []
+        for goal in agent.goals or []:
+            item = dict(goal)
+            if item.get("kind") == "money":
+                target = int(item.get("target") or 0)
+                item["progress"] = agent.money
+                item["status"] = "completed" if target > 0 and agent.money >= target else "active"
+            result.append(item)
+        return result
 
     def _location_snapshot(self, loc: WorldLocation, world_time: int) -> LocationSnapshot:
         return LocationSnapshot(
