@@ -407,6 +407,73 @@ def test_observation_shows_board_and_manager_desk(system) -> None:
     assert "review_job_application(" in manager_view
 
 
+def test_manager_observation_hides_pending_procurement_and_empty_stock(system) -> None:
+    """Managers only see procurement and stocking actions that can progress."""
+    from app.agents.observation_service import build_observation
+
+    engine, service = system
+    runtime = engine.create_world("采购观察测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+
+    queued = service.purchase_company_goods(
+        world_id,
+        "company_village_shop",
+        "company_flower_garden",
+        "agent_wangfang",
+        "flower",
+        quantity=10,
+        reason="补充鲜花",
+    )
+    assert queued["ordered"] is True
+
+    with pytest.raises(ValueError, match="企业仓库库存不足") as exc_info:
+        service.stock_store(
+            world_id,
+            "company_village_shop",
+            "village_shop",
+            "agent_wangfang",
+            "flower",
+            quantity=10,
+        )
+    failure_text = str(exc_info.value)
+    assert "鲜花（flower）可用0，上架需要10" in failure_text
+    assert "已有待履约采购订单10件，请等待供货" in failure_text
+
+    observation = build_observation(
+        world_id, "agent_wangfang", SessionLocal, engine=engine
+    )
+    assert "【待履约采购订单】" in observation
+    assert "鲜花（flower）×10：等待供货" in observation
+    assert (
+        "purchase_company_goods(company_village_shop, company_flower_garden, flower"
+        not in observation
+    )
+    assert (
+        "stock_store(company_village_shop, village_shop, flower" not in observation
+    )
+
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id,
+                company_id="company_village_shop",
+                item_id="flower",
+                quantity=10,
+                reserved_quantity=0,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    stocked_observation = build_observation(
+        world_id, "agent_wangfang", SessionLocal, engine=engine
+    )
+    assert "stock_store(company_village_shop, village_shop, flower" in stocked_observation
+
 def _hire_farm_worker(service, world_id: str, agent_id: str = "agent_linxia") -> str:
     """Hire one farm worker, return the employment id (E4 helpers)."""
     farm_opening = next(
@@ -447,8 +514,20 @@ def test_shift_start_window_and_late(system) -> None:
     # 提前 31 分钟：拒绝（先到达工作地点）
     _place_at_farm(engine, world_id)
     advance_minutes(engine, world_id, shift["scheduled_start"] - 31 - runtime.clock.world_time)
-    with pytest.raises(ValueError, match="尚未到签到时间"):
+    with pytest.raises(ValueError) as exc_info:
         service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+    early_reason = str(exc_info.value)
+    earliest_time = shift["scheduled_start"] - 30
+    current_time = earliest_time - 1
+    assert early_reason.startswith("尚未到签到时间：")
+    assert (
+        f"最早可在第{earliest_time // 1440 + 1}天 "
+        f"{earliest_time % 1440 // 60:02d}:{earliest_time % 60:02d}签到"
+    ) in early_reason
+    assert (
+        f"当前第{current_time // 1440 + 1}天 "
+        f"{current_time % 1440 // 60:02d}:{current_time % 60:02d}"
+    ) in early_reason
     # 提前 30 分钟：允许，准时
     advance_minutes(engine, world_id, 1)
     started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
@@ -1614,6 +1693,39 @@ def _hire(system, world_id: str, company_id: str, applicant: str, manager: str) 
     return reviewed["employment_id"]
 
 
+def _prepare_bakery_shift(
+        system, world_name: str
+) -> tuple[WorldEngine, CompanyEmploymentService, str, dict]:
+    engine, service = system
+    runtime = engine.create_world(world_name)
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire(
+        system,
+        world_id,
+        "company_village_bakery",
+        "agent_chenyu",
+        "agent_chenyu",
+    )
+    view = service.list_agent_employment(world_id, "agent_chenyu")
+    shift = next(row for row in view["shifts"] if row["employment_id"] == employment_id)
+    advance_minutes(
+        engine,
+        world_id,
+        shift["scheduled_start"] - 30 - runtime.clock.world_time,
+    )
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_chenyu"})
+        assert agent is not None
+        agent.location_id = "village_bakery"
+        session.commit()
+    finally:
+        session.close()
+    return engine, service, world_id, shift
+
+
 def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
     """M16 种子：6 家企业 6 个岗位；正式岗位绑定生产配方；面包坊负责人为 agent_chenyu."""
     engine, service = system
@@ -1776,8 +1888,11 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
     finally:
         session.close()
     # 无小麦 → 拒绝签到；班次保持 scheduled；无完成回调
-    with pytest.raises(ValueError, match="生产原料不足"):
+    with pytest.raises(ValueError) as exc_info:
         service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    shortage_reason = str(exc_info.value)
+    assert "小麦（wheat）可用0，需要10" in shortage_reason
+    assert "请先采购或等待生产" in shortage_reason
     session = SessionLocal()
     try:
         row = session.get(WorkShift, shift["shift_id"])
@@ -1850,6 +1965,184 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
         assert production.payload["shift_id"] == shift["shift_id"]
         assert production.payload["consumed"] == [{"item_id": "wheat", "quantity": 10}]
         assert production.payload["products"] == [{"item_id": "bread", "quantity": 24}]
+    finally:
+        session.close()
+
+
+def test_shift_shortage_reports_pending_procurement(system) -> None:
+    engine, service, world_id, shift = _prepare_bakery_shift(system, "待供货班次测试")
+    order = service.purchase_company_goods(
+        world_id,
+        "company_village_bakery",
+        "company_morning_farm",
+        "agent_chenyu",
+        "wheat",
+        quantity=10,
+        reason="班次备料",
+    )
+    assert order["ordered"] is True
+
+    with pytest.raises(ValueError) as exc_info:
+        service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+
+    assert "已有待履约采购订单10件，请等待供货" in str(exc_info.value)
+
+
+def test_shift_shortage_reports_reserved_inventory(system) -> None:
+    engine, service, world_id, shift = _prepare_bakery_shift(system, "已预留班次测试")
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id,
+                company_id="company_village_bakery",
+                item_id="wheat",
+                quantity=10,
+                reserved_quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    with pytest.raises(ValueError) as exc_info:
+        service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    assert "小麦（wheat）可用0，需要10" in str(exc_info.value)
+
+    session = SessionLocal()
+    try:
+        current_shift = session.get(WorkShift, shift["shift_id"])
+        assert current_shift is not None and current_shift.status == "scheduled"
+        completion = session.scalar(
+            select(ScheduledAction).where(
+                ScheduledAction.world_id == world_id,
+                ScheduledAction.action_type == "formal_shift_completed",
+                ScheduledAction.agent_id == "agent_chenyu",
+            )
+        )
+        assert completion is None
+        wheat = session.get(
+            CompanyInventory,
+            {
+                "world_id": world_id,
+                "company_id": "company_village_bakery",
+                "item_id": "wheat",
+            },
+        )
+        assert wheat is not None and wheat.reserved_quantity == 10
+    finally:
+        session.close()
+
+
+def test_shift_preflight_is_atomic_for_multiple_inputs(system, monkeypatch) -> None:
+    engine, service, world_id, shift = _prepare_bakery_shift(system, "多原料预检测试")
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id,
+                company_id="company_village_bakery",
+                item_id="wheat",
+                quantity=10,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+    monkeypatch.setattr(
+        "app.services.company_employment_service.load_jobs",
+        lambda _world_data_dir: [
+            {
+                "job_id": "job_bakery_bake",
+                "inputs": [
+                    {"item_id": "wheat", "quantity": 10},
+                    {"item_id": "wood", "quantity": 1},
+                ],
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        service.start_shift(world_id, shift["shift_id"], "agent_chenyu")
+    assert "木材（wood）可用0，需要1" in str(exc_info.value)
+
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {
+                "world_id": world_id,
+                "company_id": "company_village_bakery",
+                "item_id": "wheat",
+            },
+        )
+        assert wheat is not None and wheat.reserved_quantity == 0
+    finally:
+        session.close()
+
+
+def test_concurrent_shift_start_reserves_once(system) -> None:
+    engine, service, world_id, shift = _prepare_bakery_shift(system, "并发签到测试")
+    session = SessionLocal()
+    try:
+        session.add(
+            CompanyInventory(
+                world_id=world_id,
+                company_id="company_village_bakery",
+                item_id="wheat",
+                quantity=20,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, object]] = []
+    outcomes_lock = threading.Lock()
+
+    def _start() -> None:
+        barrier.wait()
+        try:
+            outcome: tuple[str, object] = (
+                "success",
+                service.start_shift(world_id, shift["shift_id"], "agent_chenyu"),
+            )
+        except ValueError as exc:
+            outcome = ("error", str(exc))
+        with outcomes_lock:
+            outcomes.append(outcome)
+
+    threads = [threading.Thread(target=_start) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    assert len([outcome for outcome in outcomes if outcome[0] == "success"]) == 1
+    assert [outcome[1] for outcome in outcomes if outcome[0] == "error"] == [
+        "班次不是待签到状态"
+    ]
+    session = SessionLocal()
+    try:
+        wheat = session.get(
+            CompanyInventory,
+            {
+                "world_id": world_id,
+                "company_id": "company_village_bakery",
+                "item_id": "wheat",
+            },
+        )
+        assert wheat is not None and wheat.reserved_quantity == 10
+        completions = session.scalars(
+            select(ScheduledAction).where(
+                ScheduledAction.world_id == world_id,
+                ScheduledAction.action_type == "formal_shift_completed",
+                ScheduledAction.agent_id == "agent_chenyu",
+            )
+        ).all()
+        assert len(completions) == 1
     finally:
         session.close()
 
@@ -1930,11 +2223,13 @@ def test_m16_stock_store_moves_warehouse_to_shelf(system) -> None:
             world_id, "company_village_shop", "village_shop", "agent_wangfang",
             "bread", quantity=1,
         )
-    with pytest.raises(ValueError, match="企业仓库库存不足"):
+    with pytest.raises(ValueError, match="企业仓库库存不足") as exc_info:
         service.stock_store(
             world_id, "company_village_shop", "village_shop", "agent_wangfang",
             "bread", quantity=20,
         )
+    assert "面包（bread）可用10，上架需要20" in str(exc_info.value)
+    assert "请先采购或等待生产" in str(exc_info.value)
     session = SessionLocal()
     try:
         product = session.get(

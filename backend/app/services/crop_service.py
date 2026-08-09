@@ -91,7 +91,11 @@ class CropService:
             if crop_def is None:
                 return False, None, MSG_CROP_UNKNOWN
             if (col, row) not in self.engine.plantable_cells:
-                return False, None, MSG_NOT_PLANTABLE  # R23.2
+                return (
+                    False,
+                    None,
+                    f"{MSG_NOT_PLANTABLE}：目标格（{col},{row}）；请使用【可播种地块】中的坐标",
+                )  # R23.2
             if session.get(
                     Crop, {"world_id": world_id, "col": col, "row": row}
             ) is not None:

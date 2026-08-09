@@ -34,6 +34,7 @@ from app.database.models.companies import (
     JobOpening,
     LeaveRequest,
     Position,
+    ProcurementOrder,
     WorkShift,
 )
 from app.database.models.items import Item
@@ -48,6 +49,11 @@ from app.services.seed_loader import load_companies, load_jobs, load_stores
 from app.world_engine.engine import WorldEngine, WorldRuntime
 
 ACTIVE_EMPLOYMENT = ("active", "on_leave")
+
+def _world_time_label(world_time: int) -> str:
+    minute_of_day = world_time % 1440
+    hour, minute = divmod(minute_of_day, 60)
+    return f"第{world_time // 1440 + 1}天 {hour:02d}:{minute:02d}"
 
 
 class CompanyEmploymentError(ValueError):
@@ -901,6 +907,51 @@ class CompanyEmploymentService:
         finally:
             session.close()
 
+    def _inventory_shortage_reason(
+            self,
+            session: Session,
+            world_id: str,
+            company_id: str,
+            item_id: str,
+            required_quantity: int,
+            prefix: str,
+            required_label: str,
+    ) -> str:
+        inventory = session.get(
+            CompanyInventory,
+            {"world_id": world_id, "company_id": company_id, "item_id": item_id},
+        )
+        available_quantity = max(
+            (
+                inventory.quantity - inventory.reserved_quantity
+                if inventory is not None
+                else 0
+            ),
+            0,
+        )
+        item = session.get(Item, {"world_id": world_id, "item_id": item_id})
+        item_name = item.name if item is not None else item_id
+        pending_order = session.scalars(
+            select(ProcurementOrder)
+            .where(
+                ProcurementOrder.world_id == world_id,
+                ProcurementOrder.buyer_company_id == company_id,
+                ProcurementOrder.item_id == item_id,
+                ProcurementOrder.status == "open",
+            )
+            .order_by(ProcurementOrder.created_at)
+            .limit(1)
+        ).first()
+        supply_hint = (
+            f"已有待履约采购订单{pending_order.quantity}件，请等待供货"
+            if pending_order is not None
+            else "请先采购或等待生产"
+        )
+        return (
+            f"{prefix}：{item_name}（{item_id}）可用{available_quantity}，"
+            f"{required_label}{required_quantity}；{supply_hint}"
+        )
+
     def stock_store(
             self,
             world_id: str,
@@ -947,7 +998,17 @@ class CompanyEmploymentService:
                 .values(quantity=CompanyInventory.quantity - quantity)
             )
             if result.rowcount == 0:
-                raise CompanyEmploymentError("企业仓库库存不足")
+                raise CompanyEmploymentError(
+                    self._inventory_shortage_reason(
+                        session,
+                        world_id,
+                        company_id,
+                        item_id,
+                        quantity,
+                        "企业仓库库存不足",
+                        "上架需要",
+                    )
+                )
             product = session.get(
                 StoreProduct,
                 {"world_id": world_id, "store_id": store_id, "item_id": item_id},
@@ -1197,8 +1258,7 @@ class CompanyEmploymentService:
             session.close()
 
     def start_shift(self, world_id: str, shift_id: str, agent_id: str) -> dict[str, Any]:
-        session = self._session_factory()
-        try:
+        def _inner(session: Session) -> dict[str, Any]:
             world = self._world(session, world_id)
             runtime = self.engine.get_runtime(world_id)
             if runtime is None:
@@ -1226,14 +1286,16 @@ class CompanyEmploymentService:
             if agent.location_id != company.location_id:
                 raise CompanyEmploymentError("不在工作地点")
             if world.world_time < shift.scheduled_start - SHIFT_EARLY_WINDOW:
-                raise CompanyEmploymentError("尚未到签到时间")
+                raise CompanyEmploymentError(
+                    f"尚未到签到时间：最早可在"
+                    f"{_world_time_label(shift.scheduled_start - SHIFT_EARLY_WINDOW)}"
+                    f"签到，当前{_world_time_label(world.world_time)}"
+                )
             if world.world_time > shift.scheduled_start + SHIFT_LATE_LIMIT:
                 raise CompanyEmploymentError("已超过最晚签到时间")
-            # M16 R37: reserve the production inputs before the shift starts.
-            # Each input is a conditional UPDATE (quantity >= qty); any shortfall
-            # aborts the whole transaction — the shift stays scheduled and no
-            # completion callback is scheduled. Farm production has no inputs,
-            # so this is a no-op for it.
+            # M16 R37: preflight every input before any reservation. A
+            # shortfall aborts the transaction, leaving the shift scheduled
+            # and without a completion callback.
             recipe = next(
                 (
                     seed
@@ -1242,25 +1304,66 @@ class CompanyEmploymentService:
                 ),
                 None,
             )
+            inputs: list[tuple[str, int]] = []
             for input_spec in (recipe or {}).get("inputs") or []:
                 input_item = str(input_spec.get("item_id") or "")
                 input_qty = int(input_spec.get("quantity") or 0)
                 if not input_item or input_qty <= 0:
                     continue
+                inventory = session.get(
+                    CompanyInventory,
+                    {
+                        "world_id": world_id,
+                        "company_id": company.company_id,
+                        "item_id": input_item,
+                    },
+                )
+                available_quantity = max(
+                    (
+                        inventory.quantity - inventory.reserved_quantity
+                        if inventory is not None
+                        else 0
+                    ),
+                    0,
+                )
+                if available_quantity < input_qty:
+                    raise CompanyEmploymentError(
+                        self._inventory_shortage_reason(
+                            session,
+                            world_id,
+                            company.company_id,
+                            input_item,
+                            input_qty,
+                            "生产原料不足",
+                            "需要",
+                        )
+                    )
+                inputs.append((input_item, input_qty))
+            for input_item, input_qty in inputs:
                 reserved = session.execute(
                     update(CompanyInventory)
                     .where(
                         CompanyInventory.world_id == world_id,
                         CompanyInventory.company_id == company.company_id,
                         CompanyInventory.item_id == input_item,
-                        CompanyInventory.quantity >= input_qty,
+                        CompanyInventory.quantity - CompanyInventory.reserved_quantity >= input_qty,
                     )
                     .values(
                         reserved_quantity=CompanyInventory.reserved_quantity + input_qty
                     )
                 )
                 if reserved.rowcount == 0:
-                    raise CompanyEmploymentError("生产原料不足")
+                    raise CompanyEmploymentError(
+                        self._inventory_shortage_reason(
+                            session,
+                            world_id,
+                            company.company_id,
+                            input_item,
+                            input_qty,
+                            "生产原料不足",
+                            "需要",
+                        )
+                    )
             completion_trace = uuid.uuid4().hex
             shift.actual_start = world.world_time
             shift.late_minutes = max(world.world_time - shift.scheduled_start, 0)
@@ -1296,10 +1399,9 @@ class CompanyEmploymentService:
                 "company_id": company.company_id,
                 "items": self._company_inventory_list(session, world_id, company.company_id),
             }, completion_trace)
-            session.commit()
             return self._shift_dict(shift)
-        finally:
-            session.close()
+
+        return self._uow.run(_inner)
 
     def resign(self, world_id: str, employment_id: str, agent_id: str, reason: str) -> dict[str, Any]:
         session = self._session_factory()

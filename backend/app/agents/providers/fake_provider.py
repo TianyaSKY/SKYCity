@@ -68,7 +68,8 @@ DEFAULT_SCRIPTS: dict[str, list[tuple[str, dict[str, Any]]]] = {
         ("wait", {"minutes": 30, "reason": "在广场和朋友聊聊天"}),
     ],
     "agent_wangfang": [
-        ("wait", {"minutes": 45, "reason": "农场活干完了，休息一会儿"}),
+        ("move", {"destination_id": "village_shop", "reason": "去商店核对货架和账目"}),
+        ("wait", {"minutes": 45, "reason": "完成货架盘点和账目核对，稍作休息"}),
     ],
     "agent_laozhang": [
         ("move", {"destination_id": "town_hall", "reason": "去镇公所看看公告"}),
@@ -248,7 +249,7 @@ class FakeDecisionProvider:
                     last is not None
                     and last[0] == "talk"
                     and last[1] is not None
-                    and last[2] == MSG_TARGET_BUSY
+                    and last[2].startswith(MSG_TARGET_BUSY)
             ):
                 return self._result(agent_id, "talk", last[1], started)
 

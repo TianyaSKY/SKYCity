@@ -94,6 +94,9 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
         assert linxia_runs[0].success == 1
         linxia = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         assert linxia.action_type is not None  # move started
+        wangfang_runs = sorted(by_agent["agent_wangfang"], key=lambda r: r.created_at)
+        assert wangfang_runs[0].tool_name == "move"
+        assert wangfang_runs[0].tool_arguments["destination_id"] == "village_shop"
         # trace ids present and unique
         assert len({r.trace_id for r in runs}) == len(runs)
         assert all(r.trace_id.startswith("trc_") for r in runs)
@@ -157,6 +160,10 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
         async def decide(self, *, observation: str, context, trace_id: str):
             raise TimeoutError("LLM 无响应")
 
+    class BareTimeoutProvider:
+        async def decide(self, *, observation: str, context, trace_id: str):
+            raise TimeoutError()
+
     eng = WorldEngine(
         session_factory=SessionLocal,
         world_config=world_config,
@@ -177,6 +184,8 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
         assert len(runs) == 9, "every agent degraded"
         assert all(r.success == 0 for r in runs)
         assert all(r.error_type for r in runs)
+        assert all(r.tool_result["success"] is False for r in runs)
+        assert all("LLM 无响应" in r.tool_result["reason"] for r in runs)
         # every agent fell back to a wait action (world kept ticking)
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world_id)
@@ -189,6 +198,32 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
     finally:
         session.close()
     eng._runtimes.clear()
+
+    bare_eng = WorldEngine(
+        session_factory=SessionLocal,
+        world_config=world_config,
+        world_data_dir=Path(get_settings().world_data_dir).resolve(),
+    )
+    bare_eng.action_service = ActionExecutionService(bare_eng, SessionLocal)
+    bare_eng.decision_service = DecisionService(
+        bare_eng, SessionLocal, provider=BareTimeoutProvider()
+    )
+    bare_runtime = bare_eng.create_world("无详情故障世界", autonomous=True)
+    advance_minutes(bare_eng, bare_runtime.world_id, 10)
+
+    session = SessionLocal()
+    try:
+        bare_runs = session.scalars(
+            select(LLMRun).where(LLMRun.world_id == bare_runtime.world_id)
+        ).all()
+        assert bare_runs
+        assert all(
+            run.tool_result["reason"] == "TimeoutError，系统将自动重试"
+            for run in bare_runs
+        )
+    finally:
+        session.close()
+    bare_eng._runtimes.clear()
 
 
 def test_non_autonomous_world_makes_no_decisions(world_config: ParsedWorldConfig) -> None:

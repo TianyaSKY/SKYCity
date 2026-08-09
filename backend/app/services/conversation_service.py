@@ -107,6 +107,7 @@ class ConversationService:
             world = session.get(World, world_id)
             if world is None:
                 return False, MSG_WORLD_MISSING, None
+            world_time = world.world_time
             sender = session.get(Agent, {"world_id": world_id, "agent_id": from_agent_id})
             if sender is None:
                 return False, MSG_AGENT_MISSING, None
@@ -119,10 +120,12 @@ class ConversationService:
             self._repair_stale_locks(session, world_id, target)
             agent_a, agent_b = sorted([from_agent_id, to_agent_id])
             conversation = self._active_between(session, world_id, agent_a, agent_b)
-            if self._busy_reason(sender, conversation) is not None:  # R1
-                return False, MSG_SENDER_BUSY, None
-            if self._busy_reason(target, conversation) is not None:  # R2
-                return False, MSG_TARGET_BUSY, None
+            sender_busy_detail = self._busy_detail(sender, conversation, world_time)
+            if sender_busy_detail is not None:  # R1
+                return False, f"{MSG_SENDER_BUSY}：你正在{sender_busy_detail}", None
+            target_busy_detail = self._busy_detail(target, conversation, world_time)
+            if target_busy_detail is not None:  # R2
+                return False, f"{MSG_TARGET_BUSY}：{target.name}正在{target_busy_detail}", None
             if (
                     manhattan_distance(sender.col, sender.row, target.col, target.row)
                     > TALK_DISTANCE
@@ -133,12 +136,18 @@ class ConversationService:
 
             message = (message or "").strip()[:MAX_MESSAGE_CHARS]
             intent = (intent or "chat").strip() or "chat"
-            world_time = world.world_time
 
             created = conversation is None
             if created:
-                if self._in_cooldown(session, world_id, agent_a, agent_b, world_time):
-                    return False, MSG_COOLDOWN, None
+                remaining = self._cooldown_remaining(
+                    session, world_id, agent_a, agent_b, world_time
+                )
+                if remaining > 0:
+                    return (
+                        False,
+                        f"{MSG_COOLDOWN}：与{target.name}还需等待{remaining}分钟",
+                        None,
+                    )
                 conversation = Conversation(
                     conversation_id=f"conv_{uuid.uuid4().hex[:16]}",
                     world_id=world_id,
@@ -394,9 +403,9 @@ class ConversationService:
                 )
                 or 0
             )
-            return self._in_cooldown(
+            return self._cooldown_remaining(
                 session, world_id, *sorted([agent_a, agent_b]), world_time
-            )
+            ) > 0
         finally:
             session.close()
 
@@ -418,13 +427,13 @@ class ConversationService:
         )
 
     @staticmethod
-    def _in_cooldown(
+    def _cooldown_remaining(
             session: Session,
             world_id: str,
             agent_a: str,
             agent_b: str,
             world_time: int,
-    ) -> bool:
+    ) -> int:
         latest_end = session.scalar(
             select(func.max(Conversation.ended_at)).where(
                 Conversation.world_id == world_id,
@@ -434,8 +443,9 @@ class ConversationService:
             )
         )
         if latest_end is None:
-            return False
-        return world_time - latest_end < PAIR_COOLDOWN_MINUTES
+            return 0
+        remaining = PAIR_COOLDOWN_MINUTES - (world_time - latest_end)
+        return remaining if remaining > 0 else 0
 
     @staticmethod
     def _is_duplicate(
@@ -528,8 +538,10 @@ class ConversationService:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _busy_reason(agent: Agent, conversation: Conversation | None) -> str | None:
-        """Why ``agent`` cannot talk right now (None = free).
+    def _busy_detail(
+            agent: Agent, conversation: Conversation | None, world_time: int
+    ) -> str | None:
+        """Describe an action that prevents ``agent`` from talking.
 
         A member locked into ``conversation`` (action_type="talk" with the
         matching conversation_id) is free to keep talking inside it, but busy
@@ -541,7 +553,18 @@ class ConversationService:
             conv_id = (agent.action_data or {}).get("conversation_id")
             if conversation is not None and conv_id == conversation.conversation_id:
                 return None
-        return "busy"
+        action_label = {
+            "move": "移动",
+            "wait": "等待",
+            "work": "工作",
+            "formal_work": "正式班次",
+            "talk": "对话",
+            "sleep": "睡觉",
+            "build": "建造",
+        }.get(agent.action_type, agent.action_type)
+        if agent.action_ends_at is None:
+            return f"{action_label}，结束时间未知"
+        return f"{action_label}，还需{max(agent.action_ends_at - world_time, 0)}分钟"
 
     @staticmethod
     def _clear_talk_lock(agent: Agent) -> None:

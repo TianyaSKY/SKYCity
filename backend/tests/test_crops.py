@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.config.settings import get_settings
+from app.config.gameplay import INITIAL_MONEY, MAX_PLANT_DISTANCE
 from app.database.models.agents import Agent
 from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
@@ -263,7 +264,8 @@ def test_plant_rejected_outside_farm(engine: WorldEngine) -> None:
     ok, _, err = engine.crop_service.plant(
         world_id, agent_id, target[0], target[1], WHEAT
     )
-    assert not ok and err == MSG_NOT_PLANTABLE  # R23.2
+    assert not ok and err is not None and err.startswith(MSG_NOT_PLANTABLE)
+    assert f"目标格（{target[0]},{target[1]}）" in err
 
 
 def test_plant_rejected_unknown_seed(engine: WorldEngine) -> None:
@@ -526,6 +528,79 @@ def test_observation_lists_seeds(engine: WorldEngine) -> None:
     assert "【可种植的种子】" in observation
     assert "wheat_seed" in observation and "flower_seed" in observation
     assert "harvest(col, row, reason)" in observation
+    assert "【可播种地块】" not in observation
+
+
+def test_observation_lists_reachable_plant_cells(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    target = plantable_near(engine, 47, 26)
+    place_agent(engine, world_id, "agent_linxia", target[0] + 1, target[1])
+
+    from app.agents.observation_service import build_observation
+
+    observation = build_observation(world_id, "agent_linxia", SessionLocal, engine=engine)
+    assert "【可播种地块】" in observation
+    assert f"({target[0]},{target[1]})" in observation
+
+
+def test_observation_directs_to_farm_when_no_plot_reachable(
+        engine: WorldEngine,
+) -> None:
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    minimum_col = min(col for col, _ in engine.plantable_cells)
+    minimum_row = min(row for _, row in engine.plantable_cells)
+    place_agent(
+        engine,
+        world_id,
+        "agent_linxia",
+        minimum_col - MAX_PLANT_DISTANCE - 1,
+        minimum_row,
+    )
+
+    from app.agents.observation_service import build_observation
+
+    observation = build_observation(world_id, "agent_linxia", SessionLocal, engine=engine)
+    assert "- 当前不在农田操作范围内；先前往村庄农场（village_farm）" in observation
+
+
+def test_observation_reports_occupied_reachable_plots(engine: WorldEngine) -> None:
+    runtime = engine.create_world()
+    world_id = runtime.world_id
+    agent_id = "agent_linxia"
+    target = plantable_near(engine, 47, 26)
+    agent_col, agent_row = target[0] + 1, target[1]
+    place_agent(engine, world_id, agent_id, agent_col, agent_row)
+    reachable_cells = [
+        (col, row)
+        for col, row in engine.plantable_cells
+        if abs(col - agent_col) + abs(row - agent_row) <= MAX_PLANT_DISTANCE
+    ]
+    assert reachable_cells
+    session = SessionLocal()
+    try:
+        session.add_all(
+            Crop(
+                world_id=world_id,
+                col=col,
+                row=row,
+                item_id=WHEAT,
+                planted_by=agent_id,
+                planted_at=0,
+                stage=0,
+                next_stage_at=1,
+            )
+            for col, row in reachable_cells
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    from app.agents.observation_service import build_observation
+
+    observation = build_observation(world_id, agent_id, SessionLocal, engine=engine)
+    assert "- 当前可达农田均被占用；先收获成熟作物或稍后再试" in observation
 
 
 # --------------------------------------------------------------------------- #
@@ -671,8 +746,8 @@ def test_autonomous_farm_chain_buy_plant_harvest_sell(
         )
         assert harvest_ok and sell_ok
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        # 50 - 5 (seed) + 16 (wheat×4 @4, M19) = 61; wheat fully sold.
-        assert agent.money == 3011, f"money={agent.money}"
+        # INITIAL_MONEY - 5 (seed) + 16 (wheat×4 @4, M19); wheat fully sold.
+        assert agent.money == INITIAL_MONEY - 5 + 16, f"money={agent.money}"
         assert held_quantity(eng, world_id, "agent_linxia", "wheat") == 0
         # No crop left on the farm.
         assert crop_rows(eng, world_id) == []

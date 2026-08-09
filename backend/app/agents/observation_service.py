@@ -23,10 +23,12 @@ from app.database.models.companies import (
     JobOpening,
     LeaveRequest,
     Position,
+    ProcurementOrder,
     WorkShift,
 )
 from app.database.models.conversations import ConversationMessage
 from app.database.models.crops import Crop
+from app.database.models.structures import TileStructure
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.jobs import Job
@@ -41,6 +43,7 @@ from app.config.gameplay import (
     HOTEL_NIGHTLY_FEE,
     HUNGER_FORCED_EAT_THRESHOLD,
     LEADER_STIPEND_PERCENT,
+    MAX_PLANT_DISTANCE,
     MINUTES_PER_STEP,
     OBSERVATION_MAX_CHARS,
     OBSERVATION_MAX_SHOP_PRODUCTS,
@@ -489,6 +492,48 @@ def build_observation(
                 f"- plant(col, row, {crop_def.seed_item_id}, reason): 种{crop_def.name}"
                 f"（约{crop_def.total_minutes}分钟成熟，收成{yield_text}）"
             )
+        if engine is not None:
+            lines.append("【可播种地块】")
+            reachable_plantable_cells = [
+                (col, row)
+                for col, row in engine.plantable_cells
+                if abs(col - agent.col) + abs(row - agent.row) <= MAX_PLANT_DISTANCE
+            ]
+            if not reachable_plantable_cells:
+                lines.append("- 当前不在农田操作范围内；先前往村庄农场（village_farm）")
+            else:
+                occupied_cells = {
+                    (row.col, row.row)
+                    for row in session.scalars(
+                        select(Crop).where(Crop.world_id == world_id)
+                    ).all()
+                }
+                occupied_cells.update(
+                    (row.col, row.row)
+                    for row in session.scalars(
+                        select(TileStructure).where(TileStructure.world_id == world_id)
+                    ).all()
+                )
+                free_plantable_cells = [
+                    cell for cell in reachable_plantable_cells if cell not in occupied_cells
+                ]
+                if free_plantable_cells:
+                    free_plantable_cells.sort(
+                        key=lambda cell: (
+                            abs(cell[0] - agent.col) + abs(cell[1] - agent.row),
+                            cell[1],
+                            cell[0],
+                        )
+                    )
+                    lines.append(
+                        "- 可用坐标："
+                        + "、".join(
+                            f"({col},{row})"
+                            for col, row in free_plantable_cells[:8]
+                        )
+                    )
+                else:
+                    lines.append("- 当前可达农田均被占用；先收获成熟作物或稍后再试")
         lines.append("- harvest(col, row, reason): 收获附近已成熟的作物")
         crops_by_id = {c.seed_item_id: c for c in load_crops()}
         nearby_crops = [
@@ -656,28 +701,67 @@ def build_observation(
                         CompanyInventory.company_id == company.company_id,
                     )
                     .order_by(CompanyInventory.item_id)
-                    .limit(8)
                 ).all()
-                if inventory_rows:
+                visible_inventory_rows = inventory_rows[:8]
+                available_inventory = {
+                    row.item_id: max(row.quantity - row.reserved_quantity, 0)
+                    for row in inventory_rows
+                }
+                if visible_inventory_rows:
                     lines.append("  【仓库库存】")
-                    for row in inventory_rows:
+                    for row in visible_inventory_rows:
                         lines.append(
                             f"  - {item_names.get(row.item_id, row.item_id)}"
                             f"（{row.item_id}）"
                             f" 总量{row.quantity}/预留{row.reserved_quantity}/"
                             f"可用{row.quantity - row.reserved_quantity}"
                         )
+                world_data_dir = getattr(engine, "world_data_dir", None)
                 company_seed = next(
-                    (s for s in load_companies() if s["company_id"] == company.company_id),
+                    (
+                        seed
+                        for seed in load_companies(world_data_dir)
+                        if seed["company_id"] == company.company_id
+                    ),
                     None,
                 )
+                open_orders = session.scalars(
+                    select(ProcurementOrder)
+                    .where(
+                        ProcurementOrder.world_id == world_id,
+                        ProcurementOrder.buyer_company_id == company.company_id,
+                        ProcurementOrder.status == "open",
+                    )
+                    .order_by(ProcurementOrder.created_at)
+                ).all()
+                open_order_keys = {
+                    (order.seller_company_id, order.item_id) for order in open_orders
+                }
+                if open_orders:
+                    lines.append("  【待履约采购订单】")
+                    for order in open_orders[:3]:
+                        seller = session.get(
+                            Company,
+                            {"world_id": world_id, "company_id": order.seller_company_id},
+                        )
+                        seller_name = (
+                            seller.name if seller is not None else order.seller_company_id
+                        )
+                        lines.append(
+                            f"  - 从 {seller_name}（{order.seller_company_id}）采购 "
+                            f"{item_names.get(order.item_id, order.item_id)}"
+                            f"（{order.item_id}）×{order.quantity}：等待供货；"
+                            "库存到位后自动履约，请勿重复采购。"
+                        )
                 for rule in (company_seed or {}).get("procurement") or []:
                     seller_id = str(rule.get("seller_company_id") or "")
+                    rule_item = str(rule.get("item_id") or "")
+                    if (seller_id, rule_item) in open_order_keys:
+                        continue
                     seller = session.get(
                         Company, {"world_id": world_id, "company_id": seller_id}
                     )
                     seller_name = seller.name if seller is not None else seller_id
-                    rule_item = str(rule.get("item_id") or "")
                     lines.append(
                         f"  - 可采购：从 {seller_name}（{seller_id}）采购 "
                         f"{item_names.get(rule_item, rule_item)}（{rule_item}），"
@@ -699,11 +783,15 @@ def build_observation(
                             )
                             .order_by(StoreProduct.item_id)
                     ).all():
-                        if product.stock >= product.stock_cap:
+                        available_quantity = available_inventory.get(product.item_id, 0)
+                        quantity_cap = min(
+                            available_quantity, product.stock_cap - product.stock
+                        )
+                        if quantity_cap <= 0:
                             continue
                         lines.append(
-                            f"  - 可上架：{item_names.get(product.item_id, product.item_id)}"
-                            f"（{product.item_id}）货架{product.stock}/{product.stock_cap} —— "
+                            f"（{product.item_id}）货架{product.stock}/{product.stock_cap}，"
+                            f"仓库可用{available_quantity}、本次至多{quantity_cap} —— "
                             f"stock_store({company.company_id}, {store.store_id}, "
                             f"{product.item_id}, reason, quantity=N)"
                         )

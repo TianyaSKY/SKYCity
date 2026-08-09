@@ -981,6 +981,7 @@ class DecisionService:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             if world is None or runtime is None or agent is None:
                 return
+            failure_detail = detail.strip() or f"{error_type}，系统将自动重试"
             logger.warning(
                 "LLM decision failed world={} agent={} type={}: {}",
                 world_id,
@@ -999,7 +1000,7 @@ class DecisionService:
                     latency_ms=0,
                     tool_name="",
                     tool_arguments={},
-                    tool_result={},
+                    tool_result={"success": False, "reason": failure_detail, "event": None},
                     success=False,
                     error_type=error_type,
                     trace_id=trace_id,
@@ -1014,7 +1015,7 @@ class DecisionService:
             # M6 T6-3: the failed decision is an observed event worth a
             # low-importance working memory.
             self.engine.memory_recorder.record_llm_failure(
-                session, world_id, agent_id, detail
+                session, world_id, agent_id, failure_detail
             )
             session.commit()
 

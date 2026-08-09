@@ -34,7 +34,7 @@ from app.services.conversation_service import (
     MSG_TARGET_MISSING,
     ConversationService,
 )
-from app.config.gameplay import TALK_LOCK_SECONDS, TALK_REPLY_GRACE
+from app.config.gameplay import PAIR_COOLDOWN_MINUTES, TALK_LOCK_SECONDS, TALK_REPLY_GRACE
 from app.services.world_config_loader import ParsedWorldConfig, load_world_config
 from app.world_engine.engine import WorldEngine
 from tests.test_world_engine import advance_minutes
@@ -155,7 +155,8 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
         world_id, "agent_linxia", "agent_zhangming", "在吗", "chat"
     )
     assert ok is False and envelope is None
-    assert reason == MSG_TARGET_BUSY
+    assert reason is not None and reason.startswith(MSG_TARGET_BUSY)
+    assert "张明正在等待，还需30分钟" in reason
 
     # busy sender -> rejected
     assert eng.action_service.execute_wait(
@@ -165,7 +166,8 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
         world_id, "agent_linxia", "agent_zhangming", "在吗", "chat"
     )
     assert ok is False and envelope is None
-    assert reason == MSG_SENDER_BUSY
+    assert reason is not None and reason.startswith(MSG_SENDER_BUSY)
+    assert "你正在等待，还需30分钟" in reason
 
     # let both waits finish, then the nearby idle pair can talk
     advance_minutes(eng, world_id, 31)
@@ -210,12 +212,14 @@ def test_talk_validation(world_config: ParsedWorldConfig) -> None:
         world_id, "agent_linxia", "agent_wangfang", "你好", "chat"
     )
     assert ok is False and envelope is None
-    assert reason == MSG_SENDER_BUSY
+    assert reason is not None and reason.startswith(MSG_SENDER_BUSY)
+    assert "你正在对话，还需" in reason
     ok, reason, envelope = service.send_message(
         world_id, "agent_wangfang", "agent_linxia", "你好", "chat"
     )
     assert ok is False and envelope is None
-    assert reason == MSG_TARGET_BUSY
+    assert reason is not None and reason.startswith(MSG_TARGET_BUSY)
+    assert "林夏正在对话，还需" in reason
 
     # leave ends the conversation and unlocks both members
     ok, reason, envelope = service.send_message(
@@ -370,7 +374,8 @@ def test_max_turns_and_cooldown(world_config: ParsedWorldConfig) -> None:
         world_id, "agent_linxia", "agent_zhangming", "再来", "greet"
     )
     assert ok is False and envelope is None
-    assert reason == MSG_COOLDOWN
+    assert reason is not None and reason.startswith(MSG_COOLDOWN)
+    assert f"与张明还需等待{PAIR_COOLDOWN_MINUTES}分钟" in reason
 
     # after the cooldown window a new conversation is allowed
     advance_minutes(eng, world_id, 61)
@@ -619,7 +624,10 @@ def test_manual_talk_api(client: TestClient) -> None:
         },
     )
     assert response.status_code == 409, response.text
-    assert response.json() == {"success": False, "reason": MSG_TARGET_BUSY}
+    body = response.json()
+    assert body["success"] is False
+    assert body["reason"].startswith(MSG_TARGET_BUSY)
+    assert "林夏正在对话，还需" in body["reason"]
 
     # missing message -> 422 (schema)
     response = client.post(
