@@ -4,8 +4,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 
+from app.config.gameplay import (
+    HUNGER_FORCED_EAT_THRESHOLD,
+    LONELINESS_BOOST_THRESHOLD,
+    LOW_ENERGY_ACTION_THRESHOLD,
+    MOOD_BOOST_THRESHOLD,
+)
+from app.config.settings import get_settings
+from app.database.models.agents import Agent
+from app.database.models.companies import WorkShift
 from app.database.models.llm_runs import LLMRun
 from app.database.models.world_events import WorldEvent
 from app.database.models.worlds import World
@@ -393,6 +402,87 @@ async def llm_stats(request: Request, world_id: str) -> dict:
             }
             for row in model_rows
         ],
+    }
+
+
+@router.get("/{world_id}/stats/overview")
+async def dashboard_overview_stats(request: Request, world_id: str) -> dict:
+    """数据看板: 当前世界的民生、财政、考勤与当日 LLM 运营汇总。"""
+    if _engine(request).get_runtime(world_id) is None:
+        raise HTTPException(status_code=404, detail="世界不存在")
+    session = SessionLocal()
+    try:
+        world = session.get(World, world_id)
+        if world is None:
+            raise HTTPException(status_code=404, detail="世界不存在")
+        day_start = world.world_time - world.world_time % 1440
+        day_end = day_start + 1440
+        agents = session.scalars(
+            select(Agent).where(Agent.world_id == world_id)
+        ).all()
+        shifts = session.scalars(
+            select(WorkShift).where(
+                WorkShift.world_id == world_id,
+                or_(
+                    (WorkShift.actual_start >= day_start)
+                    & (WorkShift.actual_start < day_end),
+                    (WorkShift.scheduled_start >= day_start)
+                    & (WorkShift.scheduled_start < day_end),
+                ),
+            )
+        ).all()
+    finally:
+        session.close()
+
+    token_usage = sum(int(agent.daily_token_usage) for agent in agents)
+    token_budget = get_settings().world_daily_token_budget
+    if token_budget > 0:
+        token_budget = int(token_budget)
+        token_remaining: int | None = max(token_budget - token_usage, 0)
+    else:
+        token_budget = None
+        token_remaining = None
+
+    return {
+        "treasury": {
+            "balance": int(world.treasury),
+            "public_work_budget_remaining": int(world.public_work_budget_remaining),
+            "public_work_escrow": int(world.public_work_escrow),
+        },
+        "attendance_today": {
+            "attended": sum(
+                1
+                for shift in shifts
+                if shift.actual_start is not None
+                and day_start <= shift.actual_start < day_end
+            ),
+            "late": sum(
+                1
+                for shift in shifts
+                if shift.actual_start is not None
+                and day_start <= shift.actual_start < day_end
+                and shift.late_minutes > 0
+            ),
+            "absent": sum(
+                1
+                for shift in shifts
+                if day_start <= shift.scheduled_start < day_end
+                and shift.status == "absent"
+            ),
+        },
+        "llm_today": {
+            "calls": sum(int(agent.daily_call_count) for agent in agents),
+            "token_usage": token_usage,
+            "token_budget": token_budget,
+            "token_remaining": token_remaining,
+            "deciding_agents": sum(1 for agent in agents if agent.is_deciding),
+        },
+        "need_thresholds": {
+            "satiety_lte": HUNGER_FORCED_EAT_THRESHOLD,
+            "energy_lte": LOW_ENERGY_ACTION_THRESHOLD,
+            "mood_lte": MOOD_BOOST_THRESHOLD,
+            "loneliness_gte": LONELINESS_BOOST_THRESHOLD,
+        },
     }
 
 

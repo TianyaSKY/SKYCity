@@ -105,7 +105,7 @@ def test_locations(world: ParsedWorldConfig) -> None:
 
 
 def test_spawn_points(world: ParsedWorldConfig) -> None:
-    assert len(world.spawn_points) == 9
+    assert len(world.spawn_points) == 19
     by_id = {spawn.agent_id: spawn for spawn in world.spawn_points}
     for spawn in world.spawn_points:
         assert spawn.spawn_id and spawn.agent_id and spawn.direction
@@ -137,7 +137,8 @@ def test_resident_homes_and_company_leaders_align(world: ParsedWorldConfig) -> N
         "agent_laozhang": "laozhang_home",
         "agent_touzi": "touzi_home",
     }
-    assert set(cards) == set(expected_homes)
+    assert set(cards) == set(expected_homes) | {f"agent_homeless_{index:02d}" for index in range(1, 11)}
+    assert all(cards[f"agent_homeless_{index:02d}"].get("home") is None for index in range(1, 11))
     for agent_id, home_id in expected_homes.items():
         home = cards[agent_id]["home"]
         location = locations[home_id]

@@ -16,6 +16,7 @@ import type {
     CompanyTransaction,
     ConversationSummary,
     DecisionRecord,
+    DashboardOverviewResponse,
     EventStatsResponse,
     GodActionRequest,
     GodActionResult,
@@ -109,6 +110,13 @@ export function getStocks(worldId: string): Promise<StocksResponse> {
 /** 数据看板: llm_runs 聚合统计。 */
 export function getLlmStats(worldId: string): Promise<LlmStatsResponse> {
     return requestJson<LlmStatsResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stats/llm`);
+}
+
+/** 数据看板: 当前民生、财政、考勤与当日 LLM 运营汇总。 */
+export function getDashboardOverview(worldId: string): Promise<DashboardOverviewResponse> {
+    return requestJson<DashboardOverviewResponse>(
+        `/api/worlds/${encodeURIComponent(worldId)}/stats/overview`,
+    );
 }
 
 /** 数据看板: world_events 聚合统计。 */

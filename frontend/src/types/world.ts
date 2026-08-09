@@ -656,6 +656,34 @@ export interface LlmStatsResponse {
     }[];
 }
 
+/** Response of GET .../stats/overview (数据看板): 当前运营补充汇总。 */
+export interface DashboardOverviewResponse {
+    treasury: {
+        balance: number;
+        public_work_budget_remaining: number;
+        public_work_escrow: number;
+    };
+    attendance_today: {
+        attended: number;
+        late: number;
+        absent: number;
+    };
+    llm_today: {
+        calls: number;
+        token_usage: number;
+        token_budget: number | null;
+        token_remaining: number | null;
+        deciding_agents: number;
+    };
+    need_thresholds: {
+        satiety_lte: number;
+        energy_lte: number;
+        mood_lte: number;
+        loneliness_gte: number;
+    };
+}
+
+
 /** Response of GET .../stats/events (数据看板): world_events 聚合。 */
 export interface EventStatsResponse {
     total: number;
