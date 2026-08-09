@@ -101,7 +101,7 @@ export function getSnapshot(id: string): Promise<WorldSnapshotPayload> {
     return requestJson<WorldSnapshotPayload>(`/api/worlds/${encodeURIComponent(id)}/snapshot`);
 }
 
-/** M10: 全部股票行情 + 全量持仓。 */
+/** Cooperative-share issues and resident holdings. */
 export function getStocks(worldId: string): Promise<StocksResponse> {
     return requestJson<StocksResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stocks`);
 }
@@ -116,40 +116,40 @@ export function getEventStats(worldId: string): Promise<EventStatsResponse> {
     return requestJson<EventStatsResponse>(`/api/worlds/${encodeURIComponent(worldId)}/stats/events`);
 }
 
-/** M13: 世界内全部企业列表。 */
+/** M13: 世界内全部合作社列表。 */
 export function getCompanies(worldId: string): Promise<CompanyInfo[]> {
     return requestJson<CompanyInfo[]>(`/api/worlds/${encodeURIComponent(worldId)}/companies`);
 }
 
-/** M13: 单个企业详情。 */
+/** M13: 单个合作社详情。 */
 export function getCompany(worldId: string, companyId: string): Promise<CompanyInfo> {
     return requestJson<CompanyInfo>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}`,
     );
 }
 
-/** M13: 企业的岗位列表（含已招满/空缺）。 */
+/** M13: 合作社的岗位列表（含已招满/空缺）。 */
 export function getCompanyPositions(worldId: string, companyId: string): Promise<CompanyPosition[]> {
     return requestJson<CompanyPosition[]>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/positions`,
     );
 }
 
-/** M13: 企业在职员工列表。 */
+/** M13: 合作社在职员工列表。 */
 export function getCompanyEmployees(worldId: string, companyId: string): Promise<CompanyEmployee[]> {
     return requestJson<CompanyEmployee[]>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/employees`,
     );
 }
 
-/** M13: 企业资金流水（最近的，新在前）。 */
+/** M13: 合作社资金流水（最近的，新在前）。 */
 export function getCompanyTransactions(worldId: string, companyId: string): Promise<CompanyTransaction[]> {
     return requestJson<CompanyTransaction[]>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/transactions`,
     );
 }
 
-/** M16: 企业仓库库存（总量/预留/可用）。 */
+/** M16: 合作社仓库库存（总量/预留/可用）。 */
 export function getCompanyInventory(worldId: string, companyId: string): Promise<CompanyInventoryItem[]> {
     return requestJson<CompanyInventoryItem[]>(
         `/api/worlds/${encodeURIComponent(worldId)}/companies/${encodeURIComponent(companyId)}/inventory`,
@@ -172,7 +172,7 @@ export interface StockStoreRequest {
     reason?: string;
 }
 
-/** M16: 经理按固定价跨企业采购（manager_agent_id 在 body 中）。 */
+/** M16: 合作社负责人按固定价跨合作社采购（manager_agent_id 在 body 中）。 */
 export function purchaseCompanyGoods(
     worldId: string,
     companyId: string,
@@ -184,7 +184,7 @@ export function purchaseCompanyGoods(
     );
 }
 
-/** M16: 经理把仓库货物上架到自有商店（manager_agent_id 在 body 中）。 */
+/** M16: 合作社负责人把仓库货物上架到自有商店（manager_agent_id 在 body 中）。 */
 export function stockStore(
     worldId: string,
     companyId: string,

@@ -1,11 +1,10 @@
-"""open_shop / stock_shop / adjust_price / close_shop tools (M18 R39–R43).
+"""Cooperative-stall tools (R39–R43).
 
-All four funnel through ShopService — the personal-store rule gate. They
+All tools funnel through ShopService — the cooperative-stall rule gate. They
 never touch SQL/ORM/WS directly and return the same structured JSON the
 decision service records in ``llm_runs.tool_result``:
 ``{"success", "reason", "event"}``.
 """
-
 from __future__ import annotations
 
 import json
@@ -16,12 +15,6 @@ from pydantic import BaseModel
 from app.agents.context import AgentToolContext
 
 
-class ShopLocation(BaseModel):
-    """open_shop's site: a map stall id, or a wild-cell (col, row) pair."""
-
-    stall_id: str | None = None
-    col: int | None = None
-    row: int | None = None
 
 
 class ShopProduct(BaseModel):
@@ -54,21 +47,26 @@ def _as_dict(value) -> dict:
 @function_tool
 async def open_shop(
         ctx: RunContextWrapper[AgentToolContext],
-        location: ShopLocation,
+        stall_id: str,
         products: list[ShopProduct],
         reason: str,
 ) -> str:
-    """在空摊位（location 传 {"stall_id": "..."}）或附近可达空地（{"col": N, "row": N}）开店；
-    需要至少 100 金币且背包持有商品；products 传 [{"item_id": "...", "price": N}]，
-    最多 3 种，售价须不低于村庄杂货店同款、不超过 2 倍基准价；可选 buy_price
-    （不高于杂货店同款收购价，0=不收购）。"""
+    """在自己所在的空合作社摊位开摊。
+
+    ``stall_id`` 必须来自【可开店位置】；开摊会收取 60 金币使用费。商品从
+    背包上架，最多 3 种；售价不得低于村庄杂货店同款且不得高于 2 倍基准价；
+    可选 ``buy_price`` 不得高于杂货店同款收购价，0 表示不收购。
+    """
     service = ctx.context.engine.shop_service
     if service is None:
-        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+        return json.dumps(
+            {"success": False, "reason": "合作社摊位服务未初始化", "event": None},
+            ensure_ascii=False,
+        )
     ok, envelope, err = service.open_shop(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,
-        location=_as_dict(location),
+        stall_id=stall_id,
         products=[_as_dict(product) for product in products],
         reason=reason,
     )
@@ -83,10 +81,10 @@ async def stock_shop(
         quantity: int = 1,
         reason: str = "",
 ) -> str:
-    """给自己店铺的货架上架背包里的商品（不超过货架容量）。"""
+    """给自己合作社摊的货架上架背包里的商品（不超过货架容量）。"""
     service = ctx.context.engine.shop_service
     if service is None:
-        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+        return json.dumps({"success": False, "reason": "合作社摊位服务未初始化", "event": None}, ensure_ascii=False)
     ok, envelope, err = service.stock_shop(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,
@@ -106,10 +104,10 @@ async def adjust_price(
         new_price: int,
         reason: str,
 ) -> str:
-    """调整自己店铺里某商品的售价（须不低于杂货店同款、不超过 2 倍基准价）。"""
+    """调整自己合作社摊里某商品的售价（须不低于杂货店同款、不超过 2 倍基准价）。"""
     service = ctx.context.engine.shop_service
     if service is None:
-        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+        return json.dumps({"success": False, "reason": "合作社摊位服务未初始化", "event": None}, ensure_ascii=False)
     ok, envelope, err = service.adjust_price(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,
@@ -129,11 +127,11 @@ async def set_buy_price(
         new_price: int,
         reason: str,
 ) -> str:
-    """设置自己店铺某商品的收购价（不高于杂货店同款收购价；0=不收购）。居民可把背包里的
-    该商品卖给你的店，货款从你余额支付。"""
+    """设置自己合作社摊某商品的收购价（不高于杂货店同款收购价；0=不收购）。居民可把背包里的
+    该商品卖给你的摊位，货款从你余额支付。"""
     service = ctx.context.engine.shop_service
     if service is None:
-        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+        return json.dumps({"success": False, "reason": "合作社摊位服务未初始化", "event": None}, ensure_ascii=False)
     ok, envelope, err = service.set_buy_price(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,
@@ -151,10 +149,10 @@ async def close_shop(
         store_id: str,
         reason: str,
 ) -> str:
-    """收掉自己的店铺：货架上的货物退回背包。"""
+    """收掉自己的合作社摊：货架上的货物退回背包。"""
     service = ctx.context.engine.shop_service
     if service is None:
-        return json.dumps({"success": False, "reason": "店铺服务未初始化", "event": None}, ensure_ascii=False)
+        return json.dumps({"success": False, "reason": "合作社摊位服务未初始化", "event": None}, ensure_ascii=False)
     ok, envelope, err = service.close_shop(
         world_id=ctx.context.world_id,
         agent_id=ctx.context.agent_id,

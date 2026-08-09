@@ -10,45 +10,35 @@ straight to the owner's balance (EconomyService.buy settlement branch).
 from __future__ import annotations
 
 import uuid
-from collections import deque
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config.gameplay import (
-    OPEN_SHOP_CAPITAL,
     PRICE_MAX_MULT,
     STALL_BUY_MAX_MULT,
-    STALL_CAPACITY,
-    STALL_CLOSE_HOUR,
     STALL_INITIAL_STOCK,
-    STALL_MAX_DISTANCE,
     STALL_MAX_PRODUCTS,
-    STALL_OPEN_HOUR,
+    STALL_PERMIT_FEE,
     STALL_STOCK_CAP,
-    STORE_STOCK_INITIAL_PRICE,
 )
 from app.database.models.agents import Agent
-from app.database.models.crops import Crop
 from app.database.models.inventories import Inventory
 from app.database.models.items import Item
 from app.database.models.locations import WorldLocation
-from app.database.models.stocks import Stock, StockHolding
+from app.database.models.transactions import Transaction
 from app.database.models.stores import Store, StoreProduct
-from app.database.models.structures import TileStructure
 from app.database.models.worlds import World
 from app.database.unit_of_work import UnitOfWork
 from app.services.economy_service import MSG_ITEM_MISSING, MSG_STORE_FULL
 from app.world_engine.engine import WorldEngine
 
 # Rejection reasons (Chinese, surfaced in tool results / HTTP 409).
-MSG_STALL_OCCUPIED = "该地点已有店铺"
-MSG_NOT_AT_STALL = "不在摊位地点"
-MSG_TOO_FAR = "距离目标格太远"
-MSG_CELL_NOT_AVAILABLE = "目标格不可行走或已被占用"
-MSG_UNREACHABLE = "会堵住村庄"  # R39.3 复用文案
-MSG_CAPITAL_TOO_LOW = "开店需要至少 100 金币"
+MSG_STALL_OCCUPIED = "该合作社摊位已被使用"
+MSG_NOT_AT_STALL = "只能在自己所在的预设合作社摊位开摊"
+MSG_ALREADY_HAS_STALL = "每位居民只能经营一个合作社摊位"
+MSG_STALL_FEE_UNAFFORDABLE = "金币不足，无法支付 60 金币摊位使用费"
 MSG_PRODUCT_LIMIT = "最多上架 3 种商品"
 MSG_DUPLICATE_PRODUCT = "商品重复"
 MSG_PRICE_OUT_OF_RANGE = "价格须不低于村庄杂货店同款售价且不超过 2 倍基准价"
@@ -85,20 +75,12 @@ class ShopService:
             self,
             world_id: str,
             agent_id: str,
-            location: dict | None,
+            stall_id: str | None,
             products: list[dict] | None,
             reason: str | None = None,
             trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Open a personal store at a map stall or a nearby wild cell.
-
-        ``location`` = ``{"stall_id": "..."}`` (must be the agent's current
-        location) or ``{"col": N, "row": N}`` (within STALL_MAX_DISTANCE,
-        walkable, unreserved and reachable). ``products`` =
-        ``[{"item_id": str, "price": int, "buy_price"?: int}]``, at most
-        STALL_MAX_PRODUCTS entries priced within the R42 bounds (anchored to
-        the seeded village store's sell/buy prices).
-        """
+        """Open one resident-operated shop at an empty map-defined stall."""
 
         def _inner(session: Session) -> tuple[bool, Any, str | None]:
             runtime = self.engine.get_runtime(world_id)
@@ -114,50 +96,46 @@ class ShopService:
                 return False, None, MSG_AGENT_MISSING
             if agent.action_type is not None:
                 return False, None, MSG_BUSY  # R1: one action at a time
-            loc_arg = location or {}
-            product_entries = products or []
-
-            # --- site selection (R39.2) ---
-            stall_id = loc_arg.get("stall_id")
-            if stall_id is not None:
-                stall = session.get(
-                    WorldLocation, {"world_id": world_id, "location_id": stall_id}
-                )
-                if stall is None or agent.location_id != stall_id:
-                    return False, None, MSG_NOT_AT_STALL
-                col, row = stall.col, stall.row
-                target_location_id = stall_id
-            else:
-                try:
-                    col = int(loc_arg["col"])
-                    row = int(loc_arg["row"])
-                except (KeyError, TypeError, ValueError):
-                    return False, None, MSG_CELL_NOT_AVAILABLE
-                if abs(agent.col - col) + abs(agent.row - row) > STALL_MAX_DISTANCE:
-                    return False, None, MSG_TOO_FAR
-                if not self._cell_available(session, world_id, col, row):
-                    return False, None, MSG_CELL_NOT_AVAILABLE
-                if not self._reachable(session, world_id, col, row):
-                    return False, None, MSG_UNREACHABLE
-                target_location_id = f"stall_{uuid.uuid4().hex}"
-
-            # --- one store per location (R39.4, unique index as backstop) ---
+            if not isinstance(stall_id, str) or not stall_id:
+                return False, None, MSG_NOT_AT_STALL
+            configured_stalls = {
+                location.location_id
+                for location in self.engine.world_config.locations
+                if location.location_type == "stall"
+            }
+            if stall_id not in configured_stalls:
+                return False, None, MSG_NOT_AT_STALL
+            stall = session.get(
+                WorldLocation, {"world_id": world_id, "location_id": stall_id}
+            )
+            if (
+                stall is None
+                or stall.location_type != "stall"
+                or agent.location_id != stall_id
+            ):
+                return False, None, MSG_NOT_AT_STALL
             if (
                 session.scalar(
                     select(Store).where(
                         Store.world_id == world_id,
-                        Store.location_id == target_location_id,
+                        Store.owner_agent_id == agent_id,
+                    )
+                )
+                is not None
+            ):
+                return False, None, MSG_ALREADY_HAS_STALL
+            if (
+                session.scalar(
+                    select(Store).where(
+                        Store.world_id == world_id,
+                        Store.location_id == stall_id,
                     )
                 )
                 is not None
             ):
                 return False, None, MSG_STALL_OCCUPIED
 
-            # --- capital threshold (R39.5: gate only, no deduction) ---
-            if agent.money < OPEN_SHOP_CAPITAL:
-                return False, None, MSG_CAPITAL_TOO_LOW
-
-            # --- product lines (R39.6 / R42; M19: optional buy_price) ---
+            product_entries = products or []
             if not 1 <= len(product_entries) <= STALL_MAX_PRODUCTS:
                 return False, None, MSG_PRODUCT_LIMIT
             seen: set[str] = set()
@@ -193,29 +171,44 @@ class ShopService:
                     return False, None, MSG_NO_ITEM
                 resolved.append((item, price, buy_price, inventory))
 
-            # --- write path (same transaction) ---
-            first_item = resolved[0][0]
-            store_name = f"{agent.name}的{first_item.name}摊"
-            if stall_id is None:
-                session.add(
-                    WorldLocation(
-                        world_id=world_id,
-                        location_id=target_location_id,
-                        name=store_name,
-                        location_type="stall",
-                        col=col,
-                        row=row,
-                        capacity=STALL_CAPACITY,
-                        open_hour=STALL_OPEN_HOUR,
-                        close_hour=STALL_CLOSE_HOUR,
-                    )
+            if agent.money < STALL_PERMIT_FEE:
+                return False, None, MSG_STALL_FEE_UNAFFORDABLE
+            paid = session.execute(
+                update(Agent)
+                .where(
+                    Agent.world_id == world_id,
+                    Agent.agent_id == agent_id,
+                    Agent.money >= STALL_PERMIT_FEE,
                 )
+                .values(money=Agent.money - STALL_PERMIT_FEE)
+                .execution_options(synchronize_session=False)
+            )
+            if paid.rowcount == 0:
+                return False, None, MSG_STALL_FEE_UNAFFORDABLE
+
+            # All following writes share the same transaction as the permit
+            # payment, so a failed stock transfer cannot consume the fee.
+            agent.money -= STALL_PERMIT_FEE
+            world.treasury += STALL_PERMIT_FEE
+            session.add(
+                Transaction(
+                    world_id=world_id,
+                    agent_id=agent_id,
+                    type="stall_permit_fee",
+                    amount=-STALL_PERMIT_FEE,
+                    balance_after=agent.money,
+                    reason=f"合作社摊位使用费：{stall.name}",
+                    world_time=world.world_time,
+                    trace_id=trace_id or "",
+                )
+            )
+            store_name = f"{agent.name}的合作社摊"
             store_id = f"store_{uuid.uuid4().hex}"
             session.add(
                 Store(
                     world_id=world_id,
                     store_id=store_id,
-                    location_id=target_location_id,
+                    location_id=stall_id,
                     company_id=None,
                     owner_agent_id=agent_id,
                     name=store_name,
@@ -248,25 +241,6 @@ class ShopService:
                         "stock": stock,
                     }
                 )
-            # R18.2: the personal store lists itself on the market; the row
-            # lives and dies with the shop (close_shop deletes it).
-            session.add(
-                Stock(
-                    world_id=world_id,
-                    stock_id=f"stock_{store_id}",
-                    name=f"{store_name}股票",
-                    company_id=store_id,
-                    source="store",
-                    base_price=STORE_STOCK_INITIAL_PRICE,
-                    price=STORE_STOCK_INITIAL_PRICE,
-                    prev_price=STORE_STOCK_INITIAL_PRICE,
-                    outstanding_shares=100,
-                )
-            )
-            location_row = session.get(
-                WorldLocation,
-                {"world_id": world_id, "location_id": target_location_id},
-            )
             envelope = runtime.event_bus.publish(
                 session,
                 world.world_time,
@@ -275,10 +249,25 @@ class ShopService:
                     "store_id": store_id,
                     "name": store_name,
                     "owner_agent_id": agent_id,
-                    "location_id": target_location_id,
-                    "col": location_row.col if location_row is not None else col,
-                    "row": location_row.row if location_row is not None else row,
+                    "location_id": stall_id,
+                    "stall_id": stall_id,
+                    "col": stall.col,
+                    "row": stall.row,
                     "products": products_payload,
+                    "stall_fee": STALL_PERMIT_FEE,
+                    "treasury_balance": world.treasury,
+                },
+                trace_id,
+            )
+            runtime.event_bus.publish(
+                session,
+                world.world_time,
+                "money_changed",
+                {
+                    "agent_id": agent_id,
+                    "amount": -STALL_PERMIT_FEE,
+                    "balance": agent.money,
+                    "reason": f"合作社摊位使用费：{stall.name}",
                 },
                 trace_id,
             )
@@ -524,9 +513,7 @@ class ShopService:
             reason: str | None = None,
             trace_id: str | None = None,
     ) -> tuple[bool, Any, str | None]:
-        """Close the owner's own store: shelf stock returns to the backpack,
-        the store (and a wild-cell stall location) is deleted, and the
-        listing is taken off the market."""
+        """Close the owner's own stall and return its shelf stock to the backpack."""
 
         def _inner(session: Session) -> tuple[bool, Any, str | None]:
             runtime = self.engine.get_runtime(world_id)
@@ -560,36 +547,6 @@ class ShopService:
                         session, world_id, agent_id, product.item_id, product.stock
                     )
                 session.delete(product)
-            # R43: 歇业即退市 — the listing and any holdings disappear
-            # (explicit deletes: SQLite sessions run with FKs off, so the
-            # ondelete=CASCADE on stock_holdings/stores would not fire).
-            stock = session.scalars(
-                select(Stock).where(
-                    Stock.world_id == world_id,
-                    Stock.company_id == store_id,
-                    Stock.source == "store",
-                )
-            ).all()
-            for row in stock:
-                for holding in session.scalars(
-                        select(StockHolding).where(
-                            StockHolding.world_id == world_id,
-                            StockHolding.stock_id == row.stock_id,
-                        )
-                ).all():
-                    session.delete(holding)
-                session.delete(row)
-            # A wild-cell stall location dies with its store; map stalls live on.
-            map_location_ids = {
-                loc.location_id for loc in self.engine.world_config.locations
-            }
-            if store.location_id not in map_location_ids:
-                location_row = session.get(
-                    WorldLocation,
-                    {"world_id": world_id, "location_id": store.location_id},
-                )
-                if location_row is not None:
-                    session.delete(location_row)
             session.delete(store)
             envelope = runtime.event_bus.publish(
                 session,
@@ -610,45 +567,7 @@ class ShopService:
     # Helpers
     # ------------------------------------------------------------------ #
 
-    def _cell_available(self, session: Session, world_id: str, col: int, row: int) -> bool:
-        """R39.2: walkable, unreserved, not a location anchor / spawn cell."""
-        if (col, row) not in self.engine.effective_walkable(session, world_id):
-            return False
-        if session.get(
-                TileStructure, {"world_id": world_id, "col": col, "row": row}
-        ) is not None:
-            return False
-        if session.get(Crop, {"world_id": world_id, "col": col, "row": row}) is not None:
-            return False
-        reserved = {
-            (loc.col, loc.row)
-            for loc in session.scalars(
-                select(WorldLocation).where(WorldLocation.world_id == world_id)
-            )
-        } | {(sp.col, sp.row) for sp in self.engine.world_config.spawn_points}
-        return (col, row) not in reserved
 
-    def _reachable(self, session: Session, world_id: str, col: int, row: int) -> bool:
-        """R39.3: the target shares the main walkable component with the
-        spawn network (BFS from the first spawn point, 4-dir)."""
-        spawns = list(self.engine.world_config.spawn_points)
-        if not spawns:
-            return False
-        start = (spawns[0].col, spawns[0].row)
-        walkable = self.engine.effective_walkable(session, world_id)
-        if start not in walkable:
-            return False
-        seen = {start}
-        frontier: deque[tuple[int, int]] = deque([start])
-        while frontier:
-            c, r = frontier.popleft()
-            for dc, dr in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                neighbour = (c + dc, r + dr)
-                if neighbour in seen or neighbour not in walkable:
-                    continue
-                seen.add(neighbour)
-                frontier.append(neighbour)
-        return (col, row) in seen
 
     def _price_bounds(
             self,

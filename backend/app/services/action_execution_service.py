@@ -22,6 +22,7 @@ from app.config.gameplay import (
     DEFAULT_WAIT_MINUTES,
     HOTEL_LOCATION_ID,
     HOTEL_NIGHTLY_FEE,
+    LOW_ENERGY_ACTION_THRESHOLD,
     MINUTES_PER_STEP,
     WEATHER_MULTIPLIERS,
 )
@@ -49,12 +50,14 @@ MSG_NO_PATH = "无可行路径"
 MSG_START_BLOCKED = "所在位置被建筑挡住，无法出发"
 MSG_AGENT_MISSING = "智能体不存在"
 MSG_WORLD_MISSING = "世界不存在"
+MSG_LOW_ENERGY = f"精力不高于 {LOW_ENERGY_ACTION_THRESHOLD}，请先休息"
 
-# Sleep place rule (R14): agents with a home sleep at home; homeless agents
-# sleep at the hotel, paying HOTEL_NIGHTLY_FEE (R7: no credit).
-MSG_SLEEP_NEED_HOME = "有家必须回家睡觉（当前不在家）"
+# Sleep place rule (R14): residents sleep at their own home for free or may
+# stay at the hotel; homeless residents must use the hotel. The first hotel
+# stay of each game day is charged (R7: no credit).
+MSG_SLEEP_NEED_HOME = "有家的居民请回家或前往旅店睡觉"
 MSG_SLEEP_NEED_HOTEL = "没有家的智能体需要去小镇旅店睡觉"
-MSG_HOTEL_UNAFFORDABLE = f"余额不足，付不起旅店房费（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
+MSG_HOTEL_UNAFFORDABLE = f"余额不足，付不起旅店首晚房费（{HOTEL_NIGHTLY_FEE} 金币）"
 
 Importance = "normal"
 
@@ -206,7 +209,7 @@ class ActionExecutionService:
         if request.action_type in ("buy_stock", "sell_stock"):
             stock_service = self.engine.stock_service
             if stock_service is None:
-                return False, None, "股票服务未初始化"
+                return False, None, "合作社份额服务未初始化"
             fn = (
                 stock_service.buy_stock
                 if request.action_type == "buy_stock"
@@ -323,6 +326,8 @@ class ActionExecutionService:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
+            if agent.energy <= LOW_ENERGY_ACTION_THRESHOLD:
+                return False, None, MSG_LOW_ENERGY
             if agent.action_type is not None:
                 queued, qreason = self._queue_if_locked(
                     session, runtime, agent, "move",
@@ -481,12 +486,11 @@ class ActionExecutionService:
     ) -> tuple[bool, WorldEventEnvelope | None, str | None]:
         """Validate + start a sleep (R1: interruptible like wait).
 
-        Sleep place rule (R14): an agent with a home must sleep at that home;
-        a homeless agent must sleep at the hotel (village_hotel), which
-        charges HOTEL_NIGHTLY_FEE per night on start (R7: no credit).
-        Sleep recovers energy/mood much faster than wait (rates live in
-        app.config.gameplay); the engine tick keys recovery off
-        action_type == "sleep".
+        Sleep place rule (R14): residents sleep at their own home for free or
+        may stay at the village hotel. Homeless residents must use the hotel.
+        The first hotel stay of each game day costs ``HOTEL_NIGHTLY_FEE``.
+        Sleep recovery rates live in ``app.config.gameplay`` and the engine
+        applies them hourly.
         """
         session = self._session_factory()
         try:
@@ -514,16 +518,28 @@ class ActionExecutionService:
             # Sleep place validation happens BEFORE the wait/sleep replacement
             # below so a rejected sleep never destroys an in-flight wait.
             home_id = self.engine.home_location_id(agent_id)
-            if home_id is not None:
-                if agent.location_id != home_id:
-                    return False, None, MSG_SLEEP_NEED_HOME
-                fee = 0
-            else:
-                if agent.location_id != HOTEL_LOCATION_ID:
-                    return False, None, MSG_SLEEP_NEED_HOTEL
-                fee = HOTEL_NIGHTLY_FEE
+            if agent.location_id == HOTEL_LOCATION_ID:
+                day_start = world.world_time // 1440 * 1440
+                paid_hotel_fee_today = session.scalar(
+                    select(Transaction.tx_id)
+                    .where(
+                        Transaction.world_id == world_id,
+                        Transaction.agent_id == agent_id,
+                        Transaction.type == "hotel_fee",
+                        Transaction.world_time >= day_start,
+                        Transaction.world_time < day_start + 1440,
+                    )
+                    .limit(1)
+                )
+                fee = 0 if paid_hotel_fee_today is not None else HOTEL_NIGHTLY_FEE
                 if agent.money < fee:
                     return False, None, MSG_HOTEL_UNAFFORDABLE  # R7
+            elif home_id is not None and agent.location_id == home_id:
+                fee = 0
+            elif home_id is not None:
+                return False, None, MSG_SLEEP_NEED_HOME
+            else:
+                return False, None, MSG_SLEEP_NEED_HOTEL
             if agent.action_type is not None:
                 # R1: wait/sleep is interruptible -> cancel pending + replace.
                 runtime.scheduler.cancel_for_agent(session, agent_id)

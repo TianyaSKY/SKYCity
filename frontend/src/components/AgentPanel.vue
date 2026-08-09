@@ -49,7 +49,7 @@ const liveAgent = computed(() =>
     store.selectedAgentId ? (store.agentById(store.selectedAgentId) ?? null) : null,
 );
 
-/** Selected agent's stock holdings with live quotes (M10). */
+/** Selected resident's cooperative-share holdings at their fixed unit prices. */
 const agentHoldings = computed(() => {
     const agentId = store.selectedAgentId;
     if (!agentId) return [];
@@ -57,9 +57,15 @@ const agentHoldings = computed(() => {
     return Object.entries(byStock)
         .filter(([, shares]) => (shares ?? 0) > 0)
         .map(([stockId, shares]) => {
-            const stock = store.stocks.find((s) => s.stock_id === stockId);
-            const price = stock?.price ?? 0;
-            return {stockId, name: stock?.name ?? stockId, shares: shares ?? 0, price, value: (shares ?? 0) * price};
+            const share = store.stocks.find((s) => s.stock_id === stockId);
+            const unitPrice = share?.unit_price ?? 0;
+            return {
+                stockId,
+                name: share?.name ?? stockId,
+                shares: shares ?? 0,
+                unitPrice,
+                value: (shares ?? 0) * unitPrice,
+            };
         });
 });
 
@@ -548,13 +554,13 @@ function teleportLocations(): WorldLocation[] {
             </div>
 
             <div class="ov-card">
-                <div class="ov-section-title">股票持仓</div>
+                <div class="ov-section-title">合作社份额</div>
                 <p v-if="agentHoldings.length === 0" class="ov-inventory">无</p>
                 <ul v-else class="ov-holdings">
                     <li v-for="h in agentHoldings" :key="h.stockId" class="ov-holding">
                         <span class="ov-holding-name">{{ h.name }}</span>
-                        <span class="ov-holding-qty">{{ h.shares }} 股</span>
-                        <span class="ov-holding-val">现价 {{ h.price }} · 市值 {{ h.value }}</span>
+                        <span class="ov-holding-qty">{{ h.shares }} 份</span>
+                        <span class="ov-holding-val">单价 {{ h.unitPrice }} · 认购额 {{ h.value }}</span>
                     </li>
                 </ul>
             </div>
@@ -698,7 +704,7 @@ function teleportLocations(): WorldLocation[] {
                         <option v-for="s in store.stocks" :key="s.stock_id" :value="s.stock_id">{{ s.name }}</option>
                     </select>
                     <input v-model.number="stockPrice" :disabled="godPending" class="god-qty" min="1" type="number"/>
-                    <button :disabled="godPending || !stockTarget" class="god-btn" @click="setStockPrice">调价</button>
+                    <button :disabled="godPending || !stockTarget" class="god-btn" @click="setStockPrice">设份额单价</button>
                 </div>
                 <div v-if="personalStores.length" class="god-row">
                     <select v-model="closeStoreTarget" :disabled="godPending" class="god-select">

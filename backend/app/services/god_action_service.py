@@ -66,8 +66,8 @@ MSG_QUANTITY_REQUIRED = "数量必须大于等于 0"
 MSG_WEATHER_REQUIRED = "天气必须是 clear/cloudy/rain/snow"
 MSG_SPEED_REQUIRED = "倍速必须是 1/2/5/10"
 MSG_TEXT_REQUIRED = "事件文本不能为空"
-MSG_STOCK_PRICE_REQUIRED = "股价必须为正整数"
-MSG_STOCK_MISSING = "股票不存在"
+MSG_STOCK_PRICE_REQUIRED = "合作社份额单价必须为正整数"
+MSG_STOCK_MISSING = "合作社份额不存在"
 MSG_STRUCTURE_MISSING = "该位置没有建筑"
 MSG_BLUEPRINT_MISSING = "蓝图不存在"
 MSG_CELL_OCCUPIED = "该位置已有建筑"
@@ -712,7 +712,7 @@ class GodActionService:
         return result, [announce, closed]
 
     # ------------------------------------------------------------------ #
-    # Stock price (M10, R18.4)
+    # Cooperative share unit price (stable command ID: change_stock_price)
     # ------------------------------------------------------------------ #
 
     def _cmd_change_stock_price(
@@ -728,20 +728,22 @@ class GodActionService:
         )
         if stock is None:
             raise HTTPException(status_code=404, detail=MSG_STOCK_MISSING)
+        stock.base_price = price
         stock.price = price
-        result = {"stock_id": stock.stock_id, "price": price}
+        result = {"stock_id": stock.stock_id, "unit_price": price}
         announce = self._announce(
             session, runtime, "change_stock_price", command_id, trace_id, world_time,
             target_id, parameters, reason, result,
         )
         changed = runtime.event_bus.publish(
-            session, world_time, "stock_price_changed",
+            session,
+            world_time,
+            "stock_price_changed",
             {
                 "stock_id": stock.stock_id,
                 "stock_name": stock.name,
-                "price": stock.price,
-                "prev_price": stock.prev_price,
-                "day_business": stock.day_business,
+                "unit_price": stock.price,
+                "operating_volume": stock.day_business,
             },
             trace_id,
         )

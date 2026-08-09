@@ -11,7 +11,13 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.config.settings import get_settings
-from app.config.gameplay import HOTEL_NIGHTLY_FEE
+from app.config.gameplay import (
+    ENERGY_DRAIN_PER_HOUR,
+    HOTEL_NIGHTLY_FEE,
+    LEADER_STIPEND_PERCENT,
+    TREASURY_UBI_SHARE_PERCENT,
+    UPKEEP_PER_DAY,
+)
 from app.database.models.agents import Agent
 from app.database.models.companies import (
     Company,
@@ -177,7 +183,7 @@ def test_seed_contract_and_queries(system) -> None:
     worker = next(p for p in farm_positions if p["position_id"] == "position_farm_worker")
     # M16: 农场正式岗位绑定生产配方（农场生产）。
     assert worker["job_name"] == "农场生产"
-    assert worker["wage_per_shift"] == 60
+    assert worker["wage_per_shift"] == 70
     assert worker["shift_start_minute"] == 480 and worker["shift_end_minute"] == 720
     assert worker["capacity"] == 2 and worker["vacancies"] == 2
     shop_positions = service.list_positions(world_id, "company_village_shop")
@@ -377,7 +383,7 @@ def test_application_boosts_manager_decision(system) -> None:
 
 
 def test_observation_shows_board_and_manager_desk(system) -> None:
-    """E3: 观察包含【公开招聘】；经理观察包含【企业经营】与【待审核求职申请】."""
+    """E3: resident sees public jobs; cooperative leader sees its workbench."""
     from app.agents.observation_service import build_observation
 
     engine, service = system
@@ -396,7 +402,7 @@ def test_observation_shows_board_and_manager_desk(system) -> None:
     assert "apply_job(" in resident_view
     assert "【我的申请】" in resident_view
     manager_view = build_observation(world_id, "agent_zhangming", SessionLocal)
-    assert "【企业经营】" in manager_view
+    assert "【合作社经营】" in manager_view
     assert "【待审核求职申请】" in manager_view
     assert "review_job_application(" in manager_view
 
@@ -472,7 +478,7 @@ def test_shift_start_late_and_beyond_window(system) -> None:
         done = session.get(WorkShift, shift["shift_id"])
         assert done is not None and done.status == "completed"
         assert done.payroll_status == "paid"
-        assert done.wage_due == 60 * 150 // 240  # 比例工资
+        assert done.wage_due == 70 * 150 // 240  # 比例工资
     finally:
         session.close()
 
@@ -516,6 +522,64 @@ def test_shift_start_wrong_location_and_busy(system) -> None:
         session.close()
     with pytest.raises(ValueError, match="当前行动未完成"):
         service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+
+
+def test_formal_shift_blocks_low_energy_and_charges_energy(system) -> None:
+    engine, service = system
+    runtime = engine.create_world("正式班次精力测试")
+    service.register_runtime(runtime)
+    service.ensure_seeded(runtime.world_id)
+    world_id = runtime.world_id
+    employment_id = _hire_farm_worker(service, world_id)
+    shift = _next_shift(service, world_id, employment_id)
+    advance_minutes(
+        engine, world_id, shift["scheduled_start"] - runtime.clock.world_time
+    )
+    _place_at_farm(engine, world_id)
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.energy = 20
+        session.commit()
+    finally:
+        session.close()
+    with pytest.raises(ValueError, match="精力不高于 20"):
+        service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+
+    session = SessionLocal()
+    try:
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        assert agent is not None
+        agent.energy = 100
+        session.commit()
+    finally:
+        session.close()
+    started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
+    advance_minutes(engine, world_id, started["scheduled_end"] - runtime.clock.world_time)
+
+    session = SessionLocal()
+    try:
+        completed = session.get(WorkShift, shift["shift_id"])
+        agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
+        job = session.get(Job, {"world_id": world_id, "job_id": "job_farm_production"})
+        event = session.scalar(
+            select(WorldEvent).where(
+                WorldEvent.world_id == world_id,
+                WorldEvent.type == "shift_completed",
+            )
+        )
+        assert completed is not None and agent is not None and job is not None
+        energy_spent = int(
+            job.energy_cost_per_hour * completed.worked_minutes / 60
+        )
+        hourly_drain = (
+            completed.actual_end // 60 - completed.actual_start // 60
+        ) * ENERGY_DRAIN_PER_HOUR
+        assert agent.energy == 100 - hourly_drain - energy_spent
+        assert event is not None and event.payload["energy_spent"] == energy_spent
+    finally:
+        session.close()
 
 
 def test_shift_absence_auto_judged(system) -> None:
@@ -773,7 +837,7 @@ def test_payroll_unpaid_and_repay(system) -> None:
     finally:
         session.close()
 
-    # 完成第一个班次 → 欠薪 60
+    # 完成第一个班次 → 欠薪 70
     advance_minutes(engine, world_id, shift["scheduled_start"] - runtime.clock.world_time)
     _place_at_farm(engine, world_id)
     started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
@@ -785,8 +849,8 @@ def test_payroll_unpaid_and_repay(system) -> None:
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert contract is not None and contract.unpaid_wage == 60
-        assert company is not None and company.unpaid_wage_total == 60
+        assert contract is not None and contract.unpaid_wage == 70
+        assert company is not None and company.unpaid_wage_total == 70
         # 没凭空发钱：没有任何正式工资流水（跨午夜的开销扣除与工资无关）
         wages = sum(
             tx.amount
@@ -809,7 +873,7 @@ def test_payroll_unpaid_and_repay(system) -> None:
     finally:
         session.close()
 
-    # 上帝注资 200，完成第二个班次 → 当期工资 60 付清 + 补发欠薪 60
+    # 上帝注资 200，完成第二个班次 → 当期工资 70 付清 + 补发欠薪 70
     session = SessionLocal()
     try:
         company = session.get(
@@ -834,7 +898,7 @@ def test_payroll_unpaid_and_repay(system) -> None:
         )
         assert contract is not None and contract.unpaid_wage == 0
         assert company is not None and company.unpaid_wage_total == 0
-        assert company.money == 200 - 120  # 班次2工资60 + 补发60
+        assert company.money == 200 - 140  # 班次2工资70 + 补发70
         wages = sum(
             tx.amount
             for tx in session.scalars(
@@ -845,7 +909,7 @@ def test_payroll_unpaid_and_repay(system) -> None:
                 )
             ).all()
         )
-        assert wages == 120
+        assert wages == 140
         repaid = session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
@@ -877,7 +941,7 @@ def test_formal_work_products_enter_company_inventory(system) -> None:
             CompanyInventory, {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"}
         )
         # M16: the farm position now runs the production recipe (12 wheat/shift,
-        # D: output raised so 12×6=72 covers the 60 wage with margin).
+        # D: output raised so 12×6=72 covers the 70 wage with margin).
         assert inventory is not None and inventory.quantity == 12
         agent_inv = session.get(
             Inventory, {"world_id": world_id, "agent_id": "agent_linxia", "item_id": "wheat"}
@@ -978,7 +1042,7 @@ def test_store_purchase_debits_company_and_rejects_when_broke(system) -> None:
         )
         assert store_row is not None and store_row.stock == 14 + 1  # 只有第一次成功
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent is not None and agent.money == 3003  # 第二次失败未入账
+        assert agent is not None and agent.money == 603  # 第二次失败未入账
     finally:
         session.close()
 
@@ -1117,7 +1181,7 @@ def test_god_inject_company_money_repays(system) -> None:
         session.commit()
     finally:
         session.close()
-    # 完成班次 → 欠薪 60
+    # 完成班次 → 欠薪 70
     advance_minutes(engine, world_id, shift["scheduled_start"] - runtime.clock.world_time)
     _place_at_farm(engine, world_id)
     started = service.start_shift(world_id, shift["shift_id"], "agent_linxia")
@@ -1139,14 +1203,14 @@ def test_god_inject_company_money_repays(system) -> None:
             world_id, "inject_company_money", "company_morning_farm",
             {"amount": 200}, "补发工资",
         )
-        assert outcome["result"]["repaid_total"] == 60
+        assert outcome["result"]["repaid_total"] == 70
     session = SessionLocal()
     try:
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
         contract = session.get(EmploymentContract, employment_id)
-        assert company is not None and company.money == 200 - 60
+        assert company is not None and company.money == 200 - 70
         assert company.unpaid_wage_total == 0
         assert contract is not None and contract.unpaid_wage == 0
         repaid = session.scalars(
@@ -1223,7 +1287,7 @@ def test_save_restore_v2_company_state(system) -> None:
         )
     finally:
         session.close()
-    # 恢复后完成班次1 → 欠薪 60（不重复支付、不凭空发钱）
+    # 恢复后完成班次1 → 欠薪 70（不重复支付、不凭空发钱）
     advance_minutes(engine, new_world_id, started["scheduled_end"] - runtime2.clock.world_time)
     session = SessionLocal()
     try:
@@ -1234,7 +1298,7 @@ def test_save_restore_v2_company_state(system) -> None:
                 EmploymentContract.status == "active",
             )
         )
-        assert contract is not None and contract.unpaid_wage == 60
+        assert contract is not None and contract.unpaid_wage == 70
         wages = sum(
             tx.amount
             for tx in session.scalars(
@@ -1419,7 +1483,7 @@ def test_first_version_acceptance_script(system) -> None:
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
-        assert company is not None and company.money == 800 - 60
+        assert company is not None and company.money == 800 - 70
         contract1 = session.scalar(
             select(EmploymentContract).where(
                 EmploymentContract.world_id == world_id,
@@ -1486,7 +1550,7 @@ def test_first_version_acceptance_script(system) -> None:
                 EmploymentContract.employment_id == emp1,
             )
         )
-        assert contract1 is not None and contract1.unpaid_wage == 60
+        assert contract1 is not None and contract1.unpaid_wage == 70
     finally:
         session.close()
     resigned = service.resign(world_id, emp1, "agent_linxia", "欠薪太久")
@@ -1499,7 +1563,7 @@ def test_first_version_acceptance_script(system) -> None:
                 EmploymentContract.employment_id == emp1,
             )
         )
-        assert contract1 is not None and contract1.unpaid_wage == 60  # 欠薪保留
+        assert contract1 is not None and contract1.unpaid_wage == 70  # 欠薪保留
     finally:
         session.close()
 
@@ -1514,7 +1578,7 @@ def test_first_version_acceptance_script(system) -> None:
             Company, {"world_id": new_world_id, "company_id": "company_morning_farm"}
         )
         assert restored_company is not None and restored_company.money == 0
-        assert restored_company.unpaid_wage_total == 60
+        assert restored_company.unpaid_wage_total == 70
         restored_contract = session.scalar(
             select(EmploymentContract).where(
                 EmploymentContract.world_id == new_world_id,
@@ -1522,7 +1586,7 @@ def test_first_version_acceptance_script(system) -> None:
                 EmploymentContract.status == "resigned",
             )
         )
-        assert restored_contract is not None and restored_contract.unpaid_wage == 60
+        assert restored_contract is not None and restored_contract.unpaid_wage == 70
         restored_shifts = session.scalars(
             select(WorkShift).where(WorkShift.world_id == new_world_id)
         ).all()
@@ -1551,7 +1615,7 @@ def _hire(system, world_id: str, company_id: str, applicant: str, manager: str) 
 
 
 def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
-    """M16 种子：6 家企业 6 个岗位；正式岗位绑定生产配方；面包坊经理为 agent_touzi."""
+    """M16 种子：6 家企业 6 个岗位；正式岗位绑定生产配方；面包坊负责人为 agent_chenyu."""
     engine, service = system
     runtime = engine.create_world("M16种子测试")
     service.register_runtime(runtime)
@@ -1569,7 +1633,7 @@ def test_m16_seed_companies_positions_and_formal_jobs(system) -> None:
         bakery = next(
             row for row in companies if row.company_id == "company_village_bakery"
         )
-        assert bakery.manager_agent_id == "agent_touzi"
+        assert bakery.manager_agent_id == "agent_chenyu"
         positions = session.scalars(
             select(Position).where(Position.world_id == world_id)
         ).all()
@@ -1602,7 +1666,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    # 农场正式班次产 10 wheat（工资 60 → 农场 740）
+    # 农场正式班次产 12 wheat（工资 70 → 农场 730）
     employment_id = _hire_farm_worker(service, world_id)
     shift = _next_shift(service, world_id, employment_id)
     advance_minutes(engine, world_id, shift["scheduled_start"] - runtime.clock.world_time)
@@ -1619,7 +1683,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
             {"world_id": world_id, "company_id": "company_morning_farm", "item_id": "wheat"},
         )
         assert wheat is not None and wheat.quantity == 12
-        assert farm is not None and farm.money == 740
+        assert farm is not None and farm.money == 730
     finally:
         session.close()
 
@@ -1627,7 +1691,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
         world_id,
         "company_village_bakery",
         "company_morning_farm",
-        "agent_touzi",
+        "agent_chenyu",
         "wheat",
         quantity=10,
         reason="备料",
@@ -1644,7 +1708,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
         assert bakery is not None and bakery.money == 300 - 60
-        assert farm is not None and farm.money == 740 + 60
+        assert farm is not None and farm.money == 730 + 60
         buyer_tx = session.scalar(
             select(CompanyTransaction).where(
                 CompanyTransaction.world_id == world_id,
@@ -1664,7 +1728,7 @@ def test_m16_purchase_chain_ledger_and_events(system) -> None:
             )
         )
         assert seller_tx is not None
-        assert seller_tx.amount == 60 and seller_tx.balance_after == 800
+        assert seller_tx.amount == 60 and seller_tx.balance_after == 790
         assert seller_tx.reference_id == "company_village_bakery"
         events = session.scalars(
             select(WorldEvent).where(
@@ -1698,7 +1762,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_chenyu")
     view = service.list_agent_employment(world_id, "agent_chenyu")
     shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
     # 面包坊班次当天 13:00（780）；先到地点
@@ -1752,7 +1816,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
         assert wheat.quantity == 10 and wheat.reserved_quantity == 10
     finally:
         session.close()
-    # 完成班次：消耗 10 wheat、产出 24 bread、工资 60（D: 产出上调留毛利）
+    # 完成班次：消耗 10 wheat、产出 24 bread、工资 70（D: 产出上调留毛利）
     advance_minutes(engine, world_id, started["scheduled_end"] - runtime.clock.world_time)
     session = SessionLocal()
     try:
@@ -1774,7 +1838,7 @@ def test_m16_shift_reserves_and_consumes_inputs(system) -> None:
                 Transaction.type == "work_wage",
             )
         )
-        assert wage is not None and wage.amount == 60
+        assert wage is not None and wage.amount == 70
         production = session.scalar(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
@@ -2010,7 +2074,7 @@ def test_m16_concurrent_purchase_exactly_one_wins(system) -> None:
                 world_id,
                 "company_village_bakery",
                 "company_morning_farm",
-                "agent_touzi",
+                "agent_chenyu",
                 "wheat",
                 quantity=10,
                 reason="抢货",
@@ -2060,7 +2124,7 @@ def test_m16_save_restore_keeps_inventory_and_seed_idempotent(system) -> None:
     world_id = runtime.world_id
     save_service = SaveService(engine, SessionLocal)
 
-    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_chenyu")
     view = service.list_agent_employment(world_id, "agent_chenyu")
     shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
     advance_minutes(engine, world_id, shift["scheduled_start"] - 30 - runtime.clock.world_time)
@@ -2159,7 +2223,7 @@ def test_interrupted_shift_cancelled_and_releases_reserved(system) -> None:
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_touzi")
+    employment_id = _hire(system, world_id, "company_village_bakery", "agent_chenyu", "agent_chenyu")
     view = service.list_agent_employment(world_id, "agent_chenyu")
     shift = next(s for s in view["shifts"] if s["employment_id"] == employment_id)
     advance_minutes(engine, world_id, shift["scheduled_start"] - 30 - runtime.clock.world_time)
@@ -2361,7 +2425,7 @@ def test_unbound_store_rejects_buy_and_sell(system) -> None:
     session = SessionLocal()
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent is not None and agent.money == 3000  # 未扣款也未入账
+        assert agent is not None and agent.money == 600  # 未扣款也未入账
         bread = session.get(
             StoreProduct, {"world_id": world_id, "store_id": "village_shop", "item_id": "bread"}
         )
@@ -2409,72 +2473,77 @@ def _company_money(world_id: str, company_id: str) -> int:
         session.close()
 
 
-def test_manager_profit_share_paid_at_midnight(system) -> None:
-    """A profitable day pays the manager 20% of net profit at 00:00, funded
-    from the company treasury, with both ledgers and events."""
+def test_leader_stipend_paid_from_operating_surplus_only(system) -> None:
+    """A cooperative leader receives 10% of operating surplus, never subsidy."""
     engine, service = system
-    runtime = engine.create_world("经理分成测试")
+    runtime = engine.create_world("负责人津贴测试")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    manager_id = "agent_zhangming"  # company_morning_farm manager (seed)
+    leader_id = "agent_zhangming"  # farm cooperative leader in the seed
     _seed_company_flow(engine, world_id, "company_morning_farm", +100, "sale_income")
+    _seed_company_flow(
+        engine, world_id, "company_morning_farm", +100, "treasury_subsidy"
+    )
 
     session = SessionLocal()
     try:
-        manager_before = session.get(Agent, {"world_id": world_id, "agent_id": manager_id}).money
+        leader_before = session.get(
+            Agent, {"world_id": world_id, "agent_id": leader_id}
+        ).money
         company_before = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         ).money
     finally:
         session.close()
 
-    advance_minutes(engine, world_id, 1440 - 480 + 1)  # 08:00 -> next 00:00
+    advance_minutes(engine, world_id, 1440 - 480 + 1)
 
+    daily_ubi = 9 * UPKEEP_PER_DAY * TREASURY_UBI_SHARE_PERCENT // 100 // 9
+    stipend = 100 * LEADER_STIPEND_PERCENT // 100
     session = SessionLocal()
     try:
-        manager = session.get(Agent, {"world_id": world_id, "agent_id": manager_id})
-        # share 100*20//100 = 20, minus the 120 daily upkeep, plus the 60
-        # treasury UBI (A1: 50% of the 1080 upkeep, split among 9 residents).
-        assert manager.money == manager_before + 20 - 120 + 60
+        leader = session.get(Agent, {"world_id": world_id, "agent_id": leader_id})
+        assert leader is not None
+        assert leader.money == leader_before + stipend - UPKEEP_PER_DAY + daily_ubi
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
-        assert company.money == company_before - 20
+        assert company is not None and company.money == company_before - stipend
         company_tx = session.scalar(
             select(CompanyTransaction).where(
                 CompanyTransaction.world_id == world_id,
                 CompanyTransaction.company_id == "company_morning_farm",
-                CompanyTransaction.type == "manager_profit",
+                CompanyTransaction.type == "leader_stipend",
             )
         )
-        assert company_tx is not None and company_tx.amount == -20
-        assert company_tx.related_agent_id == manager_id
+        assert company_tx is not None and company_tx.amount == -stipend
+        assert company_tx.related_agent_id == leader_id
         agent_tx = session.scalar(
             select(Transaction).where(
                 Transaction.world_id == world_id,
-                Transaction.agent_id == manager_id,
-                Transaction.type == "manager_profit",
+                Transaction.agent_id == leader_id,
+                Transaction.type == "leader_stipend",
             )
         )
-        assert agent_tx is not None and agent_tx.amount == 20
-        profit_events = session.scalars(
+        assert agent_tx is not None and agent_tx.amount == stipend
+        stipend_events = session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
-                WorldEvent.type == "manager_profit_paid",
+                WorldEvent.type == "leader_stipend_paid",
             )
         ).all()
-        assert len(profit_events) == 1
-        assert profit_events[0].payload["amount"] == 20
-        assert profit_events[0].payload["profit"] == 100
+        assert len(stipend_events) == 1
+        assert stipend_events[0].payload["amount"] == stipend
+        assert stipend_events[0].payload["operating_surplus"] == 100
     finally:
         session.close()
 
 
-def test_manager_profit_skipped_when_treasury_short(system) -> None:
-    """No payout when the company cannot cover the share."""
+def test_leader_stipend_skipped_when_treasury_short(system) -> None:
+    """A cooperative cannot pay a stipend it cannot cover."""
     engine, service = system
-    runtime = engine.create_world("分成金库不足")
+    runtime = engine.create_world("津贴金库不足")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
@@ -2484,53 +2553,63 @@ def test_manager_profit_skipped_when_treasury_short(system) -> None:
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
-        company.money = 10  # share is 20 > 10
+        assert company is not None
+        company.money = 9  # 10-coin stipend cannot be covered.
         session.commit()
     finally:
         session.close()
     advance_minutes(engine, world_id, 1440 - 480 + 1)
     session = SessionLocal()
     try:
-        assert _company_money(world_id, "company_morning_farm") == 10  # untouched
+        assert _company_money(world_id, "company_morning_farm") == 9
         assert not session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
-                WorldEvent.type == "manager_profit_paid",
+                WorldEvent.type == "leader_stipend_paid",
             )
         ).all()
     finally:
         session.close()
 
 
-def test_manager_profit_skipped_when_day_lost_money(system) -> None:
-    """A loss-making day pays nothing."""
+def test_leader_stipend_skipped_when_operating_day_lost_money(system) -> None:
+    """A loss-making operating day pays no leader stipend."""
     engine, service = system
-    runtime = engine.create_world("分成亏损日")
+    runtime = engine.create_world("津贴亏损日")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
-    _seed_company_flow(engine, world_id, "company_morning_farm", -50, "wage_payment")
-    advance_minutes(engine, world_id, 1440 - 480 + 1)
     session = SessionLocal()
     try:
-        manager = session.get(Agent, {"world_id": world_id, "agent_id": "agent_zhangming"})
-        # Only the daily upkeep (-120) and the treasury UBI (+60) moved the
-        # balance (A1).
-        assert manager.money == 2940  # 3000 - 120 + 60
+        leader_before = session.get(
+            Agent, {"world_id": world_id, "agent_id": "agent_zhangming"}
+        ).money
+    finally:
+        session.close()
+    _seed_company_flow(engine, world_id, "company_morning_farm", -50, "wage_payment")
+    advance_minutes(engine, world_id, 1440 - 480 + 1)
+    daily_ubi = 9 * UPKEEP_PER_DAY * TREASURY_UBI_SHARE_PERCENT // 100 // 9
+    session = SessionLocal()
+    try:
+        leader = session.get(
+            Agent, {"world_id": world_id, "agent_id": "agent_zhangming"}
+        )
+        assert leader is not None
+        assert leader.money == leader_before - UPKEEP_PER_DAY + daily_ubi
         assert not session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
-                WorldEvent.type == "manager_profit_paid",
+                WorldEvent.type == "leader_stipend_paid",
             )
         ).all()
     finally:
         session.close()
 
 
-def test_manager_profit_skipped_without_manager(system) -> None:
-    """A manager-less company never pays out."""
+def test_leader_stipend_skipped_without_leader(system) -> None:
+    """A cooperative without a designated leader pays no stipend."""
     engine, service = system
-    runtime = engine.create_world("分成无经理")
+    runtime = engine.create_world("津贴无负责人")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     world_id = runtime.world_id
@@ -2539,6 +2618,7 @@ def test_manager_profit_skipped_without_manager(system) -> None:
         company = session.get(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
+        assert company is not None
         company.manager_agent_id = None
         session.commit()
     finally:
@@ -2547,28 +2627,28 @@ def test_manager_profit_skipped_without_manager(system) -> None:
     advance_minutes(engine, world_id, 1440 - 480 + 1)
     session = SessionLocal()
     try:
-        assert _company_money(world_id, "company_morning_farm") == 800 + 100  # untouched
+        assert _company_money(world_id, "company_morning_farm") == 800 + 100
         assert not session.scalars(
             select(WorldEvent).where(
                 WorldEvent.world_id == world_id,
-                WorldEvent.type == "manager_profit_paid",
+                WorldEvent.type == "leader_stipend_paid",
             )
         ).all()
     finally:
         session.close()
 
 
-def test_observation_shows_manager_profit_share(system) -> None:
-    """The manager desk surfaces the daily profit-share rule."""
+def test_observation_shows_leader_stipend(system) -> None:
+    """The leadership desk surfaces the cooperative stipend rule."""
     engine, service = system
-    runtime = engine.create_world("分成观察")
+    runtime = engine.create_world("津贴观察")
     service.register_runtime(runtime)
     service.ensure_seeded(runtime.world_id)
     from app.agents.observation_service import build_observation
 
     observation = build_observation(runtime.world_id, "agent_zhangming", SessionLocal)
-    assert "经理分成" in observation
-    assert "20%" in observation
+    assert "负责人值守津贴" in observation
+    assert "10%" in observation
 
 
 def test_hotel_sleep_credits_hotel_company(system) -> None:

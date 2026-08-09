@@ -457,9 +457,8 @@ class BuildService:
                     frontier.append(neighbour)
         if any((col, row) not in seen for col, row in spawns[1:]):
             return False
-        # M18: anchors come from the DB (map-seeded + runtime stall rows), so
-        # a wild-cell shop enters the invariant on open_shop and leaves it on
-        # close_shop without any extra bookkeeping.
+        # Every location anchor is map-seeded. Cooperative stalls never add
+        # runtime locations, so this checks the same immutable map contract.
         anchors = session.scalars(
             select(WorldLocation).where(WorldLocation.world_id == world_id)
         ).all()

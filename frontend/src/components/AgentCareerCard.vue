@@ -3,9 +3,9 @@ import {computed} from 'vue';
 import {SHIFT_STATUS_LABELS, useWorldStore} from '../stores/worldStore';
 
 /**
- * 居民身份卡扩展 (M13): 正式职业、企业、岗位、每班工资、下一班次、
+ * 居民身份卡扩展：正式职业、合作社、岗位、每班工资、下一班次、
  * 出勤评分、欠薪与最近班次记录。数据来自 store 的 employment REST 缓存
- * 与 WS 班次事件缓存 (agentEmployment / agentShifts / jobOpenings)。
+ * 与 WS 班次事件缓存（agentEmployment / agentShifts / jobOpenings）。
  */
 
 const props = defineProps<{ agentId: string }>();

@@ -742,56 +742,58 @@ describe('applyEvent event mapping', () => {
     });
 });
 
-describe('applyEvent M10 stock events', () => {
-    let store: ReturnType<typeof useWorldStore>;
-
-    beforeEach(async () => {
+describe('applyEvent cooperative-share events', () => {
+    async function createCooperativeShareStore() {
         setActivePinia(createPinia());
-        store = useWorldStore();
+        const store = useWorldStore();
         store.applySnapshot(baseSnapshot());
         // applySnapshot fires loadStocks(); let the mock's empty payload land
-        // first so the manual quote seeding below is not overwritten.
+        // before the manual issue seed below.
         await Promise.resolve();
         store.stocks = [
             {
                 stock_id: 'stock_village_shop',
                 name: '晨露商店',
-                price: 100,
-                prev_price: 100,
-                day_business: 0,
-                last_div_per_share: 0,
+                unit_price: 20,
+                operating_volume: 0,
                 source: 'store',
                 company_id: 'village_shop',
+                issuer_company_id: 'company_village_shop',
+                outstanding_shares: 100,
+                available_shares: 100,
+                holding_cap: 20,
             },
         ];
-    });
+        return store;
+    }
 
-    it('stock_price_changed: quote row + panel price update; zero delta stays silent', () => {
+    it('stock_price_changed: administrator unit price change updates the issue and stream', async () => {
+        const store = await createCooperativeShareStore();
         store.applyEvent(env(1, 'stock_price_changed', {
             stock_id: 'stock_village_shop',
             stock_name: '晨露商店',
-            price: 102,
-            prev_price: 100,
-            day_business: 3,
+            unit_price: 25,
+            operating_volume: 3,
         }));
-        expect(store.stocks[0].price).toBe(102);
-        expect(store.stocks[0].prev_price).toBe(100);
-        expect(store.stocks[0].day_business).toBe(3);
-        expect(store.events[0].text).toBe('晨露商店 股价 102（+2）');
-
-        // Unchanged price still syncs the panel but adds no stream line.
-        store.applyEvent(env(2, 'stock_price_changed', {
-            stock_id: 'stock_village_shop',
-            stock_name: '晨露商店',
-            price: 102,
-            prev_price: 102,
-            day_business: 3,
-        }));
-        expect(store.stocks[0].prev_price).toBe(102);
-        expect(store.events).toHaveLength(1);
+        expect(store.stocks[0].unit_price).toBe(25);
+        expect(store.stocks[0].operating_volume).toBe(3);
+        expect(store.events[0].text).toBe('晨露商店 份额单价调整为 25 金币');
     });
 
-    it('stock_bought: holding grows + event line', () => {
+    it('stock_volume_changed: transparent operating volume updates without price movement', async () => {
+        const store = await createCooperativeShareStore();
+        store.applyEvent(env(1, 'stock_volume_changed', {
+            stock_id: 'stock_village_shop',
+            stock_name: '晨露商店',
+            operating_volume: 4,
+        }));
+        expect(store.stocks[0].unit_price).toBe(20);
+        expect(store.stocks[0].operating_volume).toBe(4);
+        expect(store.events[0].text).toBe('晨露商店 今日经营量 4');
+    });
+
+    it('stock_bought: subscription grows holding and emits cooperative wording', async () => {
+        const store = await createCooperativeShareStore();
         store.applyEvent(env(1, 'stock_bought', {
             agent_id: 'agent_linxia',
             stock_id: 'stock_village_shop',
@@ -801,10 +803,11 @@ describe('applyEvent M10 stock events', () => {
             total: 40,
         }));
         expect(store.holdings['agent_linxia']['stock_village_shop']).toBe(2);
-        expect(store.events[0].text).toBe('林夏 买入 晨露商店 2股 @20（共40金币）');
+        expect(store.events[0].text).toBe('林夏 认购 晨露商店 2份 @20（共40金币）');
     });
 
-    it('stock_sold: holding shrinks, removed at zero', () => {
+    it('stock_sold: redemption shrinks the holding and removes it at zero', async () => {
+        const store = await createCooperativeShareStore();
         store.holdings = {agent_linxia: {stock_village_shop: 2}};
         store.applyEvent(env(1, 'stock_sold', {
             agent_id: 'agent_linxia',
@@ -815,7 +818,7 @@ describe('applyEvent M10 stock events', () => {
             total: 20,
         }));
         expect(store.holdings['agent_linxia']['stock_village_shop']).toBe(1);
-        expect(store.events[0].text).toBe('林夏 卖出 晨露商店 1股 @20（得20金币）');
+        expect(store.events[0].text).toBe('林夏 赎回 晨露商店 1份 @20（得20金币）');
 
         store.applyEvent(env(2, 'stock_sold', {
             agent_id: 'agent_linxia',
@@ -828,25 +831,16 @@ describe('applyEvent M10 stock events', () => {
         expect(store.holdings['agent_linxia']['stock_village_shop']).toBeUndefined();
     });
 
-    it('dividend_paid: dividend event line', () => {
-        store.applyEvent(env(1, 'dividend_paid', {
-            stock_id: 'stock_village_shop',
-            stock_name: '晨露商店',
-            div_per_share: 2,
-            payouts: [{agent_id: 'agent_linxia', shares: 2, amount: 4}],
-        }));
-        expect(store.events[0].text).toBe('晨露商店 每股分红 2 金币');
-    });
-
-    it('manager_profit_paid: manager profit share line', () => {
-        store.applyEvent(env(1, 'manager_profit_paid', {
+    it('leader_stipend_paid: leader receives an operating-surplus stipend line', async () => {
+        const store = await createCooperativeShareStore();
+        store.applyEvent(env(1, 'leader_stipend_paid', {
             company_id: 'company_morning_farm',
             company_name: '晨露农场',
-            manager_agent_id: 'agent_zhangming',
-            amount: 20,
-            profit: 100,
+            leader_agent_id: 'agent_zhangming',
+            amount: 10,
+            operating_surplus: 100,
         }));
-        expect(store.events[0].text).toBe('晨露农场 给经理张明分成 20 金币');
+        expect(store.events[0].text).toBe('晨露农场 向负责人张明发放值守津贴 10 金币');
     });
 });
 
@@ -1252,14 +1246,14 @@ function baseShopDetail(): LocationDetail {
 describe('task label helpers', () => {
     const locations: WorldLocation[] = [LOCATION_SHOP, LOCATION_HOUSE];
 
-    it('TOOL_LABELS: 企业/招聘/班次工具显示中文标签', () => {
+    it('TOOL_LABELS: 合作社/招聘/班次工具显示中文标签', () => {
         expect(TOOL_LABELS['review_job_application']).toBe('审核申请');
         expect(TOOL_LABELS['withdraw_job_application']).toBe('撤回申请');
         expect(TOOL_LABELS['apply_job']).toBe('求职申请');
         expect(TOOL_LABELS['resign_job']).toBe('辞职');
         expect(TOOL_LABELS['terminate_employment']).toBe('解雇');
         expect(TOOL_LABELS['start_shift']).toBe('签到上班');
-        expect(TOOL_LABELS['purchase_company_goods']).toBe('企业采购');
+        expect(TOOL_LABELS['purchase_company_goods']).toBe('合作社采购');
         expect(TOOL_LABELS['stock_store']).toBe('上架货架');
     });
 
@@ -1579,7 +1573,7 @@ describe('applyEvent M13 company & employment events', () => {
             wage_paid: 60,
             company_balance: 740,
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 向 林夏 支付工资 60 金币');
+        expect(store.events[0].text).toBe('合作社 晨露农场 向 林夏 支付工资 60 金币');
         expect(store.companies[0].money).toBe(740);
     });
 
@@ -1594,7 +1588,7 @@ describe('applyEvent M13 company & employment events', () => {
             wage_paid: 0,
             company_balance: 0,
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 未能支付 林夏 的工资（欠 60 金币）');
+        expect(store.events[0].text).toBe('合作社 晨露农场 未能支付 林夏 的工资（欠 60 金币）');
         expect(store.companies[0].unpaid_wage_total).toBe(60);
     });
 
@@ -1606,7 +1600,7 @@ describe('applyEvent M13 company & employment events', () => {
             agent_id: 'agent_linxia',
             amount: 60,
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 向 林夏 补发欠薪 60 金币');
+        expect(store.events[0].text).toBe('合作社 晨露农场 向 林夏 补发欠薪 60 金币');
         expect(store.companies[0].unpaid_wage_total).toBe(0);
     });
 
@@ -1617,7 +1611,7 @@ describe('applyEvent M13 company & employment events', () => {
             new_status: 'suspended',
             reason: '资金不足',
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 状态：经营中 → 停业');
+        expect(store.events[0].text).toBe('合作社 晨露农场 状态：经营中 → 停业');
         expect(store.companies[0].status).toBe('suspended');
     });
 
@@ -1628,7 +1622,7 @@ describe('applyEvent M13 company & employment events', () => {
             balance: 920,
             reason: '商店售出 小麦×4',
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 资金变化 +120（当前 920）');
+        expect(store.events[0].text).toBe('合作社 晨露农场 资金变化 +120（当前 920）');
         expect(store.companies[0].money).toBe(920);
     });
 
@@ -1642,7 +1636,7 @@ describe('applyEvent M13 company & employment events', () => {
             unit_price: 3,
             total: 12,
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 售出 小麦×4（12 金币）');
+        expect(store.events[0].text).toBe('合作社 晨露农场 售出 小麦×4（12 金币）');
     });
 
     it('company_inventory_changed: 库存变化行', () => {
@@ -1650,7 +1644,7 @@ describe('applyEvent M13 company & employment events', () => {
             company_id: 'company_morning_farm',
             items: [{item_id: 'wheat', quantity: 5}],
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 库存变化（小麦×5）');
+        expect(store.events[0].text).toBe('合作社 晨露农场 库存变化（小麦×5）');
     });
 
     it('company_inventory_changed: 替换指定企业缓存且不影响其他企业 (M16)', () => {
@@ -1686,7 +1680,7 @@ describe('applyEvent M13 company & employment events', () => {
             consumed: [{item_id: 'wheat', quantity: 10}],
             products: [{item_id: 'bread', quantity: 20}],
         }));
-        expect(store.events[0].text).toBe('企业 company_village_bakery 完成生产：面包×20（消耗 小麦×10）');
+        expect(store.events[0].text).toBe('合作社 company_village_bakery 完成生产：面包×20（消耗 小麦×10）');
     });
 
     it('company_purchase_completed: 采购行', () => {
@@ -1698,7 +1692,7 @@ describe('applyEvent M13 company & employment events', () => {
             unit_price: 6,
             total: 60,
         }));
-        expect(store.events[0].text).toBe('企业 company_village_bakery 从 晨露农场 采购 小麦×10（60 金币）');
+        expect(store.events[0].text).toBe('合作社 company_village_bakery 从 晨露农场 采购 小麦×10（60 金币）');
     });
 
     it('company_store_stocked: 上架行', () => {
@@ -1709,7 +1703,7 @@ describe('applyEvent M13 company & employment events', () => {
             quantity: 20,
             stock_after: 20,
         }));
-        expect(store.events[0].text).toBe('企业 company_village_shop 上架 面包×20 到货架');
+        expect(store.events[0].text).toBe('合作社 company_village_shop 上架 面包×20 到货架');
     });
 
     it('job_opening_created: 发布职位行 + 空缺累计', () => {
@@ -1719,7 +1713,7 @@ describe('applyEvent M13 company & employment events', () => {
             position_id: 'position_farm_worker',
             vacancies: 2,
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 发布新职位 农场工人（招聘 2 人）');
+        expect(store.events[0].text).toBe('合作社 晨露农场 发布新职位 农场工人（招聘 2 人）');
         expect(store.companies[0].open_vacancies).toBe(3);
     });
 
@@ -1730,7 +1724,7 @@ describe('applyEvent M13 company & employment events', () => {
             position_id: 'position_farm_worker',
             reason: '已招满',
         }));
-        expect(store.events[0].text).toBe('企业 晨露农场 关闭了 农场工人 的招聘');
+        expect(store.events[0].text).toBe('合作社 晨露农场 关闭了 农场工人 的招聘');
     });
 });
 

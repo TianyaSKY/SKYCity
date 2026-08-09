@@ -15,6 +15,8 @@ from app.services.world_config_loader import (
     load_world_config,
 )
 
+from app.services.seed_loader import load_companies
+
 
 @pytest.fixture(scope="module")
 def world() -> ParsedWorldConfig:
@@ -52,7 +54,7 @@ def test_map_dimensions(world: ParsedWorldConfig) -> None:
 
 
 def test_map_version(world: ParsedWorldConfig) -> None:
-    assert world.map_version == "1.1.0"
+    assert world.map_version == "1.2.0"
 
 
 def test_tile_layers_present(world: ParsedWorldConfig) -> None:
@@ -85,11 +87,13 @@ def test_locations(world: ParsedWorldConfig) -> None:
         "zhoushen_home",
         "limujiang_home",
         "sunshen_home",
-        # M18 plaza stalls.
+        "laozhang_home",
+        "touzi_home",
+        # Fixed cooperative plaza stalls.
         "stall_plaza_1",
         "stall_plaza_2",
         "stall_plaza_3",
-        # M19 gathering spots.
+        # Gathering spots.
         "forest",
         "river_bank",
     }
@@ -106,16 +110,62 @@ def test_spawn_points(world: ParsedWorldConfig) -> None:
     for spawn in world.spawn_points:
         assert spawn.spawn_id and spawn.agent_id and spawn.direction
     # spawn + home come from the character cards (single source of truth)
-    assert by_id["agent_touzi"].col == 33 and by_id["agent_touzi"].row == 20
+    assert by_id["agent_touzi"].col == 38 and by_id["agent_touzi"].row == 21
     assert by_id["agent_linxia"].col == 18 and by_id["agent_linxia"].row == 27
     assert by_id["agent_linxia"].home_id == "linxia_home"
-    assert by_id["agent_touzi"].home_id is None
-    assert by_id["agent_laozhang"].home_id is None
+    assert by_id["agent_touzi"].home_id == "touzi_home"
+    assert by_id["agent_laozhang"].home_id == "laozhang_home"
 
+
+
+def test_resident_homes_and_company_leaders_align(world: ParsedWorldConfig) -> None:
+    """Cards, map anchors, and cooperative leader assignments share one roster."""
+    data_dir = Path(get_settings().world_data_dir)
+    cards = {
+        path.stem: json.loads(path.read_text(encoding="utf-8"))
+        for path in (data_dir / "identities").glob("*.json")
+    }
+    locations = {location.location_id: location for location in world.locations}
+    expected_homes = {
+        "agent_linxia": "linxia_home",
+        "agent_zhangming": "zhangming_home",
+        "agent_chenyu": "chenyu_home",
+        "agent_wangfang": "wangfang_home",
+        "agent_zhoushen": "zhoushen_home",
+        "agent_limujiang": "limujiang_home",
+        "agent_sunshen": "sunshen_home",
+        "agent_laozhang": "laozhang_home",
+        "agent_touzi": "touzi_home",
+    }
+    assert set(cards) == set(expected_homes)
+    for agent_id, home_id in expected_homes.items():
+        home = cards[agent_id]["home"]
+        location = locations[home_id]
+        assert home["location_id"] == home_id
+        assert location.location_type == "house"
+        assert (location.col, location.row) == (home["col"], home["row"])
+
+    leaders = {
+        company["company_id"]: company["manager_agent_id"]
+        for company in load_companies(data_dir)
+    }
+    assert leaders == {
+        "company_morning_farm": "agent_zhangming",
+        "company_village_shop": "agent_wangfang",
+        "company_village_bakery": "agent_chenyu",
+        "company_village_hotel": "agent_touzi",
+        "company_carpenter_shop": "agent_limujiang",
+        "company_flower_garden": "agent_sunshen",
+    }
+    assert cards["agent_linxia"]["occupation"] == "晨露农场工人"
+    assert cards["agent_laozhang"]["occupation"] == "广场文员"
+    assert cards["agent_zhoushen"]["occupation"] == "小镇旅店服务员"
+    for leader_id in leaders.values():
+        assert "负责人" in cards[leader_id]["occupation"]
 
 def test_spawns_come_from_cards_not_map(fake_world_data: Path) -> None:
-    """The map's spawn_points layer is decorative: the character cards decide
-    who spawns and where (the copied real map carries 6 spawn objects)."""
+    """The map's spawn_points layer is decorative: character cards decide
+    who spawns and where."""
     _write_card(fake_world_data, "agent_newbie", name="新手")
     world = loader._load_world_cached(fake_world_data, "tiny_world")
     assert [s.agent_id for s in world.spawn_points] == ["agent_newbie"]
@@ -170,4 +220,4 @@ def test_health_endpoint() -> None:
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "map_version": "1.1.0"}
+    assert response.json() == {"status": "ok", "map_version": "1.2.0"}

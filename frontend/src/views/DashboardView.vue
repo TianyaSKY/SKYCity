@@ -94,14 +94,14 @@ const needsAvg = computed<{satiety: number; energy: number; mood: number; loneli
 
 const companyMoneyTotal = computed(() => store.companies.reduce((sum, c) => sum + c.money, 0));
 const totalMoney = computed(() => moneyTotal.value + companyMoneyTotal.value);
-const stockCount = computed(() => store.stocks.length);
-const avgStockPrice = computed(() =>
-    stockCount.value === 0
+const shareIssueCount = computed(() => store.stocks.length);
+const avgShareUnitPrice = computed(() =>
+    shareIssueCount.value === 0
         ? 0
-        : Math.round(store.stocks.reduce((sum, s) => sum + s.price, 0) / stockCount.value),
+        : Math.round(store.stocks.reduce((sum, share) => sum + share.unit_price, 0) / shareIssueCount.value),
 );
-const dayBusinessTotal = computed(() =>
-    store.stocks.reduce((sum, s) => sum + s.day_business, 0),
+const operatingVolumeTotal = computed(() =>
+    store.stocks.reduce((sum, share) => sum + share.operating_volume, 0),
 );
 
 // --------------------------------------------------------------------------- #
@@ -174,16 +174,16 @@ const maxEventCount = computed(() =>
                 <h2>经济运行</h2>
                 <dl class="kv">
                     <div class="kv-row"><dt>居民资金</dt><dd>{{ fmt(moneyTotal) }}</dd></div>
-                    <div class="kv-row"><dt>企业资金</dt><dd>{{ fmt(companyMoneyTotal) }}</dd></div>
+                    <div class="kv-row"><dt>合作社资金</dt><dd>{{ fmt(companyMoneyTotal) }}</dd></div>
                     <div class="kv-row"><dt>资金合计</dt><dd>{{ fmt(totalMoney) }}</dd></div>
-                    <div class="kv-row"><dt>企业数</dt><dd>{{ store.companies.length }}</dd></div>
+                    <div class="kv-row"><dt>合作社数量</dt><dd>{{ store.companies.length }}</dd></div>
                     <div class="kv-row"><dt>员工 / 开放职位</dt><dd>{{ store.employedCount }} / {{ store.openPositionCount }}</dd></div>
                 </dl>
-                <h3 class="sub">股票</h3>
+                <h3 class="sub">合作社份额</h3>
                 <dl class="kv">
-                    <div class="kv-row"><dt>股票数</dt><dd>{{ stockCount }}</dd></div>
-                    <div class="kv-row"><dt>平均股价</dt><dd>{{ fmt(avgStockPrice) }}</dd></div>
-                    <div class="kv-row"><dt>今日营业合计</dt><dd>{{ fmt(dayBusinessTotal) }}</dd></div>
+                    <div class="kv-row"><dt>份额种类</dt><dd>{{ shareIssueCount }}</dd></div>
+                    <div class="kv-row"><dt>平均认购单价</dt><dd>{{ fmt(avgShareUnitPrice) }}</dd></div>
+                    <div class="kv-row"><dt>今日经营合计</dt><dd>{{ fmt(operatingVolumeTotal) }}</dd></div>
                 </dl>
                 <h3 class="sub">世界</h3>
                 <dl class="kv">

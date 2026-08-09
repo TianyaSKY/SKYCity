@@ -1,6 +1,6 @@
 # 架构 (architecture)
 
-版本：1.0.0
+版本：1.2.0
 
 ## 1. 三大边界
 
@@ -45,7 +45,8 @@ app/
 │                           memory, relationship, event
 ├── schemas/                Pydantic：actions / events / snapshots / websocket
 ├── services/               应用服务：decision / observation / action_execution /
-│                           conversation / memory / relationship / god_action
+│                           company_employment / stock / shop / conversation /
+│                           memory / relationship / god_action
 ├── world_engine/           时钟 clock / 调度器 scheduler / 事件总线 event_bus /
 │                           引擎 engine / 锁 locks
 ├── repositories/           数据访问：agent / world / inventory / memory / event

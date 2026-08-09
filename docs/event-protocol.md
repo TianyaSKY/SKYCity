@@ -1,6 +1,6 @@
 # 事件协议 (event-protocol)
 
-版本：1.1.0（M18 追加创业与个人商店事件）
+版本：1.2.0（合作社份额、负责人值守津贴与固定居民摊位）
 
 ## 1. 统一事件信封
 
@@ -50,7 +50,7 @@
 | `agent_move_completed`  | `{agent_id, at: [c,r], destination_id, destination_name, duration_minutes}`  | 移动完成（duration_minutes = 出发时结算的路程耗时，供记忆/回放）   |
 | `agent_wait_started`    | `{agent_id, minutes, reason}`                                                                                  | 等待开始                                                                               |
 | `agent_wait_completed`  | `{agent_id}`                                                                                                   | 等待结束                                                                               |
-| `agent_sleep_started`   | `{agent_id, minutes, ends_at, reason, place, fee}`                                                             | 睡觉开始（R14：有家在家、无家在旅店；`fee`=旅店房费，家睡为 0）                        |
+| `agent_sleep_started`   | `{agent_id, minutes, ends_at, reason, place, fee}`                                                             | 睡觉开始（R14：家中免费；旅店按游戏日首次入住收费）                    |
 | `agent_sleep_completed` | `{agent_id, at: [c,r]}`                                                                                        | 睡觉结束                                                                               |
 | `world_event_created`   | `{agent_id?, text, importance}`                                                                                | 世界内叙事事件                                                                         |
 | `conversation_message`  | `{from_agent_id, to_agent_id, message, intent}`                                                                | 对话消息                                                                               |
@@ -71,33 +71,27 @@
 | `relationship_changed`  | `{source_agent_id, target_agent_id, deltas: {familiarity, trust, affection, resentment, debt}, values: {...}}` | 关系数值变化（系统计算，M6；deltas 为本次增量，values 为钳制后的新值）                 |
 | `daily_reflection`      | `{agent_id, summary}`                                                                                          | 每日反思完成（23:30 游戏时间，M6）                                                     |
 
-| `god_action_applied` | `{command_id, command_type, target_id, parameters, reason, result}` | 神谕指令已应用（M7；每个
-god-action 的第一个事件，target_id 为受影响的智能体，无目标时为 null） | | `weather_changed` | `{weather}` |
-天气变化（clear/cloudy/rain/snow，M7） | | `god_teleport` | `{agent_id, to: [col,row], location_id, reason}` |
-神谕传送（M7；取消当前行动并落地到地点锚点格） | | `item_spawned` | `{agent_id, item_id, item_name, quantity}` | 神谕赐物（M7；仅
-god spawn，与 `inventory_changed` 同发） | | `store_stock_changed` | `{store_id, item_id, quantity}` |
-商店库存被神谕设定为绝对值（M7） | | `stock_price_changed` | `{stock_id, stock_name, price, prev_price, day_business}` |
-每小时行情（含经营统计；价格未变也发，M10） | | `stock_bought` |
-`{agent_id, stock_id, stock_name, shares, unit_price, total}` | 买入股票（随 `money_changed`，M10） | | `stock_sold` |
-`{agent_id, stock_id, stock_name, shares, unit_price, total}` | 卖出股票（随 `money_changed`，M10） | | `dividend_paid` |
-`{stock_id, stock_name, div_per_share, payouts: [{agent_id, shares, amount}]}` | 每日分红（M10；金额经 `money_changed`
-逐人到账） | | `money_transferred` | `{from_agent_id, to_agent_id, amount, reason}` | 智能体间转账 (M11;双方余额经各自的
-`money_changed` 到账) | | `item_given` | `{from_agent_id, to_agent_id, item_id, item_name, quantity, reason}` | 智能体间赠物
-(M11;双方背包经各自的 `inventory_changed` 到账) | | `build_started` |
-`{agent_id, col, row, blueprint_id, duration_minutes, ends_at, materials: [{item_id, quantity}]}` |
-建造开始，材料已预扣（R22.2） | | `structure_built` | `{agent_id, col, row, blueprint_id, owner_agent_id}` |
-建造完成落格（R22.5） | | `structure_removed` | `{col, row, blueprint_id, removed_by}` | 结构被移除（仅上帝，R13 管道） | |
-`crop_planted` | `{agent_id, col, row, item_id, item_name, stage, next_stage_at}` | 播种完成，种子已扣（R23.4） | |
-`crop_grown` | `{col, row, item_id, stage}` | 作物进入下一生长阶段（R23.5） | | `crop_harvested` |
-`{agent_id, col, row, item_id, item_name, products: [{item_id, quantity}]}` | 收获完成，产物进背包、清格（R23.6） |
+### 3.1 上帝、合作社份额、转账、建造与种植
 
-（M5 追加：`work_started` / `work_completed` / `item_purchased` / `item_sold` /
-`item_used` / `money_changed` / `inventory_changed` / `needs_changed` /
-`store_restocked`；M6 追加：`memory_created` /
-`relationship_changed` / `daily_reflection`；M7 追加：`god_action_applied` /
-`weather_changed` / `god_teleport` / `item_spawned` / `store_stock_changed`； M9 追加：`world_saved` / `world_restored`
-；M10 追加：`stock_price_changed` /
-`stock_bought` / `stock_sold` / `dividend_paid`；M11 追加：`money_transferred` / `item_given`。）
+| type                       | 载荷要点 | 触发方 |
+|----------------------------|----------|--------|
+| `god_action_applied`       | `{command_id, command_type, target_id, parameters, reason, result}` | 上帝指令已应用 |
+| `weather_changed`          | `{weather}` | 上帝改天气 |
+| `god_teleport`             | `{agent_id, to: [col,row], location_id, reason}` | 上帝传送 |
+| `item_spawned`             | `{agent_id, item_id, item_name, quantity}` | 上帝赐物 |
+| `store_stock_changed`      | `{store_id, item_id, quantity}` | 上帝设商店库存 |
+| `stock_price_changed`      | `{stock_id, stock_name, unit_price, operating_volume}` | 上帝设合作社份额固定单价；不是自动行情 |
+| `stock_volume_changed`     | `{stock_id, stock_name, operating_volume}` | 相关经营事件或日界清零 |
+| `stock_bought`             | `{agent_id, stock_id, stock_name, shares, unit_price, total}` | 居民认购合作社份额（随 `money_changed`） |
+| `stock_sold`               | `{agent_id, stock_id, stock_name, shares, unit_price, total}` | 居民退出份额、发行合作社回购（随 `money_changed`） |
+| `money_transferred`        | `{from_agent_id, to_agent_id, amount, reason}` | 居民间转账 |
+| `item_given`               | `{from_agent_id, to_agent_id, item_id, item_name, quantity, reason}` | 居民间赠物 |
+| `build_started`            | `{agent_id, col, row, blueprint_id, duration_minutes, ends_at, materials: [{item_id, quantity}]}` | 建造开始，材料已预扣 |
+| `structure_built`          | `{agent_id, col, row, blueprint_id, owner_agent_id}` | 建造完成落格 |
+| `structure_removed`        | `{col, row, blueprint_id, removed_by}` | 上帝拆除结构 |
+| `crop_planted`             | `{agent_id, col, row, item_id, item_name, stage, next_stage_at}` | 播种完成 |
+| `crop_grown`               | `{col, row, item_id, stage}` | 作物生长 |
+| `crop_harvested`           | `{agent_id, col, row, item_id, item_name, products: [{item_id, quantity}]}` | 收获完成 |
 
 说明（M7）：神谕发钱/扣款复用 `money_changed`（`{agent_id, amount, balance,
 reason}`，amount 带符号），公开事件复用 `world_event_created`（无
@@ -119,16 +113,17 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `company_created`              | `{company_id, name, company_type, initial_money}`                                                      | 企业播种/创建                   | 待实现 |
 | `company_status_changed`       | `{company_id, old_status, new_status, reason?}`                                                        | 暂停/恢复/停业                  | 已实现 |
 | `company_money_changed`        | `{company_id, amount, balance, reason}`                                                                | 企业资金变动（amount 带符号）   | 已实现 |
+| `leader_stipend_paid`      | `{company_id, company_name, leader_agent_id, amount, operating_surplus}` | 日界向负责人支付当日经营盈余的 10% 值守津贴 | 已实现 |
 | `company_inventory_changed`    | `{company_id, items: [{item_id, quantity, reserved_quantity}]}`                                        | 企业库存变化（完整列表）        | 已实现 |
 | `job_opening_created`          | `{opening_id, company_id, position_id, vacancies}`                                                     | 发布招聘                        | 已实现 |
 | `job_opening_closed`           | `{opening_id, company_id, position_id, reason?}`                                                       | 关闭招聘（含招聘暂停）          | 已实现 |
 | `job_application_submitted`    | `{application_id, opening_id, company_id, position_id, agent_id, reason}`                              | 居民申请                        | 已实现 |
 | `job_application_withdrawn`    | `{application_id, agent_id}`                                                                           | 撤回申请                        | 已实现 |
-| `job_application_accepted`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason, employment_id}`         | 录用（随 `employment_started`） | 待实现 |
-| `job_application_rejected`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason}`                        | 拒绝申请                        | 已实现 |
+| `job_application_accepted`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason, employment_id}`         | 负责人录用（随 `employment_started`） | 待实现 |
+| `job_application_rejected`     | `{application_id, company_id, position_id, agent_id, manager_agent_id, reason}`                        | 负责人拒绝申请                        | 已实现 |
 | `employment_started`           | `{application_id, company_id, position_id, agent_id, manager_agent_id, employment_id, employee_count, open_vacancies}` | 建立合同                        | 已实现 |
 | `employment_resigned`          | `{employment_id, company_id, agent_id, reason, employee_count, open_vacancies}`                                        | 员工辞职                        | 已实现 |
-| `employment_terminated`        | `{employment_id, company_id, agent_id, manager_agent_id, reason, employee_count, open_vacancies}`                      | 经理解雇                        | 已实现 |
+| `employment_terminated`        | `{employment_id, company_id, agent_id, manager_agent_id, reason, employee_count, open_vacancies}`                      | 负责人解雇                        | 已实现 |
 | `employment_suspended`         | `{employment_id, company_id, agent_id, reason?}`                                                       | 合同挂起                        | 待实现 |
 | `shift_scheduled`              | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end}`                      | 班次生成                        | 已实现 |
 | `shift_upcoming`               | `{shift_id, employment_id, company_id, agent_id, scheduled_start, scheduled_end, minutes_until_start}` | 班前 60 分钟提醒                | 已实现 |
@@ -150,9 +145,10 @@ M15 追加：`crop_planted` / `crop_grown` / `crop_harvested`；
 | `procurement_order_filled`     | `{order_id, company_id, seller_company_id, item_id, quantity, unit_price, total}`                      | 订单自动履约（C1）              | 已实现 |
 | `company_store_stocked`        | `{company_id, store_id, item_id, quantity, stock_after}`                                               | 企业仓库货物上架                | 已实现 |
 
-A1/A2 追加（经济修复批）：`ubi_income` / `treasury_subsidy` 走 `money_changed` /
-`company_money_changed` 事件（reason=村庄基本收入 / 金库工资补贴）；
-股票增资/回购/分红记 `stock_equity` / `stock_buyback` / `dividend` 企业流水。
+A1/A2 合作社财政：`ubi_income` / `treasury_subsidy` 分别走 `money_changed` /
+`company_money_changed`（reason=村庄基本收入 / 当日工资补贴）；负责人津贴另发
+`leader_stipend_paid` 并复用 `money_changed`。份额认购/回购写 `share_issue` /
+`share_buyback` 合作社流水与 `coop_share_buy` / `coop_share_sell` 居民流水，不产生分红事件。
 B1 饥饿强制进食复用 `item_used` / `item_purchased` / `world_event_created`。
 E2 清算/解约复用 `company_status_changed` / `employment_terminated` / `job_opening_created`。
 
@@ -160,27 +156,24 @@ E2 清算/解约复用 `company_status_changed` / `employment_terminated` / `job
 `world_id` / `world_time` / `sequence` /
 `trace_id`（同一事务内事件共享 trace_id）。
 
-M18（创业与个人商店，R39–R44）追加：
+M18（居民合作社摊位，R39–R44）追加：
 
-| type                   | 载荷要点                                                                                        | 触发方            | 状态   |
-|------------------------|-------------------------------------------------------------------------------------------------|-------------------|--------|
-| `store_opened`         | `{store_id, name, owner_agent_id, location_id, col, row, products: [{item_id, sell_price, buy_price, stock}]}` | 开店（R39；荒地店含新建运行时地点） | 已实现 |
-| `store_closed`         | `{store_id, owner_agent_id, reason}`                                                            | 收摊/上帝强制（R43） | 已实现 |
-| `store_stocked`        | `{store_id, owner_agent_id, item_id, quantity, stock_after}`                                    | 店主上架（R41）   | 已实现 |
-| `store_sale_completed` | `{store_id, owner_agent_id, buyer_agent_id, item_id, item_name, quantity, unit_price, total}`   | 个人店售出（R41） | 已实现 |
-| `store_buy_price_changed` | `{store_id, item_id, item_name, buy_price}`                                                  | 店主改收购价（M19） | 已实现 |
-| `store_purchase_completed` | `{store_id, owner_agent_id, seller_agent_id, item_id, item_name, quantity, unit_price, total}` | 个人店收购（M19，店主扣款结算） | 已实现 |
+| type                       | 载荷要点 | 触发方 | 状态 |
+|----------------------------|----------|--------|------|
+| `store_opened`             | `{store_id, name, owner_agent_id, location_id, stall_id, col, row, products: [{item_id, sell_price, buy_price, stock}], stall_fee, treasury_balance}` | 固定摊位开摊（R39） | 已实现 |
+| `store_closed`             | `{store_id, owner_agent_id, reason}` | 收摊/上帝强制收摊（R43） | 已实现 |
+| `store_stocked`            | `{store_id, owner_agent_id, item_id, quantity, stock_after}` | 摊主上架（R41） | 已实现 |
+| `store_sale_completed`     | `{store_id, owner_agent_id, buyer_agent_id, item_id, item_name, quantity, unit_price, total}` | 摊位售出（R41） | 已实现 |
+| `store_buy_price_changed`  | `{store_id, item_id, item_name, buy_price}` | 摊主改收购价（R41） | 已实现 |
+| `store_purchase_completed` | `{store_id, owner_agent_id, seller_agent_id, item_id, item_name, quantity, unit_price, total}` | 摊位收购（R40） | 已实现 |
 
-- 复用既有事件：店主调价复用 `store_price_changed`（`promo=false`）；店主
-  入账复用 `money_changed`；顾客购买复用 `item_purchased`；背包变化复用
-  `inventory_changed`；收摊/开店不新增资金事件。
-- `store_sale_completed` 与 `company_sale_completed` 语义并行：前者触发方为
-  个人店（无 `company_id`），后者为企业商店。
-- M19 个人店收购：卖家侧复用 `item_sold` + `money_changed`（+`inventory_changed`），
-  店主侧复用 `money_changed`（amount 为负），另发 `store_purchase_completed`。
-- `world_snapshot` 载荷扩展 `stores` 列表（含 owner/company/products）；
-  荒地店创建的运行时地点随既有 `locations` 列表带出，随存档
-  `runtime_locations` 段保存/恢复（R44）。
+- 复用既有事件：摊主调价复用 `store_price_changed`（`promo=false`）；使用费和店主
+  收入复用 `money_changed`；顾客购买复用 `item_purchased`；背包变化复用
+  `inventory_changed`。
+- `store_sale_completed` 与 `company_sale_completed` 语义并行：前者是居民合作社摊位
+  （无 `company_id`），后者是合作社商店。
+- `world_snapshot` 载荷包含 `stores` 列表（owner/company/products）；所有摊位地点均是
+  地图预设地点，不存在运行时 `runtime_locations` 段。
 
 ## 4. 事件持久化
 

@@ -142,8 +142,8 @@ export const TOOL_LABELS: Record<string, string> = {
     buy_item: '购买',
     sell_item: '出售',
     use_item: '使用',
-    buy_stock: '买入股票',
-    sell_stock: '卖出股票',
+    buy_stock: '认购合作社份额',
+    sell_stock: '赎回合作社份额',
     transfer_money: '转账',
     give_item: '赠物',
     build: '建造',
@@ -159,7 +159,7 @@ export const TOOL_LABELS: Record<string, string> = {
     review_leave_request: '审批请假',
     pause_recruitment: '暂停招聘',
     resume_recruitment: '恢复招聘',
-    purchase_company_goods: '企业采购',
+    purchase_company_goods: '合作社采购',
     stock_store: '上架货架',
 };
 
@@ -175,7 +175,7 @@ export const GOD_COMMAND_LABELS: Record<string, string> = {
     teleport: '传送',
     public_event: '公共事件',
     change_store_stock: '修改库存',
-    change_stock_price: '调整股价',
+    change_stock_price: '调整份额单价',
     close_store: '强制收摊',
 };
 
@@ -534,26 +534,22 @@ function eventText(
             return `商店库存：${item} → ${qty}`;
         }
         case 'stock_price_changed': {
-            const price = typeof p.price === 'number' ? p.price : 0;
-            const prev = typeof p.prev_price === 'number' ? p.prev_price : 0;
-            const delta = price - prev;
-            if (delta === 0) return ''; // 无变化不刷屏
-            const sign = delta > 0 ? '+' : '';
-            return `${typeof p.stock_name === 'string' ? p.stock_name : p.stock_id} 股价 ${price}（${sign}${delta}）`;
+            const unitPrice = typeof p.unit_price === 'number' ? p.unit_price : 0;
+            return `${typeof p.stock_name === 'string' ? p.stock_name : p.stock_id} 份额单价调整为 ${unitPrice} 金币`;
         }
+        case 'stock_volume_changed':
+            return `${typeof p.stock_name === 'string' ? p.stock_name : p.stock_id} 今日经营量 ${p.operating_volume ?? 0}`;
         case 'stock_bought': {
             const name = agentName(agents, p.agent_id);
-            return `${name} 买入 ${p.stock_name} ${p.shares}股 @${p.unit_price}（共${p.total}金币）`;
+            return `${name} 认购 ${p.stock_name} ${p.shares}份 @${p.unit_price}（共${p.total}金币）`;
         }
         case 'stock_sold': {
             const name = agentName(agents, p.agent_id);
-            return `${name} 卖出 ${p.stock_name} ${p.shares}股 @${p.unit_price}（得${p.total}金币）`;
+            return `${name} 赎回 ${p.stock_name} ${p.shares}份 @${p.unit_price}（得${p.total}金币）`;
         }
-        case 'dividend_paid':
-            return `${p.stock_name} 每股分红 ${p.div_per_share} 金币`;
-        case 'manager_profit_paid': {
-            const mgr = agentName(agents, p.manager_agent_id);
-            return `${p.company_name ?? p.company_id} 给经理${mgr}分成 ${p.amount} 金币`;
+        case 'leader_stipend_paid': {
+            const leader = agentName(agents, p.leader_agent_id);
+            return `${p.company_name ?? p.company_id} 向负责人${leader}发放值守津贴 ${p.amount} 金币`;
         }
         case 'money_transferred': {
             const from = agentName(agents, p.from_agent_id);
@@ -599,11 +595,11 @@ function eventText(
             const item = itemLabel(p.item_id, p.item_name) || '作物';
             return `${name} 收获了${item}`;
         }
-        // ---- M18 personal-shop events ----
+        // ---- M18 cooperative-stall events ----
         case 'store_opened': {
             const owner = agentName(agents, p.owner_agent_id);
             const storeName = typeof p.name === 'string' && p.name ? p.name : p.store_id;
-            return `${owner} 在 ${storeName} 开店了`;
+            return `${owner} 在 ${storeName} 开设了合作社摊位`;
         }
         case 'store_closed': {
             const known = stores.find((s) => s.store_id === p.store_id);
@@ -762,7 +758,7 @@ function eventText(
                 const name = agentName(agents, p.agent_id);
                 const company = companyName(companies, p.company_id);
                 const due = typeof p.wage_due === 'number' ? p.wage_due : '?';
-                return `企业 ${company} 向 ${name} 支付工资 ${due} 金币`;
+                return `合作社 ${company} 向 ${name} 支付工资 ${due} 金币`;
             }
         case
             'wage_unpaid'
@@ -771,7 +767,7 @@ function eventText(
                 const name = agentName(agents, p.agent_id);
                 const company = companyName(companies, p.company_id);
                 const due = typeof p.wage_due === 'number' ? p.wage_due : '?';
-                return `企业 ${company} 未能支付 ${name} 的工资（欠 ${due} 金币）`;
+                return `合作社 ${company} 未能支付 ${name} 的工资（欠 ${due} 金币）`;
             }
         case
             'wage_repaid'
@@ -780,7 +776,7 @@ function eventText(
                 const name = agentName(agents, p.agent_id);
                 const company = companyName(companies, p.company_id);
                 const amount = typeof p.amount === 'number' ? p.amount : '?';
-                return `企业 ${company} 向 ${name} 补发欠薪 ${amount} 金币`;
+                return `合作社 ${company} 向 ${name} 补发欠薪 ${amount} 金币`;
             }
         case
             'company_status_changed'
@@ -791,7 +787,7 @@ function eventText(
                     typeof p.old_status === 'string' ? (COMPANY_STATUS_LABELS[p.old_status] ?? p.old_status) : '?';
                 const newLabel =
                     typeof p.new_status === 'string' ? (COMPANY_STATUS_LABELS[p.new_status] ?? p.new_status) : '?';
-                return `企业 ${company} 状态：${oldLabel} → ${newLabel}`;
+                return `合作社 ${company} 状态：${oldLabel} → ${newLabel}`;
             }
         case
             'company_money_changed'
@@ -800,7 +796,7 @@ function eventText(
                 const company = companyName(companies, p.company_id);
                 const amount = signedAmount(p.amount);
                 const balance = typeof p.balance === 'number' ? p.balance : '?';
-                return `企业 ${company} 资金变化 ${amount}（当前 ${balance}）`;
+                return `合作社 ${company} 资金变化 ${amount}（当前 ${balance}）`;
             }
         case
             'company_sale_completed'
@@ -810,7 +806,7 @@ function eventText(
                 const item = itemLabel(p.item_id, p.item_name);
                 const qty = typeof p.quantity === 'number' ? p.quantity : 1;
                 const total = typeof p.total === 'number' ? p.total : '?';
-                return `企业 ${company} 售出 ${item}×${qty}（${total} 金币）`;
+                return `合作社 ${company} 售出 ${item}×${qty}（${total} 金币）`;
             }
         case
             'company_inventory_changed'
@@ -818,7 +814,7 @@ function eventText(
             {
                 const company = companyName(companies, p.company_id);
                 const items = itemsText(p.items);
-                return items ? `企业 ${company} 库存变化（${items}）` : `企业 ${company} 库存变化`;
+                return items ? `合作社 ${company} 库存变化（${items}）` : `合作社 ${company} 库存变化`;
             }
         case
             'company_production_completed'
@@ -829,8 +825,8 @@ function eventText(
                 const products = itemsText(p.products);
                 const suffix = consumed ? `（消耗 ${consumed}）` : '';
                 return products
-                    ? `企业 ${company} 完成生产：${products}${suffix}`
-                    : `企业 ${company} 完成生产`;
+                    ? `合作社 ${company} 完成生产：${products}${suffix}`
+                    : `合作社 ${company} 完成生产`;
             }
         case
             'company_purchase_completed'
@@ -841,7 +837,7 @@ function eventText(
                 const item = itemLabel(p.item_id);
                 const qty = typeof p.quantity === 'number' ? p.quantity : 0;
                 const total = typeof p.total === 'number' ? p.total : '?';
-                return `企业 ${buyer} 从 ${seller} 采购 ${item}×${qty}（${total} 金币）`;
+                return `合作社 ${buyer} 从 ${seller} 采购 ${item}×${qty}（${total} 金币）`;
             }
         case
             'company_store_stocked'
@@ -850,7 +846,7 @@ function eventText(
                 const company = companyName(companies, p.company_id);
                 const item = itemLabel(p.item_id);
                 const qty = typeof p.quantity === 'number' ? p.quantity : 0;
-                return `企业 ${company} 上架 ${item}×${qty} 到货架`;
+                return `合作社 ${company} 上架 ${item}×${qty} 到货架`;
             }
         case
             'job_opening_created'
@@ -859,7 +855,7 @@ function eventText(
                 const company = companyName(companies, p.company_id);
                 const title = positionTitle(jobOpenings, p.position_id);
                 const vacancies = typeof p.vacancies === 'number' ? p.vacancies : '?';
-                return `企业 ${company} 发布新职位 ${title}（招聘 ${vacancies} 人）`;
+                return `合作社 ${company} 发布新职位 ${title}（招聘 ${vacancies} 人）`;
             }
         case
             'job_opening_closed'
@@ -867,7 +863,7 @@ function eventText(
             {
                 const company = companyName(companies, p.company_id);
                 const title = positionTitle(jobOpenings, p.position_id);
-                return `企业 ${company} 关闭了 ${title} 的招聘`;
+                return `合作社 ${company} 关闭了 ${title} 的招聘`;
             }
             // inventory_changed / needs_changed carry no stream text; they only sync
             // agent state in applyEvent.
@@ -969,9 +965,9 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
             activeConversations: {} as Record<string, { agent_ids: [string, string] }>,
             /** Live speech bubbles (one per agent, newest wins; capped). */
             bubbles: [] as BubbleItem[],
-            /** M10: town stock quotes (REST-loaded, WS-updated). */
+            /** Cooperative-share issues (REST-loaded, WS-updated). */
             stocks: [] as StockItem[],
-            /** M10: shares per agent per stock (agent_id → stock_id → shares). */
+            /** Share holdings by resident and cooperative issue. */
             holdings: {} as Record<string, Record<string, number>>,
             /** M13: companies of the active world (REST-loaded after snapshot). */
             companies: [] as CompanyInfo[],
@@ -1289,7 +1285,7 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                 this.agentShifts = next;
             },
 
-            /** M10: apply a signed share delta to one agent's holding (WS events). */
+            /** Apply a signed cooperative-share delta to one resident holding (WS events). */
             patchHolding(agentId: string, stockId: string, delta: number): void {
                 const next = (this.holdings[agentId]?.[stockId] ?? 0) + delta;
                 if (next <= 0) {
@@ -1495,12 +1491,16 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                         // Openings are REST-loaded; the next snapshot refreshes the list.
                         break;
                     case 'stock_price_changed': {
-                        const s = this.stocks.find((x) => x.stock_id === p.stock_id);
-                        if (s) {
-                            s.price = Number(p.price);
-                            s.prev_price = Number(p.prev_price);
-                            s.day_business = Number(p.day_business ?? 0);
+                        const share = this.stocks.find((x) => x.stock_id === p.stock_id);
+                        if (share) {
+                            share.unit_price = Number(p.unit_price);
+                            share.operating_volume = Number(p.operating_volume ?? share.operating_volume);
                         }
+                        break;
+                    }
+                    case 'stock_volume_changed': {
+                        const share = this.stocks.find((x) => x.stock_id === p.stock_id);
+                        if (share) share.operating_volume = Number(p.operating_volume ?? 0);
                         break;
                     }
                     case 'stock_bought':
@@ -1509,8 +1509,6 @@ function locationIdAt(locations: WorldLocation[], cell: Cell): string | null {
                     case 'stock_sold':
                         this.patchHolding(String(p.agent_id), String(p.stock_id), -(Number(p.shares) || 0));
                         break;
-                    case 'dividend_paid':
-                        break; // 金额经 money_changed 到账, 面板显示不依赖此事件
                     case 'build_started':
                         // The build is now on the map as an in-progress (50% alpha)
                         // structure; the payload carries the anchor cell + blueprint.

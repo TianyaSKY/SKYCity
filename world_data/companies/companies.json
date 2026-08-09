@@ -1,9 +1,9 @@
 {
-  "version": "1.0.0",
+  "version": "1.2.0",
   "companies": [
     {
       "company_id": "company_morning_farm",
-      "name": "晨露农场",
+      "name": "晨露农场合作社",
       "company_type": "farm",
       "location_id": "village_farm",
       "initial_money": 800,
@@ -12,10 +12,10 @@
         {
           "position_id": "position_farm_worker",
           "job_id": "job_farm_production",
-          "title": "农场工人",
+          "title": "农场生产员",
           "description": "负责晨露农场的播种、浇水和收获",
           "capacity": 2,
-          "wage_per_shift": 60,
+          "wage_per_shift": 70,
           "shift_start_minute": 480,
           "shift_end_minute": 720,
           "working_days": [
@@ -32,7 +32,7 @@
     },
     {
       "company_id": "company_village_shop",
-      "name": "村庄杂货店",
+      "name": "晨露商店合作社",
       "company_type": "retail",
       "location_id": "village_shop",
       "initial_money": 1000,
@@ -79,7 +79,7 @@
         {
           "position_id": "position_shop_attendant",
           "job_id": "job_shop_attendant",
-          "title": "商店店员",
+          "title": "商店值班员",
           "description": "负责接待顾客、整理货架和维持营业",
           "capacity": 1,
           "wage_per_shift": 90,
@@ -99,11 +99,11 @@
     },
     {
       "company_id": "company_village_bakery",
-      "name": "晨露面包坊",
+      "name": "晨露面包坊合作社",
       "company_type": "workshop",
       "location_id": "village_bakery",
       "initial_money": 300,
-      "manager_agent_id": "agent_touzi",
+      "manager_agent_id": "agent_chenyu",
       "procurement": [
         {
           "item_id": "wheat",
@@ -119,7 +119,7 @@
           "title": "面包师",
           "description": "在晨露面包坊用小麦烘焙面包，供应村庄杂货店",
           "capacity": 1,
-          "wage_per_shift": 60,
+          "wage_per_shift": 70,
           "shift_start_minute": 780,
           "shift_end_minute": 1020,
           "working_days": [
@@ -136,16 +136,16 @@
     },
     {
       "company_id": "company_village_hotel",
-      "name": "小镇旅店",
+      "name": "晨露旅店合作社",
       "company_type": "hotel",
       "location_id": "village_hotel",
       "initial_money": 400,
-      "manager_agent_id": "agent_zhoushen",
+      "manager_agent_id": "agent_touzi",
       "positions": [
         {
           "position_id": "position_hotel_attendant",
           "job_id": "job_hotel_service",
-          "title": "客房服务员",
+          "title": "旅店服务员",
           "description": "在小镇旅店整理客房、接待住客，保证旅客住得舒心",
           "capacity": 1,
           "wage_per_shift": 80,
@@ -165,7 +165,7 @@
     },
     {
       "company_id": "company_carpenter_shop",
-      "name": "巧木工坊",
+      "name": "晨露木工合作社",
       "company_type": "workshop",
       "location_id": "carpenter_shop",
       "initial_money": 300,
@@ -174,10 +174,10 @@
         {
           "position_id": "position_carpenter",
           "job_id": "job_carpentry",
-          "title": "木工师傅",
+          "title": "木工师",
           "description": "在巧木工坊打造耙子等农具，供村庄杂货店售卖",
           "capacity": 1,
-          "wage_per_shift": 60,
+          "wage_per_shift": 70,
           "shift_start_minute": 600,
           "shift_end_minute": 840,
           "working_days": [
@@ -194,7 +194,7 @@
     },
     {
       "company_id": "company_flower_garden",
-      "name": "晨露花圃",
+      "name": "晨露花圃合作社",
       "company_type": "farm",
       "location_id": "flower_garden",
       "initial_money": 300,
@@ -203,10 +203,10 @@
         {
           "position_id": "position_gardener",
           "job_id": "job_flower_gardening",
-          "title": "花匠",
+          "title": "花艺师",
           "description": "在晨露花圃照料鲜花，供应村庄杂货店售卖",
           "capacity": 1,
-          "wage_per_shift": 60,
+          "wage_per_shift": 70,
           "shift_start_minute": 480,
           "shift_end_minute": 720,
           "working_days": [

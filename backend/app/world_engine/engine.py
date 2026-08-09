@@ -26,17 +26,15 @@ from starlette.websockets import WebSocket
 from app.config.gameplay import (
     DEBT_MOOD_PENALTY_PER_DAY,
     ENERGY_DRAIN_PER_HOUR,
-    HOTEL_LOCATION_ID,
-    HOTEL_NIGHTLY_FEE,
     HUNGER_FORCED_EAT_THRESHOLD,
     INITIAL_ENERGY,
     INITIAL_LONELINESS,
     INITIAL_MONEY,
     INITIAL_MOOD,
     INITIAL_SATIETY,
+    LEADER_STIPEND_PERCENT,
     LONELINESS_BOOST_THRESHOLD,
     LONELINESS_GAIN_PER_HOUR,
-    MANAGER_PROFIT_SHARE_PERCENT,
     MOOD_BOOST_THRESHOLD,
     MOOD_DRAIN_PER_HOUR,
     NEEDS_MAX,
@@ -52,6 +50,8 @@ from app.config.gameplay import (
     SLEEP_ENERGY_PER_HOUR,
     SLEEP_MOOD_PER_HOUR,
     TICK_INTERVAL,
+    TREASURY_PAYROLL_SHARE_PERCENT,
+    TREASURY_PUBLIC_WORK_SHARE_PERCENT,
     TREASURY_UBI_SHARE_PERCENT,
     UPKEEP_PER_DAY,
     WAIT_ENERGY_PER_HOUR,
@@ -104,6 +104,20 @@ from app.world_engine.clock import WorldClock
 from app.world_engine.event_bus import EventBus
 from app.world_engine.scheduler import Scheduler
 
+
+# Only day-to-day operating activity can fund a leader's attendance stipend.
+# Public subsidy, founder/share money, and god grants are deliberately absent.
+LEADER_STIPEND_SURPLUS_TYPES = frozenset(
+    {
+        "sale_income",
+        "hotel_income",
+        "wholesale_sale",
+        "material_purchase",
+        "wage_payment",
+        "external_procurement",
+        "operating_expense",
+    }
+)
 def _promo_roll(world_id: str, store_id: str, item_id: str, day: int) -> bool:
     """M12 D5: deterministic promo-day roll for one product (~20%).
 
@@ -474,7 +488,7 @@ class WorldEngine:
                     envelope.type,
                     envelope.world_id,
                 )
-        # M10: 经营事件 → 股价 (business events bump the listed company's price).
+        # Cooperative operating events update only transparent share volume.
         if self.stock_service is not None:
             try:
                 self.stock_service.on_event(session, envelope)
@@ -1033,23 +1047,23 @@ class WorldEngine:
             self._force_hunger_eat(session, runtime, world, world_time)
             self._maybe_restock(session, runtime, world, world_time)
             self._maybe_fulfill_orders(session, runtime, world, world_time)
-            self._tick_stock_prices(session, runtime, world, world_time)
             # M8: daily counters reset at the day boundary (midnight crossing).
             day = world_time // 1440
             if runtime.last_day is not None and day != runtime.last_day:
-                # M10: dividends settle before the daily counters reset (same
-                # transaction, same commit). M17: the manager's daily profit
-                # share comes after dividends, before upkeep. M12 D6: upkeep
-                # is deducted between dividends and the counter reset.
-                self._pay_dividends(session, runtime, world, world_time)
-                self._pay_manager_profits(session, runtime, world, world_time)
+                # The leader's operating stipend settles before residents
+                # contribute maintenance and the cooperative allocates it.
+                self._pay_leader_stipends(session, runtime, world, world_time)
+                if self.stock_service is not None:
+                    self.stock_service.reset_daily_operating_volume(
+                        session, runtime, world, world_time
+                    )
                 daily_upkeep_collected = self._apply_daily_upkeep(
                     session, runtime, world, world_time
                 )
-                self._disburse_treasury(
+                public_work_reserve = self._disburse_treasury(
                     session, runtime, world, world_time, daily_upkeep_collected
                 )
-                self.ensure_public_work_budget(world)
+                self.ensure_public_work_budget(world, public_work_reserve)
                 self._liquidate_zombie_companies(session, runtime, world, world_time)
                 self._reset_daily_counters(session, world.world_id)
         runtime.last_hour = hour
@@ -1071,45 +1085,21 @@ class WorldEngine:
         except Exception:  # noqa: BLE001 - one bad order must not kill the tick
             logger.exception("Order fulfillment failed world={}", world.world_id)
 
-    def _tick_stock_prices(
+
+
+    def _pay_leader_stipends(
             self,
             session: Session,
             runtime: WorldRuntime,
             world: World,
             world_time: int,
     ) -> None:
-        """M10: hourly market tick (delegates to StockService when wired)."""
-        if self.stock_service is not None:
-            self.stock_service.tick_prices(session, runtime, world, world_time)
+        """Pay each cooperative leader 10% of eligible operating surplus.
 
-    def _pay_dividends(
-            self,
-            session: Session,
-            runtime: WorldRuntime,
-            world: World,
-            world_time: int,
-    ) -> None:
-        """M10: daily dividend settlement at 00:00 (delegates when wired)."""
-        if self.stock_service is not None:
-            self.stock_service.pay_dividends(session, runtime, world, world_time)
-
-    def _pay_manager_profits(
-            self,
-            session: Session,
-            runtime: WorldRuntime,
-            world: World,
-            world_time: int,
-    ) -> None:
-        """M17: at 00:00 pay each company manager a share of the day's net
-        profit (MANAGER_PROFIT_SHARE_PERCENT, floor-divided).
-
-        Net profit = today's CompanyTransaction amounts (initial capital and
-        the manager-share rows excluded). No payout when the day lost money,
-        the company's treasury cannot cover the share, or the company has no
-        manager. Same transaction as dividends/upkeep (one commit).
+        The calculation intentionally uses an allowlist rather than "all
+        ledger rows except ...": subsidies, share subscriptions, initial
+        funds, and extraordinary injections can never become stipend income.
         """
-        # world_time is the first minute of the NEW day; the profit window is
-        # the day that just ended: [(world_time - 1) // 1440 * 1440, world_time).
         day_start = ((world_time - 1) // 1440) * 1440
         companies = session.scalars(
             select(Company).where(Company.world_id == world.world_id)
@@ -1125,45 +1115,43 @@ class WorldEngine:
                     CompanyTransaction.world_time < world_time,
                 )
             ).all()
-            profit = sum(
-                row.amount
-                for row in rows
-                if row.type not in ("initial_capital", "manager_profit")
+            operating_surplus = sum(
+                row.amount for row in rows if row.type in LEADER_STIPEND_SURPLUS_TYPES
             )
-            if profit <= 0:
+            if operating_surplus <= 0:
                 continue
-            share = profit * MANAGER_PROFIT_SHARE_PERCENT // 100
-            if share <= 0 or company.money < share:
+            stipend = operating_surplus * LEADER_STIPEND_PERCENT // 100
+            if stipend <= 0 or company.money < stipend:
                 continue
-            manager = session.get(
+            leader = session.get(
                 Agent,
                 {"world_id": world.world_id, "agent_id": company.manager_agent_id},
             )
-            if manager is None:
+            if leader is None:
                 continue
-            company.money -= share
+            company.money -= stipend
             session.add(
                 CompanyTransaction(
                     world_id=world.world_id,
                     company_id=company.company_id,
-                    type="manager_profit",
-                    amount=-share,
+                    type="leader_stipend",
+                    amount=-stipend,
                     balance_after=company.money,
-                    related_agent_id=manager.agent_id,
-                    reason=f"{company.name} 经理利润分成",
+                    related_agent_id=leader.agent_id,
+                    reason=f"{company.name} 负责人值守津贴",
                     world_time=world_time,
                     trace_id="",
                 )
             )
-            manager.money += share
+            leader.money += stipend
             session.add(
                 Transaction(
                     world_id=world.world_id,
-                    agent_id=manager.agent_id,
-                    type="manager_profit",
-                    amount=share,
-                    balance_after=manager.money,
-                    reason=f"{company.name} 经理利润分成",
+                    agent_id=leader.agent_id,
+                    type="leader_stipend",
+                    amount=stipend,
+                    balance_after=leader.money,
+                    reason=f"{company.name} 负责人值守津贴",
                     world_time=world_time,
                     trace_id="",
                 )
@@ -1171,13 +1159,13 @@ class WorldEngine:
             runtime.event_bus.publish(
                 session,
                 world_time,
-                "manager_profit_paid",
+                "leader_stipend_paid",
                 {
                     "company_id": company.company_id,
                     "company_name": company.name,
-                    "manager_agent_id": manager.agent_id,
-                    "amount": share,
-                    "profit": profit,
+                    "leader_agent_id": leader.agent_id,
+                    "amount": stipend,
+                    "operating_surplus": operating_surplus,
                 },
             )
             runtime.event_bus.publish(
@@ -1185,10 +1173,10 @@ class WorldEngine:
                 world_time,
                 "money_changed",
                 {
-                    "agent_id": manager.agent_id,
-                    "amount": share,
-                    "balance": manager.money,
-                    "reason": f"{company.name} 经理利润分成",
+                    "agent_id": leader.agent_id,
+                    "amount": stipend,
+                    "balance": leader.money,
+                    "reason": f"{company.name} 负责人值守津贴",
                 },
             )
 
@@ -1349,7 +1337,7 @@ class WorldEngine:
             world: World,
             world_time: int,
             daily_upkeep_collected: int,
-    ) -> None:
+    ) -> int:
         """Distribute only the upkeep collected at this day boundary.
 
         Historical treasury reserves are deliberately excluded from the UBI
@@ -1357,13 +1345,18 @@ class WorldEngine:
         public work, projects, and explicitly authorised treasury expenses.
         """
         if daily_upkeep_collected <= 0:
-            return
+            return 0
         day_start = ((world_time - 1) // 1440) * 1440
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world.world_id)
         ).all()
         ubi_total = daily_upkeep_collected * TREASURY_UBI_SHARE_PERCENT // 100
-        company_pool = daily_upkeep_collected - ubi_total
+        public_work_reserve = (
+            daily_upkeep_collected * TREASURY_PUBLIC_WORK_SHARE_PERCENT // 100
+        )
+        company_pool = (
+            daily_upkeep_collected * TREASURY_PAYROLL_SHARE_PERCENT // 100
+        )
 
         # UBI remains universal, including residents in debt. Integer remainder
         # remains in the public treasury rather than being created or lost.
@@ -1400,7 +1393,7 @@ class WorldEngine:
                     )
 
         if company_pool <= 0:
-            return
+            return public_work_reserve
         active_companies = {
             company.company_id: company
             for company in session.scalars(
@@ -1411,7 +1404,7 @@ class WorldEngine:
             ).all()
         }
         if not active_companies:
-            return
+            return public_work_reserve
         rows = session.scalars(
             select(CompanyTransaction).where(
                 CompanyTransaction.world_id == world.world_id,
@@ -1428,7 +1421,7 @@ class WorldEngine:
                 )
         total_wages = sum(wages_by_company.values())
         if total_wages <= 0:
-            return
+            return public_work_reserve
 
         # A subsidy is a reimbursement, never a windfall: each issuer receives
         # its proportional share of today's pool, capped at wages actually paid.
@@ -1465,7 +1458,11 @@ class WorldEngine:
                 },
             )
 
-    def ensure_public_work_budget(self, world: World) -> None:
+        return public_work_reserve
+
+    def ensure_public_work_budget(
+            self, world: World, daily_reserve: int | None = None
+    ) -> None:
         """Open one bounded public-work budget for the current game day."""
         day = world.world_time // 1440
         if world.public_work_budget_day == day:
@@ -1475,9 +1472,10 @@ class WorldEngine:
         if world.public_work_escrow > 0:
             return
         world.public_work_budget_day = day
-        world.public_work_budget_remaining = min(
-            max(world.treasury, 0), PUBLIC_WORK_DAILY_BUDGET
-        )
+        budget_limit = PUBLIC_WORK_DAILY_BUDGET
+        if daily_reserve is not None:
+            budget_limit = min(budget_limit, max(daily_reserve, 0))
+        world.public_work_budget_remaining = min(max(world.treasury, 0), budget_limit)
 
     def reserve_public_work_funds(self, world: World, amount: int) -> bool:
         """Move one public-job wage from treasury into auditable escrow."""

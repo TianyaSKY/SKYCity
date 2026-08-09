@@ -37,9 +37,10 @@ from app.database.models.stores import Store, StoreProduct
 from app.database.models.transactions import Transaction
 from app.database.models.worlds import World
 from app.config.gameplay import (
+    COOPERATIVE_SHARE_HOLDING_CAP,
     HOTEL_NIGHTLY_FEE,
     HUNGER_FORCED_EAT_THRESHOLD,
-    MANAGER_PROFIT_SHARE_PERCENT,
+    LEADER_STIPEND_PERCENT,
     MINUTES_PER_STEP,
     OBSERVATION_MAX_CHARS,
     OBSERVATION_MAX_SHOP_PRODUCTS,
@@ -50,7 +51,7 @@ from app.config.gameplay import (
     SLEEP_MAX_MINUTES,
     SLEEP_MIN_MINUTES,
     SLEEP_MOOD_PER_HOUR,
-    STALL_MAX_DISTANCE,
+    STALL_PERMIT_FEE,
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
     WEATHER_MULTIPLIERS,
@@ -243,11 +244,11 @@ def build_observation(
         home_text = (
             f" 家: {home_name}"
             if home_id is not None
-            else f" 无家（睡觉需去小镇旅店，每晚{HOTEL_NIGHTLY_FEE}金币）"
+            else f" 无家（睡觉需去小镇旅店，每日首晚{HOTEL_NIGHTLY_FEE}金币）"
         )
         money_text = f"金钱: {agent.money}"
         if agent.money < 0:
-            money_text += f"（负债 {-agent.money} 金币：负债期间不能购物/住店/买股票/转账，尽快打工赚钱还清）"
+            money_text += f"（负债 {-agent.money} 金币：负债期间不能购物/住店/认购合作社份额/转账，尽快打工赚钱还清）"
         lines.append(
             f"【自身状态】饱食度: {agent.satiety}/100 精力: {agent.energy}/100 心情: {agent.mood}/100 "
             f"孤单: {agent.loneliness}/100 {money_text} 所在位置: {here}（格 {agent.col},{agent.row}）"
@@ -336,43 +337,40 @@ def build_observation(
                 cost_text = ""
             lines.append(f"- {loc.name}({loc.location_id}): {open_state}{mark}{cost_text}")
 
-        # M18 R39: where this agent could open a personal shop — free map
-        # stalls plus nearby wild cells that are walkable and reachable.
+        # Cooperative stalls are fixed map locations; residents may operate
+        # one, but cannot create a new location.
         lines.append("【可开店位置】")
-        open_spots: list[str] = []
-        for loc in locations:
-            if loc.location_type != "stall":
-                continue
-            if (
-                session.scalar(
-                    select(Store).where(
-                        Store.world_id == world_id,
-                        Store.location_id == loc.location_id,
-                    )
-                )
-                is not None
-            ):
-                continue  # already taken
-            open_spots.append(
-                f"- 摊位 {loc.name}({loc.location_id}): 营业 {loc.open_hour}~{loc.close_hour}，空置可开店"
+        own_stall = session.scalar(
+            select(Store).where(
+                Store.world_id == world_id,
+                Store.owner_agent_id == agent.agent_id,
             )
-        shop = getattr(engine, "shop_service", None) if engine is not None else None
-        if shop is not None:
-            near: list[str] = []
-            for dc in range(-STALL_MAX_DISTANCE, STALL_MAX_DISTANCE + 1):
-                for dr in range(-STALL_MAX_DISTANCE, STALL_MAX_DISTANCE + 1):
-                    if abs(dc) + abs(dr) > STALL_MAX_DISTANCE:
-                        continue
-                    col, row = agent.col + dc, agent.row + dr
-                    if shop._cell_available(session, world_id, col, row) and shop._reachable(
-                            session, world_id, col, row
-                    ):
-                        near.append(f"- 空地 ({col},{row}): 可开店")
-            open_spots.extend(near[:8])
-        if open_spots:
-            lines.extend(open_spots)
+        )
+        if own_stall is not None:
+            lines.append(f"（你正在经营 {own_stall.name}，不能再开新摊）")
         else:
-            lines.append("（暂无空摊位或可达空地）")
+            open_spots: list[str] = []
+            for loc in locations:
+                if loc.location_type != "stall":
+                    continue
+                if (
+                    session.scalar(
+                        select(Store).where(
+                            Store.world_id == world_id,
+                            Store.location_id == loc.location_id,
+                        )
+                    )
+                    is not None
+                ):
+                    continue
+                open_spots.append(
+                    f"- 摊位 {loc.name}({loc.location_id}): 营业 {loc.open_hour}~{loc.close_hour}，"
+                    "空置可开摊"
+                )
+            if open_spots:
+                lines.extend(open_spots)
+            else:
+                lines.append("（三个预设合作社摊位均已使用）")
 
         same_location = [a for a in others if a.location_id == agent.location_id]
         lines.append("【可见人物】")
@@ -393,8 +391,8 @@ def build_observation(
         lines.append(
             f"- sleep(minutes, reason): 睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 "
             f"{SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情"
-            "（比 wait 快）；有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)"
-            f"（每晚 {HOTEL_NIGHTLY_FEE} 金币）"
+            "（比 wait 快）；有家→可在自己家免费睡或去小镇旅店(village_hotel)，无家→必须去旅店"
+            f"（每日首晚 {HOTEL_NIGHTLY_FEE} 金币）"
         )
         if same_location:
             lines.append(
@@ -408,17 +406,18 @@ def build_observation(
                 "- give_item(target_agent_id, item_id, quantity=1, reason): 把背包里的物品送给【可见人物】里的智能体"
             )
 
-        # M18: personal-shop tools are town-wide (like sell_item), not tied
-        # to other agents being around.
+        # Cooperative-stall tools are town-wide, while opening requires the
+        # resident to stand at the selected preset stall.
         lines.append(
-            "- open_shop(location, products, reason): 在空摊位或附近可达空地开店"
-            "（资本 ≥100 金币，商品从背包上架，≤3 种；售价须不低于村庄杂货店"
-            "同款、不超过 2 倍基准价；可选 buy_price 收购价须不高于杂货店同款收购价，0 不收购）"
+            f"- open_shop(stall_id, products, reason): 在自己所在的空合作社摊位开摊"
+            f"（使用费 {STALL_PERMIT_FEE} 金币，商品从背包上架，≤3 种；售价须不低于"
+            "村庄杂货店同款、不超过 2 倍基准价；可选 buy_price 收购价须不高于杂货店"
+            "同款收购价，0 不收购）"
         )
-        lines.append("- stock_shop(store_id, item_id, quantity=1, reason): 给自己店铺的货架补货（从背包上架）")
-        lines.append("- adjust_price(store_id, item_id, new_price, reason): 调整自己店铺的售价")
-        lines.append("- set_buy_price(store_id, item_id, new_price, reason): 设置自己店铺的收购价（不高于杂货店同款收购价，0=不收购）")
-        lines.append("- close_shop(store_id, reason): 收掉自己的店铺，货架货物退回背包")
+        lines.append("- stock_shop(store_id, item_id, quantity=1, reason): 给自己合作社摊补货（从背包上架）")
+        lines.append("- adjust_price(store_id, item_id, new_price, reason): 调整自己合作社摊的售价")
+        lines.append("- set_buy_price(store_id, item_id, new_price, reason): 设置自己合作社摊的收购价（不高于杂货店同款收购价，0=不收购）")
+        lines.append("- close_shop(store_id, reason): 收掉自己的合作社摊，货架货物退回背包")
 
         # M5: shop products at the current store (up to 6) + jobs offered here.
         if agent.location_id is not None:
@@ -509,9 +508,8 @@ def build_observation(
                 state = "成熟可收" if row.stage >= final else f"生长中（阶段{row.stage + 1}/{final + 1}）"
                 lines.append(f"- ({row.col},{row.row}) {item_names.get(row.item_id, row.item_id)}：{state}")
 
-        # M10: town-wide stock quotes + own holdings (always visible: the
-        # market is village news, not tied to the agent's location).
-        lines.append("【股票行情】")
+        # Cooperative shares are town-wide information, not tied to location.
+        lines.append("【合作社份额】")
         stocks = session.scalars(
             select(Stock).where(Stock.world_id == world_id).order_by(Stock.stock_id)
         ).all()
@@ -524,24 +522,31 @@ def build_observation(
                 )
             ).all()
         }
+        issued_by_stock = {
+            stock_id: int(issued)
+            for stock_id, issued in session.execute(
+                select(StockHolding.stock_id, func.sum(StockHolding.shares))
+                .where(StockHolding.world_id == world_id)
+                .group_by(StockHolding.stock_id)
+            ).all()
+        }
         for stock in stocks:
-            delta = stock.price - stock.prev_price
-            line = (
-                f"- buy_stock({stock.stock_id}, reason, shares=1): {stock.name} 现价{stock.price}金币"
-                f"（昨收{stock.prev_price}，{'涨+' if delta >= 0 else '跌'}{abs(delta)}）"
-            )
             holding = holdings.get(stock.stock_id)
-            if holding is None or holding.shares <= 0:
-                line += "——你持有 0 股"
-            else:
-                profit = stock.price - holding.avg_cost
-                line += (
-                    f"——你持有 {holding.shares} 股（成本 {holding.avg_cost}金币/股，"
-                    f"{'浮盈' if profit >= 0 else '浮亏'}{abs(profit)}金币/股）"
-                )
-            lines.append(line)
-        lines.append("- sell_stock(stock_id, reason, shares=1): 卖出持股变现（不能超卖）")
-        lines.append("- 股价每小时随商店/农场经营变动，每日按业绩分红（分红到账看 money_changed）")
+            held = holding.shares if holding is not None else 0
+            available = max(
+                stock.outstanding_shares - issued_by_stock.get(stock.stock_id, 0),
+                0,
+            )
+            lines.append(
+                f"- {stock.name}（{stock.stock_id}）：固定单价 {stock.price}金币/份，"
+                f"剩余 {available}/{stock.outstanding_shares} 份；"
+                f"你持有 {held}/{COOPERATIVE_SHARE_HOLDING_CAP} 份。"
+                f"认购 buy_stock({stock.stock_id}, reason, shares=1)；"
+                f"退出 sell_stock({stock.stock_id}, reason, shares=1)。"
+            )
+        lines.append(
+            "- 认购资金进入对应合作社；经营活动只记录运营量，不改变单价，也没有每日分红。"
+        )
 
         # M13: public job board (R23) + own pending applications (R24). The
         # board is village news, visible everywhere (first version).
@@ -571,7 +576,7 @@ def build_observation(
                 )
             lines.append(
                 "- apply_job(opening_id, reason): 申请公开招聘中的职位"
-                "（opening_id 用上面括号里的完整 id；录用与否由经理决定）"
+                "（opening_id 用上面括号里的完整 id；录用与否由负责人决定）"
             )
         my_applications = session.scalars(
             select(JobApplication).where(
@@ -590,7 +595,7 @@ def build_observation(
             lines.append(
                 "- withdraw_job_application(application_id, reason): 撤回我的求职申请"
             )
-        # M13: manager desk (R25): own companies, pending reviews.
+        # M13: cooperative leader desk (R25): own companies, pending reviews.
         managed = session.scalars(
             select(Company).where(
                 Company.world_id == world_id,
@@ -598,7 +603,7 @@ def build_observation(
             )
         ).all()
         if managed:
-            lines.append("【企业经营】")
+            lines.append("【合作社经营】")
             managed_ids = [company.company_id for company in managed]
             pending_leaves = list(session.scalars(
                 select(LeaveRequest).where(
@@ -638,12 +643,12 @@ def build_observation(
                     f"{sum(1 for r in pending_leaves if r.company_id == company.company_id)}条"
                 )
                 lines.append(
-                    f"- 每日 00:00 你会按当日净利润的 "
-                    f"{MANAGER_PROFIT_SHARE_PERCENT}% 获得经理分成"
-                    f"（公司亏损或金库不足则不发）"
+                    f"- 每日 00:00 你会从当日可分配经营盈余中获得 "
+                    f"{LEADER_STIPEND_PERCENT}% 的负责人值守津贴"
+                    f"（补贴、份额认购、初始资金和公共资金不计入）"
                 )
                 # M16: warehouse + procurement + shelf visibility for the
-                # manager's own company (fixed server prices, full IDs).
+                # leader's own company (fixed server prices, full IDs).
                 inventory_rows = session.scalars(
                     select(CompanyInventory)
                     .where(
@@ -718,7 +723,7 @@ def build_observation(
                         )
                     lines.append(
                         "- review_job_application(application_id, accept|reject, reason): "
-                        "审核求职申请（仅企业经理）"
+                        "审核求职申请（仅合作社负责人）"
                     )
             if pending_leaves:
                 lines.append("  【待审批请假】")
@@ -733,7 +738,7 @@ def build_observation(
                     )
                 lines.append(
                     "- review_leave_request(request_id, approve|reject, reason): "
-                    "审批请假（仅企业经理；准假不判缺勤也不发工资）"
+                    "审批请假（仅合作社负责人；准假不判缺勤也不发工资）"
                 )
             position_rows = session.scalars(
                 select(Position).where(
@@ -765,16 +770,16 @@ def build_observation(
                     f"解雇 {employee_name}（{contract_row.agent_id}）"
                 )
             lines.append(
-                "- pause_recruitment/resume_recruitment/terminate_employment 仅企业经理可用；"
+                "- pause_recruitment/resume_recruitment/terminate_employment 仅合作社负责人可用；"
                 "解雇不消除欠薪"
             )
             lines.append(
                 "- purchase_company_goods(buyer_company_id, seller_company_id, item_id, "
-                "reason, quantity=1): 按固定价向其他企业采购（仅企业经理，价格由服务器决定）"
+                "reason, quantity=1): 按固定价向其他合作社采购（仅负责人，价格由服务器决定）"
             )
             lines.append(
                 "- stock_store(company_id, store_id, item_id, reason, quantity=1): "
-                "把本企业仓库货物上架到自有商店货架（仅企业经理，需货架有空间）"
+                "把本合作社仓库货物上架到自有商店货架（仅负责人，需货架有空间）"
             )
 
         # M18 R41: the agent's own personal shops (owner view) — products
@@ -798,7 +803,7 @@ def build_observation(
                 )
                 or 0
             )
-            lines.append("【店铺经营摘要】")
+            lines.append("【合作社摊位经营摘要】")
             for store in my_stores:
                 store_name = store.name or store.store_id
                 lines.append(f"- {store_name}({store.store_id}): 累计销售额 {total_sales}")
@@ -815,7 +820,7 @@ def build_observation(
                         f"{product.sell_price}金币（库存{product.stock}/{product.stock_cap}）"
                     )
         else:
-            lines.append("（暂无店铺）")
+            lines.append("（暂无合作社摊位）")
 
         # M13: employee card (R27/R31): own contract + today's shift.
         contract = session.scalar(
@@ -841,7 +846,7 @@ def build_observation(
                 f"未发工资{contract.unpaid_wage}金币"
             )
             if contract.unpaid_wage > 0:
-                lines.append(f"  企业尚欠你{contract.unpaid_wage}金币工资。")
+                lines.append(f"  合作社尚欠你{contract.unpaid_wage}金币工资。")
             upcoming_shift = session.scalar(
                 select(WorkShift).where(
                     WorkShift.world_id == world_id,
@@ -872,7 +877,7 @@ def build_observation(
                     )
                     lines.append(
                         f"- request_leave({upcoming_shift.shift_id}, reason): 无法到岗时请假"
-                        "（经理审批，准假不判缺勤）"
+                        "（负责人审批，准假不判缺勤）"
                     )
             lines.append(
                 f"- resign_job({contract.employment_id}, reason): 辞去当前正式工作"

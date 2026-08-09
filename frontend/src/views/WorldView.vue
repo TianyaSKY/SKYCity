@@ -298,8 +298,8 @@ onBeforeUnmount(() => {
         </div>
         <div class="overview-controls" aria-label="世界概览面板">
             <button type="button" @click="showTasks = !showTasks">任务</button>
-            <button type="button" @click="showCompany = !showCompany">企业</button>
-            <button type="button" @click="showStocks = !showStocks">股票</button>
+            <button type="button" @click="showCompany = !showCompany">合作社</button>
+            <button type="button" @click="showStocks = !showStocks">合作社份额</button>
         </div>
         <div v-if="showTasks" v-draggable="'task-board'" class="hud hud-top-left" style="top: 44px">
             <TaskBoard/>

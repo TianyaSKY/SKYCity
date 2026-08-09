@@ -1,6 +1,6 @@
 # 智能体提示词与工具约定 (agent-prompt)
 
-版本：1.0.0
+版本：1.2.0
 
 ## 1. 提示词结构
 
@@ -17,7 +17,7 @@
 
 约束：
 
-- 观察文本必须限长（默认 ≤ 2000 字符），超长截断，不重复发送完整静态说明。
+- 观察文本必须限长（默认 ≤ 50,000 字符），超长截断，不重复发送完整静态说明。
 - **不提供**：其他地点的秘密、完整数据库、未观察到的信息。
 - 相同观察短时缓存（M8），命中缓存不重复调用 LLM。
 
@@ -28,22 +28,28 @@
   `tool_use_behavior="stop_on_first_tool"`：第一个工具执行完即结束回合， 模型无法在同一决策内连环行动；最大轮数（默认
   4）仅作为畸形工具调用的兜底。
 - 工具失败（规则拒绝）不重试同一调用；结果写入观察（下次决策可见）， LLM 自行调整策略（T3-9）。
-- LLM 故障/超时 → 降级为 `wait` 10~30 游戏分钟（T8-4），世界不崩溃。
+- LLM 故障/超时 → 降级为 `wait` 15 游戏分钟（T8-4），世界不崩溃。
 
 ## 3. 工具约定
 
-第一版工具（均为 `@function_tool`，Agents SDK 官方装饰器）：
+当前工具（均为 `@function_tool`，Agents SDK 官方装饰器）：
 
 ```text
-move(destination_id, reason)   # 路程耗时在观察的【可见地点】标注（每步 2 分钟，雨雪天更慢）
-wait(minutes)
-sleep(minutes, reason)   # 60~480 分钟，每小时 +2 精力 / +3 心情（值见 backend/app/config/gameplay.py）；
-                         # 有家必须在家睡觉，无家必须去小镇旅店(village_hotel)睡（每晚 85 金币）
+move(destination_id, reason)    # 路程耗时在观察的【可见地点】标注（每步 2 分钟，雨雪天更慢）
+wait(minutes, reason)
+sleep(minutes, reason)          # 60~480 分钟，每小时 +5 精力 / +3 心情；
+                                # 有家可在自己家免费睡或去旅店；无家必须去旅店（每日首晚 30 金币）
 talk(target_agent_id, message, intent)
 buy_item(item_id, quantity, reason)
 sell_item(item_id, quantity, reason)
-work(job_id, reason)
 use_item(item_id, reason)
+buy_stock(stock_id, reason, shares=1)     # 认购固定单价合作社份额
+sell_stock(stock_id, reason, shares=1)    # 退出并由发行合作社按同价回购
+open_shop(stall_id, products, reason)     # 只可在自己所在的预设合作社摊位开摊
+stock_shop(store_id, item_id, quantity, reason)
+adjust_price(store_id, item_id, new_price, reason)
+set_buy_price(store_id, item_id, new_price, reason)
+close_shop(store_id, reason)
 ```
 
 统一结构：
@@ -114,7 +120,7 @@ request_leave(shift_id, reason)                    # 请假
 resign_job(employment_id, reason)                  # 辞职
 ```
 
-### 8.2 企业经理工具
+### 8.2 合作社负责人工具
 
 ```text
 review_job_application(application_id, decision, reason)   # accept | reject
@@ -131,9 +137,9 @@ stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物�
 - 工具只传意图参数（opening_id / shift_id / reason / decision）。 **禁止 LLM 传入**：工资金额、企业余额、合同状态、实际签到时间、
   工资是否支付成功、岗位剩余人数 —— 全部由服务端确定。
 - `purchase_company_goods` / `stock_store` **禁止 LLM 传入**：单价、余额、库存数量上限 —— 价格与可采购量由服务器固定规则决定；
-  `manager_agent_id` 由服务端注入。
+  `manager_agent_id`（负责人 ID）由服务端注入。
 - `agent_id` / `manager_agent_id` 由服务端从 `AgentToolContext` 注入， 不作为工具参数（防止冒充他人，同 §3）。
-- 经理工具校验：只有 `company.manager_agent_id` 可操作本企业资源； 引擎做硬性校验，决策由真实 LLM 作出。
+- 负责人工具校验：只有 `company.manager_agent_id` 对应的合作社负责人可操作本企业资源；引擎做硬性校验，决策由真实 LLM 作出。
 - 工具失败返回可读原因（`{"success": false, "reason": "岗位已满"}`）， 不吞异常；失败不重试同一调用（同 §2 T3-9）。
 
 ### 8.4 观察内容
@@ -142,10 +148,10 @@ stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物�
 
 ```text
 【正式职业】
-企业：晨露农场
-岗位：农场工人
+企业：晨露农场合作社
+岗位：农场生产员
 合同状态：在职
-每班工资：60金币
+每班工资：70金币
 出勤评分：92
 未支付工资：0
 
@@ -160,22 +166,23 @@ stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物�
 
 ```text
 【公开招聘】
-晨露农场：农场工人，60金币/班，剩余2个名额
-村庄杂货店：商店店员，90金币/班，剩余1个名额
+晨露农场合作社：农场生产员，70金币/班，剩余2个名额
+晨露商店合作社：商店值班员，90金币/班，剩余1个名额
 
 【我的申请】
 晨露农场：等待审核
 ```
 
-企业经理观察追加：
+合作社负责人观察追加：
 
 ```text
-【企业经营】
-企业余额：800
+【合作社经营】
+合作社余额：800
 员工人数：1/2
-今日应付工资：60
+今日应付工资：70
 欠薪：0
 今日收入：0
+当日可分配经营盈余的 10% 为负责人值守津贴（补贴、份额认购、初始资金和公共资金不计入）
 
 【待审核事项】
 求职申请1条
@@ -183,7 +190,7 @@ stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物�
 
 【待审核求职申请】
 申请人：林夏
-职位：农场工人
+职位：农场生产员
 申请理由：希望获得稳定收入
 当前职业：无
 出勤历史：暂无
@@ -191,3 +198,10 @@ stock_store(company_id, store_id, item_id, reason, quantity=1)  # 仓库货物�
 ```
 
 观察必须控制长度，只提供与当前决策相关的数据（同 §1 限长约束）。
+
+## 9. 合作社份额与居民摊位
+
+- `buy_stock` / `sell_stock` 保留稳定工具名和底层 ID，但面向居民的含义是**认购/退出合作社份额**：两种种子份额均为每份 10 金币、总量 100 份；每位居民每种最多持有 20 份。
+- 认购款进入对应发行合作社；经营活动只更新公开的今日经营量，**不会**改变单价，也不产生每日分红。退出时由发行合作社按同一固定单价回购，合作社余额不足会被拒绝。
+- `open_shop` 的 `stall_id` 必须来自观察中的【可开店位置】。居民必须站在空置的 `stall_plaza_1`、`stall_plaza_2` 或 `stall_plaza_3` 才能开摊；每人至多经营一个摊位，开摊一次收取 60 金币使用费进入公共金库。
+- 不支持任意坐标、运行时地点或第二摊位。关摊只退回货架商品并释放该固定摊位，不影响地图地点或合作社份额。

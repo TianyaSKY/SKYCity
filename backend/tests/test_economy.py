@@ -332,7 +332,7 @@ def test_work_lifecycle_settles_at_completion(engine: WorldEngine) -> None:
 
     row = agent_row(engine, world_id, "agent_linxia")
     assert row.action_type is None
-    assert row.money == 3000  # independent work mints no wage
+    assert row.money == 600  # independent work mints no wage
     # energy: -1/h x2 (hourly) then -8 work drain (4/h x 2h) = 90
     assert row.energy == 90
     assert row.satiety == 98  # -1/h x2 (R14)
@@ -392,7 +392,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 2988  # 3000 - 12
+    assert row.money == 588  # 600 - 12
     assert inventory_of(engine, world_id, "agent_linxia") == {"bread": 1}
 
     session = SessionLocal()
@@ -407,7 +407,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
     txs = transaction_rows(engine, world_id, "agent_linxia")
     assert txs[0].type == "expense"
     assert txs[0].amount == -12
-    assert txs[0].balance_after == 2988
+    assert txs[0].balance_after == 588
     assert txs[0].item_id == "bread"
 
     events = engine.events_after(world_id, 0)
@@ -416,7 +416,7 @@ def test_buy_success_and_snapshot_inventory(engine: WorldEngine) -> None:
         and e.payload == {
             "agent_id": "agent_linxia",
             "amount": -12,
-            "balance": 2988,
+            "balance": 588,
             "reason": "购买 面包×1",
         }
         for e in events
@@ -441,12 +441,12 @@ def test_buy_rejected_no_money(engine: WorldEngine) -> None:
 
     ok, envelope, reason = engine.economy_service.buy(
         world_id, "agent_linxia", "bread", quantity=300, reason="囤货"
-    )  # 300 * 12 = 3600 > 3000
+    )  # 300 * 12 = 3600 > 600
     assert ok is False and envelope is None
     assert reason == MSG_NO_MONEY  # R7: no credit
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3000
+    assert row.money == 600
     assert inventory_of(engine, world_id, "agent_linxia") == {}
     session = SessionLocal()
     try:
@@ -472,7 +472,7 @@ def test_buy_rejected_no_stock(engine: WorldEngine) -> None:
     assert reason == MSG_NO_STOCK
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3000
+    assert row.money == 600
     assert inventory_of(engine, world_id, "agent_linxia") == {}
     session = SessionLocal()
     try:
@@ -544,7 +544,7 @@ def test_concurrent_last_item_race_exactly_one_wins(engine: WorldEngine) -> None
     finally:
         session.close()
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 2988  # exactly one transaction
+    assert row.money == 588  # exactly one transaction
     assert inventory_of(engine, world_id, "agent_linxia") == {"bread": 1}
     assert len(transaction_rows(engine, world_id, "agent_linxia")) == 1
 
@@ -576,7 +576,7 @@ def test_sell_success(engine: WorldEngine) -> None:
     }
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3004  # 3000 + 4
+    assert row.money == 604  # 600 + 4
     assert inventory_of(engine, world_id, "agent_linxia") == {}  # stack emptied
 
     session = SessionLocal()
@@ -591,13 +591,13 @@ def test_sell_success(engine: WorldEngine) -> None:
     txs = transaction_rows(engine, world_id, "agent_linxia")
     assert txs[0].type == "income"
     assert txs[0].amount == 4
-    assert txs[0].balance_after == 3004
+    assert txs[0].balance_after == 604
 
     events = engine.events_after(world_id, 0)
     assert any(e.type == "item_sold" for e in events)
     assert any(
         e.type == "money_changed"
-        and e.payload == {"agent_id": "agent_linxia", "amount": 4, "balance": 3004, "reason": "出售 小麦×1"}
+        and e.payload == {"agent_id": "agent_linxia", "amount": 4, "balance": 604, "reason": "出售 小麦×1"}
         for e in events
     )
 
@@ -618,7 +618,7 @@ def test_sell_rejected_store_full(engine: WorldEngine) -> None:
     assert reason == MSG_STORE_FULL
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3000
+    assert row.money == 600
     assert inventory_of(engine, world_id, "agent_linxia") == {"wheat": 1}
 
 
@@ -771,7 +771,7 @@ def test_exhausted_agent_forced_to_rest(world_config: ParsedWorldConfig) -> None
         assert runs == [], "no LLM decision while exhausted (R12)"
         row = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         assert row.action_type == "wait"
-        assert row.action_data == {"reason": "精力耗尽，强制休息"}
+        assert row.action_data == {"reason": "精力不足，强制休息"}
     finally:
         session.close()
 
@@ -782,7 +782,7 @@ def test_exhausted_agent_forced_to_rest(world_config: ParsedWorldConfig) -> None
         for e in eng.events_after(world_id, 0)
         if e.type == "world_event_created"
     ]
-    assert any("精力耗尽，正在休息" in text for text in texts)
+    assert any("精力不足，正在休息" in text for text in texts)
     eng._runtimes.clear()
 
 
@@ -946,7 +946,7 @@ def test_hungry_agent_buys_bread_at_shop(world_config) -> None:
         assert runs[-1].tool_arguments["item_id"] == "bread"
         assert runs[-1].success == 1
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
-        assert agent.money == 2988  # 3000 - 12
+        assert agent.money == 588  # 600 - 12
     finally:
         session.close()
     eng._runtimes.clear()

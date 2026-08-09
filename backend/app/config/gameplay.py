@@ -17,10 +17,10 @@ ENERGY_DRAIN_PER_HOUR = 1
 MOOD_DRAIN_PER_HOUR = 1
 LONELINESS_GAIN_PER_HOUR = 1
 
-# 各行动每小时恢复；睡眠快于等待（睡眠一晚应约等于一天的精力消耗）。
-WAIT_ENERGY_PER_HOUR = 1
+# 各行动每小时恢复；休息必须足以抵消清醒状态的基础消耗。
+WAIT_ENERGY_PER_HOUR = 3
 WAIT_MOOD_PER_HOUR = 2
-SLEEP_ENERGY_PER_HOUR = 2
+SLEEP_ENERGY_PER_HOUR = 5
 SLEEP_MOOD_PER_HOUR = 3
 
 # 饱食度 = 0 时每小时额外精力消耗。
@@ -34,7 +34,7 @@ INITIAL_SATIETY = 100
 INITIAL_ENERGY = 100
 INITIAL_MOOD = 100
 INITIAL_LONELINESS = 0
-INITIAL_MONEY = 3000
+INITIAL_MONEY = 600
 
 # 高优先级决策阈值 与 夜间睡觉引导。
 MOOD_BOOST_THRESHOLD = 20
@@ -43,11 +43,14 @@ NIGHT_START_HOUR = 22
 NIGHT_END_HOUR = 7
 NIGHT_SLEEP_ENERGY_THRESHOLD = 40
 
+# 精力不高于该阈值时只能休息，不能移动、开工或签到正式班次。
+LOW_ENERGY_ACTION_THRESHOLD = 20
+
 # --------------------------------------------------------------------------- #
 # 睡眠与旅店
 # --------------------------------------------------------------------------- #
 HOTEL_LOCATION_ID = "village_hotel"
-HOTEL_NIGHTLY_FEE = 85
+HOTEL_NIGHTLY_FEE = 30
 SLEEP_MIN_MINUTES = 60
 SLEEP_MAX_MINUTES = 480
 
@@ -75,13 +78,14 @@ WEATHER_MULTIPLIERS = {"clear": 1.0, "cloudy": 1.0, "rain": 1.5, "snow": 2.0}
 # --------------------------------------------------------------------------- #
 # 日常开销、财政与促销
 # --------------------------------------------------------------------------- #
-UPKEEP_PER_DAY = 120  # 每日 00:00 全额扣除；余额不足自动负债（余额可为负）
-# 每日刚收取的 upkeep 才能进入 UBI 和企业工资补贴的分配公式；历史金库余额
-# 保留给公共服务、公共项目和其他明确的金库支出，不能被下一次补贴一并瓜分。
+UPKEEP_PER_DAY = 100  # 每日 00:00 全额扣除；余额不足自动负债（余额可为负）
+# 每日刚收取的维护费按合作社章程分配。历史金库余额保留给明确的公共支出，
+# 不会被下一日的补贴公式重新瓜分。
 TREASURY_UBI_SHARE_PERCENT = 50
-# 公共工作每天最多动用的公共预算。预算只从实际金库余额中划出；未用余额留在
-# 金库，已预留但未完成的工资留在 public_work_escrow，绝不凭空发放。
-PUBLIC_WORK_DAILY_BUDGET = 240
+TREASURY_PUBLIC_WORK_SHARE_PERCENT = 20
+TREASURY_PAYROLL_SHARE_PERCENT = 30
+# 公共工程只能动用当日公共工程储备，且每日总额不超过该上限。
+PUBLIC_WORK_DAILY_BUDGET = 180
 # B1: 引擎强制进食阈值。饱食度 ≤ 该值且空闲时，引擎直接调度进食——优先吃
 # 背包食物，否则在所在商店买最便宜的食物——不再依赖 LLM 自觉。
 HUNGER_FORCED_EAT_THRESHOLD = 20
@@ -170,33 +174,27 @@ CLAMP_MAIN = (0, 100)  # familiarity/trust/affection/resentment 钳制
 CLAMP_DEBT = (0, 1000)  # debt 钳制
 
 # --------------------------------------------------------------------------- #
-# R18 股票
+# R18 合作社份额
 # --------------------------------------------------------------------------- #
-STOCK_NOISE_RANGE = 2  # 每小时确定性噪声 ±2
-DIV_BUSINESS_PER_SHARE = 3  # 分红 = max(1, 当日经营数 // 3)（M19 由 5 下调增强）
-MAX_SHARES = 9999  # 单笔交易上限（schema le 镜像）
+# 居民个人持有上限；总发行量由种子中的 outstanding_shares 控制。
+COOPERATIVE_SHARE_HOLDING_CAP = 20
 
 # --------------------------------------------------------------------------- #
-# M17 经理利润分成
+# 合作社负责人值守津贴
 # --------------------------------------------------------------------------- #
-# 每日 00:00 从公司金库按当日净利润的该百分比给经理分成；
-# 公司当日亏损或金库不足以支付时不发（历史流水聚合，不含初始资金）。
-MANAGER_PROFIT_SHARE_PERCENT = 20
+# 每日 00:00 从当日可分配经营盈余中向负责人支付固定比例的值守津贴。
+LEADER_STIPEND_PERCENT = 10
 
 # --------------------------------------------------------------------------- #
-# M18 创业与个人商店
+# M18 合作社摊位
 # --------------------------------------------------------------------------- #
-OPEN_SHOP_CAPITAL = 100  # 开店资本门槛（R39.5：只校验不扣款；M19 由 150 下调）
-STALL_STOCK_CAP = 20  # 个人店每商品货架容量上限
-STALL_INITIAL_STOCK = 5  # 开店首单上架件数（min(持有量, 该值)）
-STALL_MAX_PRODUCTS = 3  # 单店最多商品种类
-PRICE_MAX_MULT = 2.0  # 个人店售价上限倍数（1 ~ base_price × 该值）
-STALL_BUY_MAX_MULT = 1.0  # M19：个人店收购价上限倍数（0 ~ base_price × 该值）
-STALL_OPEN_HOUR = 6  # 摊位/荒地店开门小时（R8 复用）
-STALL_CLOSE_HOUR = 22  # 摊位/荒地店关门小时
-STALL_CAPACITY = 4  # 摊位/荒地店同时容纳最大人数
-STALL_MAX_DISTANCE = 3  # 荒地店目标格距发起者最大曼哈顿距离
-STORE_STOCK_INITIAL_PRICE = 10  # 个人店上市行初始股价（R18.2 计数）
+# 摊位位置、营业时间和容量由地图预设地点定义；运行时不可新增地点。
+STALL_PERMIT_FEE = 60
+STALL_STOCK_CAP = 20  # 每种商品货架容量上限
+STALL_INITIAL_STOCK = 5  # 开摊首批上架件数（min(持有量, 该值)）
+STALL_MAX_PRODUCTS = 3  # 单摊最多商品种类
+PRICE_MAX_MULT = 2.0  # 售价上限倍数（1 ~ base_price × 该值）
+STALL_BUY_MAX_MULT = 1.0  # 收购价上限倍数（0 ~ base_price × 该值）
 
 # --------------------------------------------------------------------------- #
 # R19 转账 / 赠物

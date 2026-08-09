@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.2.0",
   "jobs": [
     {
       "job_id": "job_farm_field",
@@ -24,7 +24,7 @@
       "location_id": "village_farm",
       "interactable_id": "farm_field",
       "duration_minutes": 240,
-      "wage": 60,
+      "wage": 70,
       "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
@@ -34,7 +34,7 @@
         }
       ],
       "inputs": [],
-      "description": "正式班次：在晨露农场按班生产小麦，产物进入农场企业库存"
+      "description": "正式班次：在晨露农场合作社按班生产小麦，产物进入合作社库存"
     },
     {
       "job_id": "job_bakery_bake",
@@ -42,7 +42,7 @@
       "location_id": "village_bakery",
       "interactable_id": "bakery_oven",
       "duration_minutes": 240,
-      "wage": 60,
+      "wage": 70,
       "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
@@ -57,7 +57,7 @@
           "quantity": 10
         }
       ],
-      "description": "正式班次：消耗小麦烘烤面包，产物进入面包坊企业库存"
+      "description": "正式班次：消耗小麦烘焙面包，产物进入面包坊合作社库存"
     },
     {
       "job_id": "job_shop_attendant",
@@ -69,31 +69,31 @@
       "work_kind": "formal",
       "energy_cost_per_hour": 2,
       "products": [],
-      "description": "正式班次：在杂货店柜台招呼客人、整理货架和维持营业"
+      "description": "正式班次：在晨露商店合作社柜台招呼顾客、整理货架和维持营业"
     },
     {
       "job_id": "job_delivery",
-      "name": "送货跑腿",
+      "name": "公共跑腿",
       "location_id": "village_plaza",
       "interactable_id": "fountain",
       "duration_minutes": 90,
-      "wage": 24,
+      "wage": 30,
       "work_kind": "public",
       "energy_cost_per_hour": 3,
       "products": [],
-      "description": "把货物从广场送到各家各户"
+      "description": "从广场出发完成镇民需要的公共跑腿"
     },
     {
       "job_id": "job_town_clerk",
-      "name": "政务登记",
-      "location_id": "town_hall",
-      "interactable_id": "town_hall_desk",
+      "name": "广场文员",
+      "location_id": "village_plaza",
+      "interactable_id": "fountain",
       "duration_minutes": 180,
-      "wage": 48,
+      "wage": 60,
       "work_kind": "public",
       "energy_cost_per_hour": 1,
       "products": [],
-      "description": "在政务厅整理档案、登记公告"
+      "description": "在村庄广场整理公告、登记公共事务"
     },
     {
       "job_id": "job_hotel_service",
@@ -105,7 +105,7 @@
       "work_kind": "formal",
       "energy_cost_per_hour": 2,
       "products": [],
-      "description": "正式班次：在小镇旅店整理客房、接待住客"
+      "description": "正式班次：在晨露旅店合作社整理客房、接待住客"
     },
     {
       "job_id": "job_carpentry",
@@ -113,7 +113,7 @@
       "location_id": "carpenter_shop",
       "interactable_id": "carpenter_bench",
       "duration_minutes": 240,
-      "wage": 60,
+      "wage": 70,
       "work_kind": "formal",
       "energy_cost_per_hour": 4,
       "products": [
@@ -135,7 +135,7 @@
         }
       ],
       "inputs": [],
-      "description": "正式班次：在巧木工坊打造耙子、斧头、渔竿、镰刀等农具，产物进入工坊企业库存"
+      "description": "正式班次：在晨露木工合作社制作农具，产物进入合作社库存"
     },
     {
       "job_id": "job_flower_gardening",
@@ -143,7 +143,7 @@
       "location_id": "flower_garden",
       "interactable_id": "garden_bed",
       "duration_minutes": 240,
-      "wage": 60,
+      "wage": 70,
       "work_kind": "formal",
       "energy_cost_per_hour": 3,
       "products": [
@@ -153,7 +153,7 @@
         }
       ],
       "inputs": [],
-      "description": "正式班次：在晨露花圃照料鲜花，产物进入花圃企业库存"
+      "description": "正式班次：在晨露花圃合作社照料鲜花，产物进入合作社库存"
     },
     {
       "job_id": "job_woodcutting",

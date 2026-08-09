@@ -4,8 +4,8 @@ World rules enforced here (docs/world-rules.md): R1 (one action; move 独占),
 R3 (work uninterruptible — no other tool may run mid-work), R4 (last-item
 race via BEGIN IMMEDIATE + conditional UPDATE), R7 (no credit), R8 (store
 hours), R10 (wage + products settled at completion), R11 (satiety=0 blocks
-work), R12 (energy=0 blocks work; forced rest lives in the decision service),
-R14 (work drains energy by the job's intensity).
+work), R12 (energy<=20 blocks work; forced rest lives in the decision
+service), R14 (work drains energy by the job's intensity).
 
 Every accepted action publishes its event envelopes through the runtime event
 bus and returns ``(ok, envelope, reason)`` — the same shape the action
@@ -21,6 +21,8 @@ from typing import Any
 from loguru import logger
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
+
+from app.config.gameplay import LOW_ENERGY_ACTION_THRESHOLD
 
 from app.database.models.agents import Agent
 from app.database.models.companies import Company, CompanyTransaction
@@ -46,7 +48,7 @@ MSG_FORMAL_ONLY = "该工作仅限正式员工班次"
 MSG_NOT_AT_JOB = "不在工作地点"
 MSG_LOCATION_CLOSED = "地点未开门"
 MSG_SATIETY_EMPTY = "饱食度耗尽，无法工作"
-MSG_EXHAUSTED = "精力耗尽，无法工作"
+MSG_EXHAUSTED = f"精力不高于 {LOW_ENERGY_ACTION_THRESHOLD}，请先休息"
 MSG_PRODUCT_MISSING = "商店没有该商品"
 MSG_NOT_AT_STORE = "不在商店"
 MSG_STORE_CLOSED = "商店未开门"
@@ -104,6 +106,8 @@ class EconomyService:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
             if agent is None:
                 return False, None, MSG_AGENT_MISSING
+            if agent.energy <= LOW_ENERGY_ACTION_THRESHOLD:
+                return False, None, MSG_EXHAUSTED
             if agent.action_type is not None:
                 conversation_service = self.engine.conversation_service
                 if conversation_service is not None:
@@ -131,8 +135,6 @@ class EconomyService:
                 return False, None, MSG_LOCATION_CLOSED
             if agent.satiety <= 0:
                 return False, None, MSG_SATIETY_EMPTY
-            if agent.energy <= 0:
-                return False, None, MSG_EXHAUSTED
 
             ends_at = world.world_time + job.duration_minutes
             public_wage = 0

@@ -316,7 +316,7 @@ async def list_events(request: Request, world_id: str, after_sequence: int = 0) 
 
 @router.get("/{world_id}/stocks", response_model=StocksResponse)
 async def world_stocks(request: Request, world_id: str) -> StocksResponse:
-    """M10: 全部股票行情 + 全量持仓(WS 事件增量维护前端状态)。"""
+    """全部合作社份额、可认购余额与居民持有量。"""
     result = _engine(request).stock_service.list_stocks(world_id)
     if result is None:
         raise HTTPException(status_code=404, detail="世界不存在")

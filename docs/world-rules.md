@@ -3,7 +3,7 @@
 > 本文件是 **程序实现契约**，不是提示词建议。引擎与 Service 层必须逐条实现，
 > 不允许把规则交给 LLM 临场发挥。修改规则需同步修改本文件与对应测试。
 
-版本：1.1.0（M18 追加 R39–R44 创业与个人商店）
+版本：1.2.0（合作社小镇：R18 合作社份额、R39–R44 固定居民摊位）
 
 ## 总则
 
@@ -53,7 +53,7 @@
 
 ## R7 没钱能否欠款
 
-- **主动交易不赊账**：余额不足 → 购买/住店/买股票/转账失败，返回 `余额不足`。
+- **主动交易不赊账**：余额不足 → 购买/住店/认购合作社份额/转账失败，返回 `余额不足`。
 - **唯一允许的负债来源是每日生活开销（R20.4）**：00:00 全额扣除 `UPKEEP_PER_DAY`，余额不足时余额变为负数
   （负债）。负债期间所有主动消费依旧被拒绝，且每天承受心情惩罚（R20.4）。
 - `debt` 只存在于关系模型（direction 字段），由显式事件（第一版无借贷工具）产生， 购买/工作不产生债务。
@@ -72,8 +72,8 @@
 ## R10 劳动结算
 
 - 自雇 `work` 完成后只获得产物（进背包），必须出售给商店才能获得现金。
-- 公共工作在开始时从当日公共预算预留，完成后支付预留报酬。
-- 企业岗位只能通过 `formal_work` 班次完成；工资由企业账户支付，产物进入企业库存。
+- 公共工作在开始时从当日公共工程预算预留，完成后支付预留报酬。
+- 合作社岗位只能通过 `formal_work` 班次完成；工资由合作社账户支付，产物进入合作社库存。
 
 ## R11 饱食度 = 0
 
@@ -81,10 +81,10 @@
 - 触发「寻找食物」高优先级决策（调度器将其 `next_decision_at` 提前）。
 - 第一版无死亡机制。
 
-## R12 精力 = 0
+## R12 低精力强制休息
 
-- 精力为 0：强制休息，禁止 `move`/`work`；`wait` 每小时恢复 `WAIT_ENERGY_PER_HOUR` 精力（见 `backend/app/config/gameplay.py`，当前为 1）。
-- 精力恢复 > 20 后才允许其他行动。
+- 精力 **不高于 20**：强制休息，禁止 `move`、开始普通/公共 `work` 和 `start_shift`；`wait` 每小时恢复 `WAIT_ENERGY_PER_HOUR` 精力，`sleep` 每小时恢复 `SLEEP_ENERGY_PER_HOUR` 精力（见 `backend/app/config/gameplay.py`，当前分别为 3 和 5）。
+- 精力恢复 **> 20** 后才允许上述行动；引擎和正式班次服务分别硬校验，不能依赖 LLM 自觉休息。
 
 ## R13 上帝命令与规则
 
@@ -99,21 +99,21 @@
 | 需求   | 变化                                                                                 |
 |--------|--------------------------------------------------------------------------------------|
 | 饱食度 | 每小时 -1；使用食物按物品效果恢复                                                    |
-| 精力   | 每小时 -1；`work` 每小时额外 -4（按 job 强度）；`wait` 每小时 +1；`sleep` 每小时 +2 |
-| 心情   | 每小时 -1；`sleep` 每小时 +3；`wait` 每小时 +2；使用心情物品按效果恢复（M12）；负债期间每日 00:00 额外 -8（下限 0） |
+| 精力   | 每小时 -1；`work` 每小时额外按岗位成本消耗；`wait` 每小时 +3；`sleep` 每小时 +5 |
+| 心情   | 每小时 -1；`sleep` 每小时 +3；`wait` 每小时 +2；使用心情物品按效果恢复；负债期间每日 00:00 额外 -8（下限 0） |
 | 孤单   | 每小时 +1；与智能体对话每条消息 -1（R21，`LONELINESS_RELIEF`）                        |
-| 金钱   | 初始 3000；商品交易、正式班次和公共工作改变；每日 00:00 扣 `UPKEEP_PER_DAY=120`，余额不足自动负债（余额可为负） |
+| 金钱   | 初始 600；商品交易、正式班次和公共工作改变；每日 00:00 扣 `UPKEEP_PER_DAY=100`，余额不足自动负债（余额可为负） |
 
-- 上表为当前 `backend/app/config/gameplay.py` 的取值快照（睡眠恢复约为 `wait` 的 2 倍），改动配置即全局生效。
+- 上表为当前 `backend/app/config/gameplay.py` 的取值快照；改动配置即全局生效。
 
 - `sleep` 是独立行动（action_type=`sleep`）：60~480 分钟，可打断，完成后恢复空闲并重新调度决策。
-- **睡觉地点规则（R14 扩展）**：有家的智能体 **只能在家睡觉**（`sleep` 要求当前在 自己的家）；没有家的智能体
-  **只能在小镇旅店**（`village_hotel`，24 小时开放）睡觉， 每次入睡收取 `HOTEL_NIGHTLY_FEE=85` 金币房费（当前值，见 `backend/app/config/gameplay.py`；入住即扣，记
-  `hotel_fee` 流水 +
-  `money_changed` 事件；余额不足拒绝，不赊账 R7）。 在错误地点睡觉被拒绝（`有家必须回家睡觉（当前不在家）` /
-  `没有家的智能体需要去小镇旅店睡觉`），智能体需先 `move` 回家/旅店再睡。
-- **夜间睡觉引导**：22:00–07:00 且精力 ≤ 40 的空闲智能体，每小时触发一次 高优先级决策（`needs_boost`），引导其回家/去旅店睡觉；LLM
-  提示词与观察 文本同步说明睡觉地点与房费。
+- **睡觉地点规则（R14 扩展）**：有家的智能体可在自己的家免费睡觉，也可在小镇旅店
+  （`village_hotel`，24 小时开放）睡觉；没有家的智能体只能在旅店睡觉。旅店按游戏日收取
+  首次入住的 `HOTEL_NIGHTLY_FEE=30` 金币房费（入住即扣，记 `hotel_fee` 流水 +
+  `money_changed` 事件；余额不足拒绝，不赊账 R7）。错误地点睡觉被拒绝，智能体需先 `move`
+  回家/旅店再睡。
+- **夜间睡觉引导**：22:00–07:00 且精力 ≤ 40 的空闲智能体，每小时触发一次高优先级决策
+  （`needs_boost`），引导其回家/去旅店睡觉；LLM 提示词与观察文本同步说明地点与房费。
 - 心情 ≤ 20 触发高优先级决策（同 R11/R12 机制，调度 `agent_decide` 提前）。
 
 - R15 商店补货与地点容量
@@ -135,15 +135,13 @@
 - 存档包含：世界时间/天气/身份与状态/背包/商店库存/关系/记忆/未完成行动/ 待执行事件/随机种子/配置版本（map 只记录版本号）。
 - 恢复后世界必须从存档时间继续运行，事件序列继续递增。
 
-## R18 股票市场（M10）
+## R18 合作社份额
 
-- R18.1 交易：买入/卖出为即时行动，要求智能体空闲（R1），无地点要求； 余额不足/持股不足拒绝（不赊账，R7）；交易不改变股价。
-  持仓记录均价（`avg_cost`，买入时按加权平均更新，卖出不变），观察文本与 `/stocks` 接口据此给出成本价与浮盈/浮亏， 供智能体判断止盈止损；旧存档恢复时由 `stock_buy` 流水回填。
-- R18.2 股价由发行企业的经营事件驱动；每小时发布报价刷新事件。
-- R18.3 分红仅由发行企业账户实际支付；资金不足则当日不分红。
-- 每个上市公司必须有有效发行企业。买入所得进入该企业的 `stock_equity` 流水，卖出由该企业回购；发行量不得超过 `outstanding_shares`。
-- R18.4 上帝：可设定任意股价（走 GodActionService 审计 + 事件）。
-- R18.5 存档：股票价格/经营计数/持仓随存档（R17）；旧存档恢复时自动补种市场。
+- `buy_stock` / `sell_stock` 保留稳定 API 与 `stock_*` ID，但居民面对的是**认购/退出合作社份额**，不是可投机交易的股票。
+- 每个种子份额必须绑定有效、`active` 的发行合作社；当前两种份额均为固定单价 10 金币、总量 100 份。每位居民每种最多持有 20 份；总已认购量不得超过总量。
+- 认购/退出均为即时空闲行动（R1），不赊账（R7）。认购款进入发行合作社，退出时由同一发行合作社按同一固定单价回购；余额不足或份额不足即拒绝。
+- 每次销售、正式生产或相应工作事件只更新公开的**当日经营量**；价格永不因经营量、时间或噪声变化，不产生每日股息或其他分红。日界将经营量归零并发布 `stock_volume_changed`。
+- 认购、回购、持仓和发行上限随存档保存（R17）；`share_issue` / `share_buyback` 分别写发行合作社与居民的对应流水。份额认购、初始资金、公共补贴和上帝注资均不计入负责人值守津贴盈余。
 
 ## R19 智能体间转账与赠物（M11）
 
@@ -153,18 +151,18 @@
   `money_transferred` / `item_given` 事件，余额/背包经 `money_changed` /
   `inventory_changed` 到账。
 - R19.4 记忆：双方各记一条 episodic（无金额阈值）。
-- R19.5 转账与赠物不改变股价；随存档（R17，`transactions`/`inventories` 已覆盖，无新表）。
+- R19.5 转账与赠物不改变合作社份额单价；随存档（R17，`transactions`/`inventories` 已覆盖，无新表）。
 
 ## R20 消费与心情（M12）
 
-- R20.1 心情维度：0~100，每小时基础 -1；`sleep` 每小时 +20、`wait` 每小时 +2 （上限 100）；心情 ≤ 20 触发高优先级决策（同
-  R11/R12）。
+- R20.1 心情维度：0~100，每小时基础 -1；`sleep` 每小时 +3、`wait` 每小时 +2 （上限 100）；心情 ≤ 20 触发高优先级决策（同 R11/R12）。
 - R20.2 非食物心情物品可 `use_item`：蜂蜜 (+15)/草莓 (+10)/蜡烛 (+8)/陶罐 (+12)/ 花种 (+15) 恢复心情；`satiety_restore` 与
   `mood_restore` 均为 0 的物品仍拒绝 （`该物品不是食物`）。
 - R20.3 工具只取持有工具中对该工作的最高加成，不叠加；肥料仅在每次作物收获时消耗一份并提供一次收益加成。
-- R20.4 每日生活开销：00:00 每个智能体全额扣除 `UPKEEP_PER_DAY=120` 金币（余额不足时余额变为负数，即负债；负债是每日开销超支的唯一结果），记 `upkeep` 流水并发布 `money_changed`。负债者同时扣 `DEBT_MOOD_PENALTY_PER_DAY=8` 心情。
-- R20.4a upkeep 全部进入 `world.treasury`；当日收取部分的 50% 全民平分为 UBI，余下部分只按当日已实发的企业工资补贴企业。历史金库保留作公共用途。
-- R20.4b **饥饿强制进食（B1）**：饱食度 ≤ `HUNGER_FORCED_EAT_THRESHOLD=20` 且空闲/等待的智能体，
+- R20.4 每日生活开销：00:00 每个智能体全额扣除 `UPKEEP_PER_DAY=100` 金币（余额不足时余额变为负数，即负债；负债是每日开销超支的唯一结果），记 `upkeep` 流水并发布 `money_changed`。负债者同时扣 `DEBT_MOOD_PENALTY_PER_DAY=8` 心情。
+- R20.4a 当日刚收取的维护费进入 `world.treasury` 后按合作社章程分配：50% 向所有居民平均发放 UBI（含负债居民；余数留在金库）、20% 作为当日公共工程储备、30% 按当日已实际支付工资的比例补贴 active 合作社（每家不超过其已付工资）。公共工作日预算为 `min(180, 当日公共工程储备, 可用金库)`；历史金库不重新参与次日分配。
+- R20.4b **负责人值守津贴**：每个日界先以刚结束游戏日的 `sale_income`、`hotel_income`、`wholesale_sale`、`material_purchase`、`wage_payment`、`external_procurement`、`operating_expense` 流水求和；可分配经营盈余为正且合作社余额足够时，向 `manager_agent_id` 对应负责人支付其 10%。`initial_capital`、`share_issue`、`share_buyback`、`treasury_subsidy` 与 `god_injection` 永不计入盈余。支付写 `leader_stipend` 双方流水并发布 `leader_stipend_paid`，之后才收维护费并分配金库。
+- R20.4c **饥饿强制进食（B1）**：饱食度 ≤ `HUNGER_FORCED_EAT_THRESHOLD=20` 且空闲/等待的智能体，
   引擎每小时直接调度进食——优先吃背包食物，否则在所在商店买最便宜的食物——不再依赖 LLM 自觉，
   消费回路强制接通（观察文本同步给出【饥饿警告】）。
 - R20.5 促销：见 R15（确定性 20% 日概率、20% 折扣、恢复基准价）。
@@ -211,13 +209,13 @@
   （清格，无退还），走 R13 审计管道。
 - R23.9 存档：`crops` 行 + 未触发的 `crop_grow` 回调行随 R17 存档；恢复后 生长从 `next_stage_at` 续跑。
 
-## 企业与正式工作（R21–R35，详见 company-employment.md）
+## 合作社与正式工作（R21–R38，详见 company-employment.md）
 
-## R21 企业账户独立性
+## R21 合作社账户独立性
 
-- 企业拥有独立余额（`companies.money`），与老板/经理个人余额严格分离， 任何逻辑不得合并两者。
-- 企业资金变化必须写 `CompanyTransaction` 流水并发布事件；企业余额不得为负。
-- 企业创建时写入 `initial_capital` 流水；第一版不赊账、不贷款、无银行。
+- 合作社拥有独立余额（`companies.money`），与负责人个人余额严格分离，任何逻辑不得合并两者。
+- 合作社资金变化必须写 `CompanyTransaction` 流水并发布事件；合作社余额不得为负。
+- 合作社创建时写入 `initial_capital` 流水；不赊账、不贷款、无银行。
 
 ## R22 Job 与 Position 分离
 
@@ -240,10 +238,10 @@
 - 已关闭（非 `open`）招聘不接受申请。
 - 一个居民最多持有一份 active/on_leave 合同；录用前校验，冲突则拒绝。
 
-## R25 经理审核权限
+## R25 合作社负责人审核权限
 
-- 只有 `company.manager_agent_id` 可以审核本企业申请。
-- 审核决策（accept/reject）由真实 LLM 作出；引擎只做硬性校验 （申请有效、有空缺、企业正常、权限正确、无重复合同）。
+- 只有 `company.manager_agent_id` 对应的合作社负责人可以审核本企业申请。
+- 审核决策（accept/reject）由真实 LLM 作出；引擎只做硬性校验（申请有效、有空缺、合作社正常、权限正确、无重复合同）。
 
 ## R26 班次生成
 
@@ -255,7 +253,7 @@
 
 - 允许提前 30 分钟、允许迟到 120 分钟：
   `scheduled_start - 30 ≤ 世界时间 ≤ scheduled_start + 120`，窗口外拒绝。
-- 要求：班次属于该居民、合同 `active`、居民空闲（R1）、居民位于企业地点。
+- 要求：班次属于该居民、合同 `active`、居民空闲（R1）、精力 > 20、居民位于合作社地点。
 - `late_minutes = max(actual_start - scheduled_start, 0)`；迟到记合同
   `late_shifts + 1`、`attendance_score - 2`（下限 0）。
 
@@ -268,9 +266,9 @@
 ## R28.5 请假
 
 - 员工可对未开始的班次（`scheduled`）申请请假；同一班次最多一条待审批申请。
-- 经理审批：准假 → 班次转 `leave`（不判缺勤、`wage_due = 0`、不发工资）， 并生成下一空槽班次；拒绝 → 班次保持 `scheduled`。
+- 合作社负责人审批：准假 → 班次转 `leave`（不判缺勤、`wage_due = 0`、不发工资），并生成下一空槽班次；拒绝 → 班次保持 `scheduled`。
 - 缺勤判定时待审批申请自动转 `expired`；辞职时转 `cancelled`。
-- 请假事件与求职申请一样提升经理决策优先级。
+- 请假事件与求职申请一样提升合作社负责人决策优先级。
 
 ## R29 工资支付
 
@@ -281,6 +279,7 @@
 - 余额不足：班次 `unpaid`，欠薪记入合同 `unpaid_wage` 与企业
   `unpaid_wage_total`，不凭空发钱；欠薪不因辞职/合同终止消失。
 - 支付处理器必须幂等：班次状态非 `in_progress`/`late` 直接返回， 同一班次绝不重复支付。
+- 班次完成时另按 `job.energy_cost_per_hour × worked_minutes // 60` 扣除居民精力（下限 0）；工资与精力均按实际工时结算。
 
 ## R30 正式工作产物
 
@@ -296,23 +295,19 @@
 
 ## R32 解雇、暂停与停业
 
-- `terminate_employment` 仅经理可操作、不能解雇他企业员工、不能重复终止； 未来班次取消、名额恢复；欠薪不消失。
-- 企业 `suspended` 停止招聘与排班但保留企业（未来 scheduled 班次取消、 进行中班次照常完成但不续排）；恢复后重新招聘并为缺班次的合同续排。
-- `bankrupt`：资不抵薪且满足破产条件（后续定义）；上帝注资（`god_injection`
-  流水）可恢复经营并立即补发欠薪。
-- **E2 僵尸清算**：连续亏损 ≥ `ZOMBIE_LOSS_DAYS=3` 天且欠薪 > 0 的企业，在日界自动清算——
+- `terminate_employment` 仅合作社负责人可操作、不能解雇其他合作社员工、不能重复终止；未来班次取消、名额恢复；欠薪不消失。
+- 合作社 `suspended` 停止招聘与排班但保留合作社（未来 scheduled 班次取消、进行中班次照常完成但不续排）；恢复后重新招聘并为缺班次的合同续排。
+- `bankrupt`：资不抵薪且满足破产条件（后续定义）；上帝注资（`god_injection` 流水）可恢复经营并立即补发欠薪。
+- **E2 僵尸清算**：连续亏损 ≥ `ZOMBIE_LOSS_DAYS=3` 天且欠薪 > 0 的合作社，在日界自动清算——
   `status=closed`、合同终止（reason=企业连续亏损，破产清算）、未来班次取消、招聘关闭。
-  释放员工与资本，避免僵尸企业永久占坑。
+  释放员工与资本，避免僵尸合作社永久占坑。
 - **E2 缺勤解约**：同一合同累计缺勤 ≥ `MAX_ABSENT_SHIFTS=3` 次 → 自动解约并重开招聘
   （reason=连续缺勤 N 次，自动解约），把岗位让给能真正来上班的人。
 
-## R33 企业销售
+## R33 合作社商店销售
 
-- `Store.company_id` 绑定企业；居民购买时同一事务内：居民扣钱、商店库存减少、 居民获得商品、企业余额增加、双流水 +
-  `company_sale_completed` 事件。
-- 居民出售给商店：企业必须有足够资金（校验先于库存更新，避免失败事务残留 库存变更），不足则拒绝交易（不赊账 R7）；企业扣款写
-  `material_purchase`
-  流水 + `company_money_changed` 事件。
+- `Store.company_id` 绑定合作社；居民购买时同一事务内：居民扣钱、商店库存减少、居民获得商品、合作社余额增加、双流水 + `company_sale_completed` 事件。
+- 居民出售给商店：合作社必须有足够资金（校验先于库存更新，避免失败事务残留库存变更），不足则拒绝交易（不赊账 R7）；合作社扣款写 `material_purchase` 流水 + `company_money_changed` 事件。
 
 ## R34 企业事件与流水（完整列表见 event-protocol）
 
@@ -333,7 +328,7 @@
 - 采购规则来自 `world_data/companies/companies.json` 的 `procurement` 列表：
   `(item_id, seller_company_id, unit_price, max_quantity_per_order)`，价格由服务器固定，
   不接受议价或自定义价格。
-- `purchase_company_goods` 仅买方企业经理可调用；同一事务内：卖方可用库存
+- `purchase_company_goods` 仅买方合作社负责人可调用；同一事务内：卖方可用库存
   （`quantity - reserved_quantity`）条件扣减、买方可用库存增加、买方扣款卖方入账、
   双方 `material_purchase`/`wholesale_sale` 流水 + 事件。
 - 任一新校验失败整单回滚；并发采购最后可用库存时恰一单成功（同 R4 的
@@ -354,134 +349,56 @@
 - 缺勤/请假/辞职/解雇/停业只作用于 `scheduled` 班次，因此不存在「已预留但永不完成」
   的路径；`formal_only` 的 job 拒绝普通 `work()` 路径。
 
-## R38 企业仓库上架
+## R38 合作社仓库上架
 
-- `stock_store` 仅企业经理可调用，商店必须绑定本企业（R33 的
+- `stock_store` 仅合作社负责人可调用，商店必须绑定本合作社（R33 的
   `Store.company_id`）；同一事务内仓库可用库存条件扣减、货架条件增加
   （`stock + qty <= stock_cap`），无资金转移。
 - 任一条件失败整单回滚；发布 `company_store_stocked` 与仓库侧
   `company_inventory_changed`。
 
-## 创业与个人商店（M18，R39–R44）
+## 居民合作社摊位（R39–R44）
 
-个人店 = 居民自主创建、直接归属个人的商店（`stores.owner_agent_id` 非空、
-`company_id` 为空），与种子/企业商店（R33/R38）并行。个人店资金即店主
-个人余额，R21 企业账户独立性规则不适用。
-个人店与种子商店**错位竞争**：定价锚定村庄杂货店（R42），个人店不得比
-杂货店卖得便宜、不得比杂货店收购得贵——只能靠特色商品、地段与经营
-（补货/调价/收购）竞争，不能打价格战。
+居民合作社摊位是个人经营、受公共摊位资源约束的 `Store`：`owner_agent_id` 非空、
+`company_id` 为空。它与种子合作社商店（R33/R38）并行，但不能创造新地点、开设连锁店或改变合作社份额。
 
-### R39 开店（open_shop）
+### R39 开摊（open_shop）
 
-- `open_shop(location, products)` 是即时行动：发起者要求空闲（R1）。
-- `location` 两种选址模式：
-  - **摊位模式** `{stall_id}`：地图预置摊位（`location_type=stall`，见
-    map-specification），发起者当前位于该地点（`agent.location_id == stall_id`）。
-  - **荒地模式** `{col, row}`：任意可行走空地，发起者距目标格曼哈顿距离
-    ≤ 3（同 R9/R23.1）。
-- `products` 为商品线列表 `[{item_id, price}]`，最多 `STALL_MAX_PRODUCTS`（当前 3）种。
-- 前置校验（全部通过才可开店，失败返回具体原因）：
-  1. 世界未暂停、智能体存在、空闲（R1）。
-  2. 选址合法：摊位模式要求位于摊位地点；荒地模式要求目标格**可行走且
-     未被占用**（同 R22.3：有 navigation 标记、无 collision、无
-     `tile_structures`、无作物、非 location 锚点格、非 spawn 格）。
-  3. 荒地模式**路径可达**：目标格与全部 location 锚点 + spawn 点处于同一
-     `effective_walkable` 连通分量（BFS，同 R22.4 数据源）。荒地店本身
-     **不挡路**（不进 effective_walkable 减集，开店不改变连通性），校验
-     只确认「从道路网络能走到店」；不可达返回 `会堵住村庄`（复用拒绝文案）。
-  4. 地点空闲：`stores` 表 `(world_id, location_id)` 部分唯一索引保证一个
-     摊位/地点只能开一家店（含并发抢摊，同 R4 的事务模式）。
-  5. 资本门槛：`agent.money >= OPEN_SHOP_CAPITAL`（当前 100，见 gameplay.py；M19 由 150 下调）。
-  6. 每种商品持有 ≥ 1 件；价格在合法区间（R42，售价下限锚定杂货店同款
-     售价、收购价上限锚定杂货店同款收购价）；可选 `buy_price`（收购价）在
-     合法区间（R42，默认 0 = 不收购）。
-- 一个居民可开**多家**个人店（无数量上限）：每家店独立货架、独立结算、
-  独立定价，收摊一家不影响其他家；扩张受地点与资本天然约束。
-- 成功（同一事务）：荒地模式先创建运行时 `WorldLocation`
-  （`location_id=stall_<hex>` 生成、`location_type=stall`、锚点=目标格、
-  营业时间与容量取 gameplay.py 的 `STALL_OPEN_HOUR` / `STALL_CLOSE_HOUR` /
-  `STALL_CAPACITY` 配置；摊位模式复用地图地点行）；再创建 `Store`
-  （`owner_agent_id=发起者`、`company_id=NULL`、`name=发起者姓名+首商品名`
-  派生）与每个商品的 `StoreProduct`（`sell_price=定价`、`buy_price=0`、
-  `restock_daily=0`、`stock=min(持有量, STALL_INITIAL_STOCK)`、
-  `stock_cap=STALL_STOCK_CAP`）；首单货在同一事务内从背包扣除进货架。
-- 荒地店锚点加入 R22.4 连通性不变式的锚点集合：此后放置 blocking 建筑
-  不得切断新店（`会堵住村庄` 拒绝条件扩展）。
-- 发布 `store_opened`；商店与运行时地点进入快照（R44）。
+- `open_shop(stall_id, products)` 是即时行动：发起者必须空闲（R1）、站在 `stall_id` 对应的空置地图预设摊位。
+- `stall_id` 必须是 `world_data/maps/tiny_world.tmj` 中 `location_type=stall` 的固定地点；当前为 `stall_plaza_1`、`stall_plaza_2`、`stall_plaza_3`。任意坐标、任意地点、运行时地点和未知 ID 一律拒绝。
+- 一个居民最多经营一摊；同一固定摊位最多一店。两项在事务内查询校验，抢同一摊位时仅一人成功。
+- 货架必须提供 1–3 种互不重复的商品；每种至少持有 1 件，售价/收购价必须满足 R42。开摊首批从背包转入每种 `min(持有量, 5)` 件，单品货架上限 20 件。
+- 开摊收取 `STALL_PERMIT_FEE=60` 金币使用费：居民余额不足时拒绝；成功时同一事务扣居民余额、写 `stall_permit_fee` 流水、增加 `world.treasury`，再创建 `Store` 与 `StoreProduct`。后续失败不得吞掉使用费。
+- 不创建 `WorldLocation`、不修改地图、导航或连通性。
 
 ### R40 摊位营业
 
-- 营业时间随店铺地点 `[open_hour, close_hour)`（R8 复用）：地图摊位用
-  地点配置（06:00–22:00），荒地店用运行时地点的配置默认值
-  （`STALL_OPEN_HOUR`–`STALL_CLOSE_HOUR`，当前 06:00–22:00）；关店时购买
-  被拒（`商店未开门`）。
-- 售货**无人值守**：顾客位于摊位地点即可购买（`agent.location_id ==
-  store.location_id`），不要求店主在场或空闲；店主可离开摊位继续做别的事。
-- 个人店**默认只卖不收**：`buy_price=0`，居民 `sell_item` 到个人店返回
-  `商店不收购该物品`（复用既有 `buy_price <= 0` 校验）。
-- M19：店主可用 `set_buy_price` 设收购价（R42 区间），此后居民可把该商品
-  卖给个人店：同一事务内店主余额扣款（R7 不赊账，余额不足拒绝 `店主资金不足`）、
-  卖家入账、货架增加（`stock + qty <= stock_cap` 条件更新，并发安全）；店主
-  不能卖货给自己店铺（`不能卖货给自己店铺`）。结算发布 `item_sold` +
-  `store_purchase_completed` + 双方 `money_changed`。
-- **无魔法补货**：R15 每日自动补货不适用于个人店（`restock_daily=0`）；
-  货架只增不减路径为店主本人 `stock_shop`（R41）。
-- M12 每日促销**不适用于个人店**（无促销、无基准价恢复流程）。
+- 摊位开放时间与容量复用地图地点配置；关门时购买被拒。
+- 摊位无人值守：顾客位于摊位地点即可购买，不要求店主在场或空闲；店主可离开继续生活。
+- 摊位默认只卖不收（`buy_price=0`）。设置收购价后，居民可出售给摊位；货款从店主余额扣除，余额/货架容量不足或店主向自己摊位出售时拒绝。
+- 个人摊位不参与自动补货或每日促销；库存只能由店主经 R41 补入。
 
 ### R41 店主经营
 
-- `stock_shop(item_id, quantity)`：仅店主本人、空闲（R1）；同一事务内背包
-  条件扣减、货架条件增加（`stock + qty <= stock_cap`），任一失败整单回滚；
-  发布 `store_stocked`。
-- `adjust_price(item_id, new_price)`：仅店主本人、空闲（R1）；价格区间校验
-  同 R42；即时生效并同步更新 `sell_price` 与 `base_sell_price`；发布
-  `store_price_changed`（promo=false）。
-- `set_buy_price(item_id, new_price)`（M19）：仅店主本人、空闲（R1）；收购价
-  区间校验同 R42；即时生效并发布 `store_buy_price_changed`。
-- 售出结算（R33 的并行路径）：顾客 `buy_item` 命中个人店时同一事务内——
-  顾客扣款（`Transaction` type=`expense`）、店主入账（`Transaction`
-  type=`sale_income`，与顾客流水同 `trace_id`）、货架减货、顾客得货；
-  发布 `item_purchased` + `store_sale_completed` + 店主 `money_changed`。
-  不赊账（R7）；并发抢最后一单同 R4（恰一单成功）。
-- 个人店售出计入 R18.2 经营事件（股票 +1）。
+- `stock_shop(store_id, item_id, quantity)`、`adjust_price(store_id, item_id, new_price)`、
+  `set_buy_price(store_id, item_id, new_price)` 和 `close_shop(store_id)` 仅摊主本人且空闲时可用。
+- 补货在同一事务将背包货物转入货架，受单品容量上限保护；调价/设收购价即时生效并发布相应事件。
+- 顾客购买时，居民支出、店主收入、货架扣减和顾客背包增加同一事务完成；不赊账、抢最后一件仅一单成功（R4/R7）。
 
 ### R42 定价
 
-- **价格锚定种子商店（错位竞争）**：个人店定价以村庄杂货店（种子店
-  `village_shop`，见 world_data/stores/）为锚——
-  - 售价下限：同款商品杂货店的基准售价（`base_sell_price`，促销不改基准），
-    即个人店**不得比杂货店卖得便宜**；售价上限
-    `round(base_price × PRICE_MAX_MULT)`（当前 `PRICE_MAX_MULT=2.0`）。
-  - 收购价上限：`min(round(base_price × STALL_BUY_MAX_MULT),
-    杂货店同款收购价)`（当前 `STALL_BUY_MAX_MULT=1.0`），即个人店**不得比
-    杂货店收购得贵**；杂货店不收购（`buy_price=0`）或未上架的商品沿用
-    纯基准价上限。
-  - 据此杂货店始终是价格锚点：居民摊既不能压价抢客、也不能抬价抢货，
-    只能以特色商品、地段与经营竞争。杂货店未上架的新商品自动回退到
-    `1 ≤ price ≤ round(base_price × PRICE_MAX_MULT)`。
-- M19 收购价合法区间：`0 ≤ buy_price ≤ 收购价上限`（0 = 不收购）。越界拒绝
-  （开店、`adjust_price`、`set_buy_price` 共用同一校验）。
-- v1 无动态市场价格，价格不随供需自动波动。
+- 价格以村庄杂货店种子商品的 `base_sell_price` 为锚：摊位售价不得低于同款基准售价，且不得高于 `round(base_price × PRICE_MAX_MULT)`（当前 2 倍）。
+- 收购价范围为 `0 ≤ buy_price ≤ min(round(base_price × STALL_BUY_MAX_MULT), 杂货店同款收购价)`；杂货店不收购或未上架该商品时，以物品基准价上限回退。`0` 代表不收购。
+- 因此摊位不能压价抢客或抬价抢货，只能以特色商品和经营竞争；价格不随供需自动波动。
 
 ### R43 收摊与上帝干预
 
-- `close_shop` 仅店主本人、空闲（R1）：货架全部退回店主背包、删除
-  `Store` 与 `StoreProduct` 行、摊位释放；发布 `store_closed`
-  （reason=自主收摊）。
-- 上帝 `close_store`（R13 管道）：可强制收摊，货架货物退回店主背包，
-  reason=上帝干预；店铺不可被其他逻辑删除。
-- 店主余额与商店无独立账户（个人店资金即店主个人余额）。
+- `close_shop` 仅摊主本人且空闲时可用：货架商品全部退回其背包、删除 `Store`/`StoreProduct`、释放固定摊位、发布 `store_closed`；使用费不退。
+- 上帝 `close_store` 走 R13 审计管道，货架商品退回摊主背包；其他逻辑不得删除摊位。
+- 摊位没有独立账户；售货收入归摊主个人，使用费归公共金库。
 
-### R44 存档与快照（M18 扩展）
+### R44 存档与快照
 
-- 存档（R17）：`stores`/`store_products` 已覆盖；新增 `owner_agent_id`/`name`
-  列随表迁移；恢复后地点占用、货架库存、所有权不变，个人店不重复创建。
-- 存档新增 `runtime_locations` 段：荒地店创建的运行时地点**不随地图重建**
-  （地图只记版本号，R17），随存档保存；恢复顺序为「先按地图版本重建 map
-  地点 → 再插入运行时地点行」（location_id 为 `stall_<hex>`，与 map id
-  不冲突）。
-- 快照：`world_snapshot` 载荷扩展 `stores` 列表
-  （store_id/name/location_id/owner_agent_id/company_id/products）；运行时
-  地点随既有 `locations` 列表自然带出（快照查全表，无需新段）。
-- M16 静态数据补种只针对 `world_data/stores/` 种子商店与 map 地点
-  （存在性门控），不得覆盖/删除个人店与运行时地点行。
+- 存档（R17）保存 `stores`/`store_products` 中的摊位所有权、地点和库存；恢复后固定地点占用不变，不重复创建摊位。
+- 快照 `stores` 列表包含 `store_id`、`name`、`location_id`、`owner_agent_id`、`company_id` 和商品；地图预设地点始终由地图重建，不存在运行时摊位地点段。
+- 静态数据补种只针对 `world_data/stores/` 种子商店与地图地点，不能覆盖或删除居民合作社摊位。

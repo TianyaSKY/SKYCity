@@ -207,17 +207,6 @@ class SaveService:
                 }
                 for store in stores
             ],
-            # M18 R44: wild-cell stall locations created by open_shop are not
-            # part of the map (map restores only its version), so they travel
-            # with the save and are re-inserted after the map locations.
-            "runtime_locations": [
-                self._row_dict(row)
-                for row in session.scalars(
-                    select(WorldLocation).where(WorldLocation.world_id == world_id)
-                ).all()
-                if row.location_id
-                not in {loc.location_id for loc in self.engine.world_config.locations}
-            ],
             "jobs": rows(Job),
             "employments": rows(WorkHistory),
             # M13 (schema v2): company and formal-employment state.
@@ -414,12 +403,6 @@ class SaveService:
                 )
             )
 
-        # M18 R44: wild-cell stalls created by open_shop restore after the map
-        # locations (their location_id is stall_<hex>, disjoint from map ids).
-        for row in payload.get("runtime_locations", []):
-            data = self._row_data(row)
-            data["world_id"] = world_id  # re-point at the restored world
-            session.add(WorldLocation(**data))
 
         restored_agents: list[Agent] = []
         for row in payload.get("agents", []):

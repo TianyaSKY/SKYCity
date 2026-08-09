@@ -24,8 +24,8 @@ SLEEP_TOOL_DESCRIPTION = (
     "睡觉恢复精力和心情（比 wait 快得多，每小时 +"
     f"{SLEEP_ENERGY_PER_HOUR} 精力 / +{SLEEP_MOOD_PER_HOUR} 心情）："
     f"minutes {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES}，建议深夜或精力低时使用。"
-    "有家必须在家睡，无家必须去小镇旅店(village_hotel)睡"
-    f"（每晚 {HOTEL_NIGHTLY_FEE} 金币）。睡觉与 wait 一样可被打断。"
+    "有家可在自己家免费睡或去小镇旅店(village_hotel)，无家必须去旅店"
+    f"（每日首晚 {HOTEL_NIGHTLY_FEE} 金币）。睡觉与 wait 一样可被打断。"
 )
 
 

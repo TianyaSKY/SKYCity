@@ -9,14 +9,15 @@
 
 - 64×40 瓦片小镇地图（Tiled JSON），PixiJS 整数倍缩放渲染
 - 世界时钟（游戏分钟制）：暂停 / 恢复 / 1× / 2× / 5× / 10×
-- 6 个智能体（每人一份角色卡，可自行添加），由 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品
+- 9 位居民（每人一份角色卡，可自行添加），由 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品
 - 真实对话：气泡、历史面板、交谈高亮、防无限对聊
-- 经济闭环：饱食度下降 → 工作 → 工资 → 商店购买 → 进食
-- 夜间作息：精力/心情按小时消耗，睡觉大幅恢复（+2 精力 / +3 心情每小时，数值见 backend/app/config/gameplay.py）； 有家回自己家睡，无家去小镇旅店（每晚 85
-  金币，余额不足不赊账）
+- 合作社经济闭环：生产 → 合作社商店 → 居民消费；居民每日缴纳维护费，按全民基本收入、公共工程和工资保障分配
+- 夜间作息：精力/心情按小时消耗，`wait` 每小时恢复 3 精力，睡觉恢复 5 精力 / 3 心情；有家回自己家睡，无家去小镇旅店（每日首晚 30 金币，余额不足不赊账）
+- 合作社份额：两种有限认购、固定单价的合作社份额；经营量公开，不设投机价格或每日股息
+- 合作社摊位：居民只能在广场三个预设摊位经营一摊，开摊使用费进入公共金库
 - 记忆系统（工作/情节/语义记忆 + 加权检索）与方向性人际关系
 - 每日反思（独立限频调用）
-- 上帝视角：暂停/调速/改天气/发钱/给物品/传送/公共事件/改商店库存，全程审计
+- 上帝视角：暂停/调速/改天气/发钱/给物品/传送/公共事件/改商店库存/调份额单价，全程审计
 - 稳定性：LLM 并发信号量、超时重试、故障降级、Token 预算、观察缓存、trace_id 全程可溯
 - 存档 / 恢复 / 事件重放
 
@@ -57,6 +58,12 @@ curl -X POST localhost:8000/api/worlds/world_001/speed \
 注意：SDK 默认走 Responses API，而第三方服务通常只实现 `/chat/completions`，因此本项目固定走 chat completions（
 `LLM_USE_RESPONSES=false`）。若你的服务商明确支持 `/responses`，可改为 `true`。
 
+### 合作社规则版本升级
+
+本版本的合作社份额与旧版股票表不兼容，项目没有数据库迁移脚本。升级已有部署时，先停止后端并备份
+`backend/ai_tiny_world.db`，再删除该数据库文件后启动服务，让 SQLAlchemy 按当前模型创建新表；随后在前端创建新世界。
+只删除 `world_001` 不会更新旧表结构，不能替代重建数据库。
+
 | 环境变量                   | 默认          | 说明                                                |
 |----------------------------|---------------|-----------------------------------------------------|
 | `OPENAI_API_KEY`           | —             | 真实 LLM 密钥（第三方兼容 key 亦可）                |
@@ -91,7 +98,7 @@ curl -X POST localhost:8000/api/worlds/world_001/speed \
    }
    ```
 
-   `home` 可省略（无家的智能体出生在出生点格）；`initial_money` 默认 50。`spawn` 必填，`id` 必须等于文件名。
+   `home` 可省略（无家的智能体出生在出生点格）；`initial_money` 未设置时默认 600。`spawn` 必填，`id` 必须等于文件名。
 
 2. 重新生成地图（可选，仅同步 tmj 里的可视化出生点/住宅；引擎只读角色卡，不跑也能建世界）：
 
@@ -114,7 +121,7 @@ curl -X POST localhost:8000/api/worlds/world_001/speed \
 ## 测试
 
 ```bash
-cd backend && uv run pytest tests/ -q          # 123+ 个后端测试
+cd backend && uv run pytest tests/ -q          # 全部后端测试
 cd frontend && npm run test                    # Vitest 单元测试
 cd frontend && npm run test:e2e                # Playwright 冒烟（需前后端已启动）
 ```
@@ -126,7 +133,7 @@ cd frontend && npm run test:e2e                # Playwright 冒烟（需前后�
 ```
 backend/     FastAPI + SQLAlchemy + 世界引擎 + LLM 智能体
 frontend/    Vue3 + Vite + Pinia + PixiJS 8
-world_data/  地图(tmj/tsj)、角色卡(身份+出生点+家)、物品、工作、商店种子数据
+world_data/  地图(tmj/tsj)、角色卡(身份+出生点+家)、物品、工作、合作社、商店和份额种子数据
 tools/       地图生成器（build_map.py，确定性）
 docs/        架构、世界规则、事件协议、地图规范、智能体约定
 ```
@@ -136,7 +143,7 @@ docs/        架构、世界规则、事件协议、地图规范、智能体约�
 ## 文档
 
 - `docs/architecture.md` — 三大边界（LLM 只出意图 / 引擎唯一真值 / 前端只观察）
-- `docs/world-rules.md` — 世界规则契约（R1~R17，程序实现）
+- `docs/world-rules.md` — 世界规则契约（R1~R44，程序实现）
 - `docs/event-protocol.md` — 统一事件协议与全部事件类型
 - `docs/map-specification.md` — 图层与对象层规范
 - `docs/agent-prompt.md` — 提示词与工具约定

@@ -10,8 +10,10 @@ from __future__ import annotations
 import json
 
 from app.config.gameplay import (
+    COOPERATIVE_SHARE_HOLDING_CAP,
     HOTEL_NIGHTLY_FEE,
     IDLE_DELAY,
+    LOW_ENERGY_ACTION_THRESHOLD,
     MAX_BUILD_DISTANCE,
     NIGHT_SLEEP_ENERGY_THRESHOLD,
     NIGHT_START_HOUR,
@@ -19,7 +21,9 @@ from app.config.gameplay import (
     SLEEP_MAX_MINUTES,
     SLEEP_MIN_MINUTES,
     SLEEP_MOOD_PER_HOUR,
+    STALL_PERMIT_FEE,
     TALK_DISTANCE,
+    UPKEEP_PER_DAY,
     WAIT_ENERGY_PER_HOUR,
     WAIT_MAX_MINUTES,
     WAIT_MIN_MINUTES,
@@ -52,12 +56,12 @@ _BEHAVIORAL_RULES = f"""行为规则：
 4. 保持角色：说符合你性格的话，但行动接口只调用工具，不要编造结果。
 5. 饱食度、精力、孤单、金钱会影响你的选择；感到饥饿（饱食度低）时去商店买食物，
    这是最高优先级——饥饿警告出现时，先吃背包食物或去杂货店买食物，再考虑其他；
-   精力低或深夜时回家（或去旅店）睡觉恢复精力；孤单会随时间增加，找别人聊天可以缓解孤单。
+   精力不高于 {LOW_ENERGY_ACTION_THRESHOLD} 时只能先休息；孤单会随时间增加，找别人聊天可以缓解孤单。
 6. 主动社交：看到【可见人物】时，优先考虑用 talk 打招呼、闲聊或询问；
    收到消息务必回复。不要在同一个地点长时间独处等待。
 7. 睡觉要主动：深夜（{NIGHT_START_HOUR} 点后）或精力低（≤{NIGHT_SLEEP_ENERGY_THRESHOLD}）时应当回家睡觉（有家的智能体），
-   没有家的智能体去小镇旅店(village_hotel)开房睡觉（每晚 {HOTEL_NIGHTLY_FEE} 金币，钱不够先去工作赚钱）。
-   不要在路边、商店或工作地点过夜；sleep 只能在家或旅店执行，否则会被拒绝。
+   没有家的智能体去小镇旅店(village_hotel)开房睡觉（每日首晚 {HOTEL_NIGHTLY_FEE} 金币，钱不够先去工作赚钱）。
+   不要在路边、商店或工作地点过夜；sleep 只能在自己的家或旅店执行，否则会被拒绝。
 8. 等待要克制：wait 只在确无其他可做之事时使用，白天等待一般不超过 {IDLE_DELAY} 分钟；
    深夜或精力低时用 sleep 睡觉（{SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟），不要用 wait 假装睡觉。
 9. 环境改造：持有木材/麻绳/花种等材料且目标达成需要时，可以在附近空地用 build
@@ -66,16 +70,16 @@ _BEHAVIORAL_RULES = f"""行为规则：
    成熟后 harvest 收获并到商店卖钱——种地是稳定收入（等待期不占行动），也是小镇生活的一部分。
 11. 采集：树林/河边/花圃有伐木、钓鱼、采蜜的自雇活（见【可做的事】），随时能干，
    产物能卖商店换钱，也能自己用；持有专长工具时产量更高。
-12. 创业：有资本（≥100 金币）和可卖商品时，可以在广场空摊位或附近可达空地用 open_shop 开店卖货；店铺收入直接进自己腰包，记得用 stock_shop 补货、用 adjust_price 随行就市调价；可以用 set_buy_price 定收购价收购别人的货（货款从你余额扣）；不想经营了用 close_shop 收摊。
+12. 合作社摊位：有可卖商品时，只能在【可开店位置】列出的空置固定合作社摊位用 open_shop 开摊；必须先移动到相应 stall_id，开摊收取 {STALL_PERMIT_FEE} 金币使用费。每人只能经营一摊，不能在空地新建地点；摊位收入直接进自己腰包，记得用 stock_shop 补货、用 adjust_price 调价；可以用 set_buy_price 定收购价收购别人的货（货款从你余额扣）；不想经营了用 close_shop 收摊。
 """
 
 _TOOL_CONVENTIONS = f"""工具约定：
 - move(destination_id, reason)：移动到指定地点。destination_id 必须是可见地点列表中的 id；
   路程耗时已在【可见地点】中标注（每步 2 分钟，雨雪天更慢），移动期间无法做其他事，权衡路程后再决定。
 - wait(minutes, reason)：原地等待 {WAIT_MIN_MINUTES}~{WAIT_MAX_MINUTES} 分钟。
-- sleep(minutes, reason)：睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 {SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情
-  （精力是 wait 的 {SLEEP_ENERGY_PER_HOUR // WAIT_ENERGY_PER_HOUR} 倍、心情 {SLEEP_MOOD_PER_HOUR // WAIT_MOOD_PER_HOUR} 倍）；
-  有家→必须在家睡觉，无家→必须去小镇旅店(village_hotel)（每晚 {HOTEL_NIGHTLY_FEE} 金币）；深夜或精力低时使用，醒来后精力充沛。
+- sleep(minutes, reason)：睡觉 {SLEEP_MIN_MINUTES}~{SLEEP_MAX_MINUTES} 分钟，每小时恢复 {SLEEP_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR} 点心情；
+  比 wait 每小时多恢复 {SLEEP_ENERGY_PER_HOUR - WAIT_ENERGY_PER_HOUR} 点精力、{SLEEP_MOOD_PER_HOUR - WAIT_MOOD_PER_HOUR} 点心情；
+  有家→在自己家免费睡，或去小镇旅店(village_hotel)；无家→必须去旅店。旅店每日首晚 {HOTEL_NIGHTLY_FEE} 金币；深夜或精力低时使用，醒来后精力充沛。
 - talk(target_agent_id, message, intent)：与附近（距离 ≤ {TALK_DISTANCE} 格）且空闲的智能体对话；
   intent 取 greet/chat/ask/offer/leave 之一；对方忙碌或太远时会被拒绝；聊天能缓解孤单。
   收到【收到的消息】里的消息时应当回复（intent 用 chat/ask/offer）；如果不想继续聊，
@@ -86,35 +90,36 @@ _TOOL_CONVENTIONS = f"""工具约定：
 - buy_item(item_id, reason, quantity=1)：在商店购买商品；钱不够会被拒绝。
 - sell_item(item_id, reason, quantity=1)：把背包里的物品卖给商店换钱。
 - use_item(item_id, reason)：食用背包里的食物提高饱食度（每次消耗 1 件）。
-- buy_stock(stock_id, reason, shares=1)：用现金买入【股票行情】里的公司股票；钱不够会被拒绝。
-- sell_stock(stock_id, reason, shares=1)：卖出你持有的股票换回现金。
+- buy_stock(stock_id, reason, shares=1)：认购【合作社份额】中的固定单价份额；每种最多持有 {COOPERATIVE_SHARE_HOLDING_CAP} 份，钱不够会被拒绝。
+- sell_stock(stock_id, reason, shares=1)：退出持有的合作社份额，由发行合作社按同一固定单价回购。
 - transfer_money(target_agent_id, amount, reason)：给附近的智能体转账金币；对方无需空闲，但距离必须 ≤ {TALK_DISTANCE} 格（target_agent_id 用【可见人物】里的完整 id）。
 - give_item(target_agent_id, item_id, quantity=1, reason)：把背包里的物品送给附近的智能体。
 - build(col, row, blueprint_id, reason)：在 (col,row) 格建造【可建造的蓝图】里的建筑；要求离目标格 ≤ {MAX_BUILD_DISTANCE} 格、目标格可行走且未被占用、背包材料足够。
   建造是重体力活：完成后建筑永久留在地图上，挡住通行的建筑（栅栏/房屋）所有人都会绕行，别把路堵死。
 - plant(col, row, item_id, reason)：在农田 (col,row) 格种下一粒【可种植的种子】里的种子；作物按世界时钟生长，成熟后可 harvest 收获卖钱。
 - harvest(col, row, reason)：收获 (col,row) 格已成熟的作物（见【附近作物】里的"成熟可收"）。
-- open_shop(location, products, reason)：在空摊位或附近可达空地开店（资本 ≥100 金币，商品从背包上架，≤3 种；售价须不低于村庄杂货店同款、不超过 2 倍基准价；可选 buy_price 收购价须不高于杂货店同款收购价，0=不收购）。
-- stock_shop(store_id, item_id, quantity=1, reason)：给自己店铺的货架补货（从背包上架）。
-- adjust_price(store_id, item_id, new_price, reason)：调整自己店铺的售价。
-- set_buy_price(store_id, item_id, new_price, reason)：设置自己店铺的收购价（不高于杂货店同款收购价，0=不收购）。
-- close_shop(store_id, reason)：收掉自己的店铺，货架货物退回背包。
+- open_shop(stall_id, products, reason)：只可在自己所在的【可开店位置】固定合作社摊位开摊（使用费 {STALL_PERMIT_FEE} 金币，商品从背包上架，≤3 种；售价须不低于村庄杂货店同款、不超过 2 倍基准价；可选 buy_price 收购价须不高于杂货店同款收购价，0=不收购）。
+- stock_shop(store_id, item_id, quantity=1, reason)：给自己合作社摊的货架补货（从背包上架）。
+- adjust_price(store_id, item_id, new_price, reason)：调整自己合作社摊的售价。
+- set_buy_price(store_id, item_id, new_price, reason)：设置自己合作社摊的收购价（不高于杂货店同款收购价，0=不收购）。
+- close_shop(store_id, reason)：收掉自己的合作社摊，货架货物退回背包。
 - 每个工具都必须提供中文 reason（talk 的消息用中文），说明你为什么这么做。
 - 一次决策至多发起一次行动；其余情况请选择 wait 并给出理由。"""
 
-_ECONOMY_GUIDE = """经济规则：
-- 自雇工作只产出材料，必须卖给商店才会得到现金；正式企业岗位按班次由企业支付工资。
+_ECONOMY_GUIDE = f"""经济规则：
+- 自雇工作只产出材料，必须卖给商店才会得到现金；正式合作社岗位按班次由合作社支付工资。
 - 自雇活：村北树林伐木、河边钓鱼、花圃采蜜，产物可卖商店。
 - 温饱优先：饱食度低（低于 40）时，第一优先是去商店买食物（面包等）并 use_item 吃掉——饿着肚子什么都做不好；【饥饿警告】出现时必须立刻解决吃饭。
 - 干活收获的材料（小麦、木材、鲜鱼、蜂蜜等）可以到商店 sell_item 卖钱；商店只收标了收购价的商品。
 - 种地收益：买种子种下后不用守着，成熟了回来 harvest 卖钱；肥料每次收获仅消耗一份，工具只取最强适用加成。
-- 投资要留余地：buy_stock 的钱会进入企业账户，股价随经营上涨，企业盈利时按业绩分红（亏损不发）；永远不要把所有现金都投进股票——留足吃饭、住店和应急的钱。
+- 认购要留余地：buy_stock 认购的是固定单价的合作社份额，资金进入对应发行合作社；经营只公开今日经营量，不改变单价，也没有每日分红。每种份额最多持有 {COOPERATIVE_SHARE_HOLDING_CAP} 份，别把吃饭、住店和应急的钱都认购出去。
 - 你无法主动赊账或借钱：钱不够就先去工作，赚到钱再回来买东西。
-- 每天 00:00 会扣除 120 金币生活开销进村庄金库，次日金库会按基本收入发还一部分；余额不足会自动负债（金钱显示为负数）。负债期间不能购物/住店/买股票/转账，而且每天心情会变差——负债后要尽快去工作赚钱还清欠款。
+- 每天 00:00 每位居民缴纳 {UPKEEP_PER_DAY} 金币生活维护费进入村庄金库；当日收取额的 50% 平分为全民基本收入、20% 留作公共工程储备、30% 按当日已实发工资补贴合作社。余额不足会自动负债（金钱显示为负数）；负债期间不能购物/住店/认购份额/转账，而且每天心情会变差——负债后要尽快去工作赚钱还清欠款。
 - 缺钱时可以请朋友 transfer_money 帮忙，不需要的物品可以 give_item 送人（只能给附近的人）。
 - 有余钱时改善生活：蜂蜜/鱼/草莓等可以恢复心情，陶罐/蜡烛/花种可以装点生活或送人（心情和关系都会变好）；工具和肥料让工作更高效。
 - 想改造小镇时，去商店买木材/麻绳/花种，到空地上用 build 建造（详见工具约定）。
-- 想当老板：攒够 100 金币后可以在摊位/空地 open_shop 开店，售价不能低于村庄杂货店同款（上限 2 倍基准价），卖出收入直接进你的余额；也可以 set_buy_price 定收购价收别人卖来的货（不能高于杂货店同款收购价），再转手卖出赚差价——定价和杂货店错位，别打价格战，靠特色货品和地段竞争。"""
+- 想经营摊位：带着可卖商品前往【可开店位置】列出的空置固定合作社摊位，用 open_shop 开摊并支付 {STALL_PERMIT_FEE} 金币使用费；每人只能经营一摊，不能在空地另建商店。售价不能低于村庄杂货店同款（上限 2 倍基准价），卖出收入直接进你的余额；也可以 set_buy_price 定收购价收别人卖来的货（不能高于杂货店同款收购价），再转手卖出赚差价——以特色货品和服务竞争，不打价格战。
+"""
 
 
 def build_system_prompt(identity: dict) -> str:

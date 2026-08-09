@@ -151,8 +151,8 @@ LOCATION_ANCHORS: dict[str, tuple[int, int]] = {
     "village_bakery": (30, 12),
     "carpenter_shop": (10, 5),
     "flower_garden": (6, 14),
-    # M18 摊位: 广场内三个空置摊位（避开 fountain (32,20)、well (28,22)
-    # 与各建筑 door；open/close/capacity 与 gameplay.STALL_* 配置一致）。
+    # Three fixed cooperative stalls in the plaza; they are map locations,
+    # never runtime-created sites.
     "stall_plaza_1": (30, 19),
     "stall_plaza_2": (33, 19),
     "stall_plaza_3": (30, 22),
@@ -194,8 +194,8 @@ LOCATIONS: dict[str, dict] = {
         "name": "晨露花圃", "location_type": "farm", "capacity": 8,
         "open_hour": 6, "close_hour": 18,
     },
-    # M18: 广场空摊位（STALL_CAPACITY=4 / STALL_OPEN_HOUR=6 /
-    # STALL_CLOSE_HOUR=22 的镜像值，脚本内硬编码并指向 gameplay 配置）。
+    # Three fixed cooperative stalls. Their hours and capacity live in the
+    # map object definitions below, the single source for stall geometry.
     "stall_plaza_1": {
         "name": "广场摊位一", "location_type": "stall", "capacity": 4,
         "open_hour": 6, "close_hour": 22,
@@ -229,6 +229,8 @@ HOME_TILES: dict[str, int] = {
     "zhoushen_home": HOUSE_FRONTS[1],
     "limujiang_home": HOUSE_FRONTS[2],
     "sunshen_home": HOUSE_FRONTS[3],
+    "laozhang_home": HOUSE_FRONTS[0],
+    "touzi_home": HOUSE_FRONTS[2],
 }
 
 

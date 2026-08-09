@@ -1,6 +1,6 @@
 # 企业与正式工作系统 (company-employment)
 
-版本：1.0.0（第一版）
+版本：1.2.0（合作社小镇）
 
 > 本文件是企业与正式工作系统的详细规则契约。程序实现契约以 `world-rules.md`
 > R21–R35 为准；本文档给出实体定义、流程细节与实现边界。
@@ -8,16 +8,16 @@
 
 ## 1. 目标与边界
 
-第一版目标是建立一个可靠、可扩展、由真实 LLM 居民参与决策的正式就业闭环：
+本版本建立一个可靠、可扩展、由真实 LLM 居民参与决策的合作社正式就业闭环：
 
 ```text
-企业发布职位 → 居民了解招聘信息 → 居民自主决定应聘 → 企业管理者审核申请
+合作社发布职位 → 居民了解招聘信息 → 居民自主决定应聘 → 合作社负责人审核申请
 → 建立正式劳动关系 → 系统生成工作班次 → 居民自主决定是否准时上班
-→ 员工完成工作 → 企业支付工资 → 企业获得产出或营业收入
-→ 企业继续招聘、经营或停业
+→ 员工完成工作 → 合作社支付工资 → 合作社获得产出或营业收入
+→ 合作社继续招聘、经营或停业
 ```
 
-居民是否应聘、是否上班、是否请假、是否辞职以及管理者是否录用，由真实 LLM 根据身份、目标、关系和现实条件决定。世界引擎负责验证、执行与记账。
+居民是否应聘、是否上班、是否请假、是否辞职以及负责人是否录用，由真实 LLM 根据身份、目标、关系和现实条件决定。世界引擎负责验证、执行与记账。
 
 坚持现有边界：
 
@@ -29,20 +29,20 @@ LLM 产生意图
 
 ## 2. 第一版范围
 
-### 已实现（v1.0.0）
+### 已实现（当前版本）
 
 1. 企业拥有独立资金（`companies.money`）。
 2. 企业拥有岗位（`positions`）与招聘（`job_openings`）。
 3. 企业发布招聘职位（种子数据 + 离职/解雇后自动重开）。
 4. 居民申请职位（`apply`，活跃申请唯一约束防重复）。
-5. 企业经理审核申请（`review`，仅 `manager_agent_id` 有权限）。
+5. 合作社负责人审核申请（`review`，仅 `manager_agent_id` 有权限）。
 6. 录用后建立正式劳动合同（`employment_contracts`）。
 7. 系统自动生成下一班次（`work_shifts`，幂等）。
 8. 员工签到开始工作（`start_shift`，窗口 `SHIFT_EARLY_WINDOW`/`SHIFT_LATE_LIMIT`，见 `backend/app/config/gameplay.py`）。
 9. 迟到计算与缺勤判定（调度器 `formal_shift_absence_check`）。
 10. 班次完成结算：工资从企业账户转入员工账户，产物进入企业库存。
 11. 企业余额不足时欠薪（`unpaid_wage` / `unpaid_wage_total`），不凭空发钱； 资金到位后自动补发（`wage_repaid`）。
-12. 员工辞职（`resign`）与经理解雇（`terminate`）：取消未来班次、释放名额、重开招聘。
+12. 员工辞职（`resign`）与负责人解雇（`terminate`）：取消未来班次、释放名额、重开招聘。
 13. 请假流程（`request_leave` / `review_leave_request`）：准假不判缺勤、不发工资。
 14. 招聘暂停/恢复（`pause_recruitment` / `resume_recruitment`）。
 15. 企业停业/恢复（`suspend_company` / `resume_company`）：停业停止招聘与排班。
@@ -54,8 +54,8 @@ LLM 产生意图
 
 ### 暂不实现（后续版本）
 
-企业贷款、银行、税收、股权发行、企业收购、多层管理职位、复杂绩效奖金、 员工晋升、劳动仲裁、工会、跨企业自动采购、动态市场价格、创业流程、
-企业间合同、合同挂起（`employment_suspended`）、破产状态自动流转。
+企业贷款、银行、税收、企业收购、多层管理职位、复杂绩效奖金、员工晋升、劳动仲裁、工会、
+企业间合同、合同挂起（`employment_suspended`）与一般性破产重组。
 
 ## 3. 实体模型
 
@@ -66,8 +66,8 @@ LLM 产生意图
 | `company_id`                                  | 企业 ID，与 `world_id` 联合主键                                      |
 | `name` / `company_type`                       | 名称 / 类型（farm、retail…）                                         |
 | `location_id`                                 | 企业地点                                                             |
-| `owner_agent_id` / `manager_agent_id`         | 所有者 / 经理（经理拥有审核权限）                                    |
-| `money`                                       | 企业独立余额，与老板个人余额严格分离                                 |
+| `owner_agent_id` / `manager_agent_id`         | 所有者 / 合作社负责人（负责人拥有审核权限；保留底层字段名以兼容 API） |
+| `money`                                       | 合作社独立余额，与负责人个人余额严格分离                               |
 | `status`                                      | `active` / `suspended` / `closed` / `bankrupt`（v1 只使用 `active`） |
 | `founded_at` / `suspended_at` / `closed_at`   | 时间戳                                                               |
 | `consecutive_loss_days` / `unpaid_wage_total` | 连续欠薪天数 / 累计欠薪总额                                          |
@@ -128,8 +128,10 @@ LLM 产生意图
 
 ### 3.8 CompanyTransaction（`company_transactions`）
 
-- 类型：`initial_capital` / `wage_payment` / `sale_income` / `material_purchase` /
-  `refund` / `god_injection` / `operating_expense`（v1 使用前两类）。
+- 类型：`initial_capital` / `wage_payment` / `sale_income` / `hotel_income` /
+  `material_purchase` / `wholesale_sale` / `operating_expense` /
+  `share_issue` / `share_buyback` / `leader_stipend` / `treasury_subsidy` /
+  `god_injection`。
 - 与居民 `Transaction` 分离；工资支付产生一对对应流水，同一 `trace_id`：
 
 ```text
@@ -147,29 +149,19 @@ Transaction:        type=work_wage,     amount=+90
 
 ## 4. 第一版企业配置
 
-| 企业                 | 地点             | 岗位                                   | 容量 | 班次        | 每班工资 | 初始资金 |
-|----------------------|------------------|----------------------------------------|------|-------------|----------|----------|
-| 晨露农场（farm）     | `village_farm`   | 农场工人（`job_farm_production`）      | 2    | 08:00–12:00 | 60       | 800      |
-| 村庄杂货店（retail） | `village_shop`   | 商店店员（`job_shop_attendant`）       | 1    | 09:00–17:00 | 90       | 1000     |
-| 晨露面包坊（workshop）| `village_bakery` | 面包师（`job_bakery_bake`）            | 1    | 13:00–17:00 | 60       | 300      |
-| 小镇旅店（hotel）    | `village_hotel`  | 客房服务员（`job_hotel_service`）      | 1    | 12:00–16:00 | 80       | 400      |
-| 巧木工坊（workshop） | `carpenter_shop` | 木工师傅（`job_carpentry`）            | 1    | 10:00–14:00 | 60       | 300      |
-| 晨露花圃（farm）     | `flower_garden`  | 花匠（`job_flower_gardening`）         | 1    | 08:00–12:00 | 60       | 300      |
+| 合作社                 | 地点             | 岗位                                   | 容量 | 班次        | 每班工资 | 初始资金 | 负责人 |
+|------------------------|------------------|----------------------------------------|------|-------------|----------|----------|--------|
+| 晨露农场合作社（farm） | `village_farm`   | 农场生产员（`job_farm_production`）    | 2    | 08:00–12:00 | 70       | 800      | 张明 |
+| 晨露商店合作社（retail） | `village_shop` | 商店值班员（`job_shop_attendant`）     | 1    | 09:00–17:00 | 90       | 1000     | 王芳 |
+| 晨露面包坊合作社（workshop） | `village_bakery` | 面包师（`job_bakery_bake`）       | 1    | 13:00–17:00 | 70       | 300      | 陈宇 |
+| 晨露旅店合作社（hotel） | `village_hotel` | 旅店服务员（`job_hotel_service`）      | 1    | 12:00–16:00 | 80       | 400      | 钱多多 |
+| 晨露木工合作社（workshop） | `carpenter_shop` | 木工师（`job_carpentry`）          | 1    | 10:00–14:00 | 70       | 300      | 李木匠 |
+| 晨露花圃合作社（farm） | `flower_garden`  | 花艺师（`job_flower_gardening`）       | 1    | 08:00–12:00 | 70       | 300      | 孙婶 |
 
-- 种子文件：`world_data/companies/companies.json`（企业 + 岗位 + 工作日 + 采购规则）。
-- 播种幂等：`ensure_seeded` 只创建缺失的企业/岗位/招聘，可重复调用。
-- **生产链（M16 已实现）**：晨露农场正式班次产出 10 小麦/班 → 面包坊按固定价 6 金币/件
-  从农场采购小麦，面包师班次消耗 10 小麦产出 20 面包/班 → 杂货店按固定价 6 金币/件
-  从面包坊采购面包并上架 → 居民以 12 金币/件零售购买，收入进杂货店企业账户。
-  配方与 `formal_only` 标记在 `world_data/jobs/jobs.json`，采购规则在
-  `world_data/companies/companies.json` 的 `procurement` 列表；面包不再自动补货
-  （`restock_daily = 0`）。
-- **M17 延伸链（新经理企业）**：巧木工坊班次产出耙子/斧头/渔竿/镰刀各 1 件/班 → 杂货店按
-  18/26/23/16 金币/件采购并上架（零售 35/48/42/30）；晨露花圃班次产出 5 鲜花/班 → 杂货店按
-  6 金币/件采购并上架（零售 12）。
-  旅店为纯服务企业，无产物。三家新企业经理：周婶（agent_zhoushen）、李木匠（agent_limujiang）、
-  孙婶（agent_sunshen），角色卡与地图（建筑/小路/出生点）由 `tools/build_map.py` 从
-  `world_data/identities/` 派生。
+- 种子文件：`world_data/companies/companies.json`（合作社、岗位、工作日、负责人和采购规则）。
+- 播种幂等：`ensure_seeded` 只创建缺失的合作社/岗位/招聘，可重复调用。
+- **生产链**：晨露农场合作社正式班次产出 12 小麦/班 → 面包坊合作社按固定价 6 金币/件从农场采购小麦，面包师班次消耗 10 小麦产出 24 面包/班 → 晨露商店合作社按固定价 6 金币/件采购面包并上架 → 居民以 12 金币/件零售购买，收入进入商店合作社账户。配方与 `formal_only` 标记在 `world_data/jobs/jobs.json`，采购规则在 `world_data/companies/companies.json` 的 `procurement` 列表；面包不再自动补货（`restock_daily = 0`）。
+- **延伸生产链**：晨露木工合作社每班产出耙子/斧头/渔竿/镰刀各 1 件，商店按 18/26/23/16 金币/件采购并以 35/48/42/30 金币零售；晨露花圃合作社每班产出 10 鲜花，商店按 7 金币/件采购并以 12 金币零售。旅店合作社为服务企业，无班次产物。
 
 ## 5. 流程规则
 
@@ -186,7 +178,7 @@ Transaction:        type=work_wage,     amount=+90
 
 ### 5.2 审核（review_job_application / API）
 
-- 仅 `company.manager_agent_id` 可审核本企业申请；申请须仍为 `submitted`。
+- 仅 `company.manager_agent_id` 对应的合作社负责人可审核本企业申请；申请须仍为 `submitted`。
 - `reject`：状态转 `rejected`，发布 `job_application_rejected`。
 - `accept`：
     1. 申请人无 active/on_leave 合同；
@@ -215,9 +207,8 @@ Transaction:        type=work_wage,     amount=+90
 ### 5.5 请假（request_leave / review_leave_request）
 
 - 员工为未开始的班次申请请假（仅 `scheduled` 班次；同一班次一条 pending 申请）。
-- 经理（`manager_agent_id`）审批：`approve` → 班次转 `leave`、`wage_due = 0`、 不判缺勤，并生成下一空槽班次；`reject` → 班次保持
-  `scheduled`。
-- 事件：`shift_leave_requested` / `shift_leave_approved` / `shift_leave_rejected`； 请假申请提升经理决策优先级。
+- 合作社负责人（底层字段 `manager_agent_id`）审批：`approve` → 班次转 `leave`、`wage_due = 0`、不判缺勤，并生成下一空槽班次；`reject` → 班次保持 `scheduled`。
+- 事件：`shift_leave_requested` / `shift_leave_approved` / `shift_leave_rejected`；请假申请提升负责人决策优先级。
 - 缺勤判定时 pending 申请转 `expired`（不能依赖 LLM 主动撤销）。
 
 ### 5.6 缺勤判定（调度器）
@@ -235,6 +226,7 @@ Transaction:        type=work_wage,     amount=+90
 3. `worked_minutes = actual_end - actual_start`，计算 `wage_due`（比例向下取整）。
 4. 按配方结算（R37）：先消耗已预留原料（`min(reserved, qty)`），再按 `products` 产出进入
    `CompanyInventory`；无配方的旧存档回退到 `job.products_json`（只产出、不消耗）。
+- 精力结算：班次完成时按 `job.energy_cost_per_hour × worked_minutes // 60` 扣除居民精力（下限 0）；这与普通 `work` 的精力成本一致，但不影响工资比例公式。
 5. 工资结算（见 5.7）。
 6. 班次转 `completed`；合同 `completed_shifts += 1`； 清空居民行动状态；发布
    `shift_completed` + 工资事件（仅 `wage_due > 0` 时）+ `company_inventory_changed` +
@@ -257,7 +249,7 @@ Transaction:        type=work_wage,     amount=+90
 
 ### 5.9 解雇（terminate_employment / API）
 
-- 仅企业经理；不能解雇他企业员工；不能重复终止。
+- 仅合作社负责人；不能解雇其他合作社员工；不能重复终止。
 - 合同转 `terminated`；未来班次与 pending 请假转 `cancelled`（班次发布 `shift_cancelled`）；
   名额恢复（停业期间同上保持 `paused`）；发布 `employment_terminated`（含权威
   `employee_count` / `open_vacancies`）。
@@ -311,10 +303,10 @@ formal_work`）与临时工作（`work`）互不干扰。v1 暂不物理拆分�
 | `start_shift(shift_id, reason)`                                                      | 员工 | 已接入 |
 | `request_leave(shift_id, reason)`                                                    | 员工 | 已接入 |
 | `resign_job(employment_id, reason)`                                                  | 员工 | 已接入 |
-| `review_job_application(application_id, decision, reason)`                           | 经理 | 已接入 |
-| `review_leave_request(request_id, decision, reason)`                                 | 经理 | 已接入 |
-| `terminate_employment(employment_id, reason)`                                        | 经理 | 已接入 |
-| `pause_recruitment(position_id, reason)` / `resume_recruitment(position_id, reason)` | 经理 | 已接入 |
+| `review_job_application(application_id, decision, reason)`                           | 负责人 | 已接入 |
+| `review_leave_request(request_id, decision, reason)`                                 | 负责人 | 已接入 |
+| `terminate_employment(employment_id, reason)`                                        | 负责人 | 已接入 |
+| `pause_recruitment(position_id, reason)` / `resume_recruitment(position_id, reason)` | 负责人 | 已接入 |
 
 禁止 LLM 传入：工资金额、企业余额、合同状态、实际签到时间、支付结果、 岗位剩余人数 —— 全部由服务端确定。
 
@@ -348,7 +340,7 @@ logger.info(
 工作历史与劳动合同分离        企业余额与个人余额分离
 班次计划与实际行动分离        正式工作产物归企业
 工资必须来自企业账户          企业销售收入进入企业账户
-居民和经理决策使用真实 LLM    世界规则不能交给 LLM 执行
+居民和负责人决策使用真实 LLM  世界规则不能交给 LLM 执行
 所有资金变化必须有流水        所有状态变化必须有事件
 所有调度处理器必须幂等        存档恢复不能重复发工资
 ```

@@ -5,9 +5,9 @@ import {COMPANY_STATUS_LABELS, useWorldStore} from '../stores/worldStore';
 import type {CompanyEmployee, CompanyPosition, CompanyTransaction} from '../types/world';
 
 /**
- * 企业总览 (M13): 就业统计条 + 公司列表卡片 + 选中公司的详情 Tab
- * (概览/员工/招聘/库存/流水)。公司列表与公开招聘职位来自 store
- * (快照后 REST 拉取);详情数据按公司用 REST 拉取一次并缓存。
+ * 合作社总览：就业统计条 + 合作社列表卡片 + 选中合作社的详情 Tab
+ * （概览/员工/招聘/库存/流水）。列表与公开招聘职位来自 store，
+ * 详情数据按合作社用 REST 拉取一次并缓存。
  */
 
 const store = useWorldStore();
@@ -75,28 +75,30 @@ function timeOf(worldTime: number): string {
 const TX_LABELS: Record<string, string> = {
     initial_capital: '初始资金',
     sale_income: '销售收入',
+    hotel_income: '住宿收入',
     material_purchase: '原料采购',
+    external_procurement: '外部采购',
     wholesale_sale: '批发销售',
     wage_payment: '工资支出',
+    leader_stipend: '负责人值守津贴',
     god_injection: '神谕注资',
-    stock_equity: '股票增资',
-    stock_buyback: '股票回购',
-    dividend: '股票分红',
+    share_issue: '份额认购收入',
+    share_buyback: '份额赎回支出',
     treasury_subsidy: '金库工资补贴',
-    manager_profit: '经理分成',
 };
+
+const OPERATING_INCOME_TYPES = new Set(['sale_income', 'hotel_income', 'wholesale_sale']);
 
 function txLabel(type: string): string {
     return TX_LABELS[type] ?? type;
 }
-
-/** 今日收入: 本游戏日内的正额经营流水之和 (神谕注资不计入)。 */
+/** Today's positive operating receipts; funding and share subscriptions do not count. */
 function todayIncome(companyId: string): number {
     const txs = details.value[companyId]?.transactions;
     if (!txs) return 0;
     const dayStart = Math.floor(store.worldTime / 1440) * 1440;
     return txs
-        .filter((t) => t.world_time >= dayStart && t.amount > 0 && t.type !== 'god_injection')
+        .filter((t) => t.world_time >= dayStart && t.amount > 0 && OPERATING_INCOME_TYPES.has(t.type))
         .reduce((sum, t) => sum + t.amount, 0);
 }
 
@@ -149,9 +151,9 @@ watch(
 </script>
 
 <template>
-    <aside aria-label="企业总览" class="company-panel">
+    <aside aria-label="合作社总览" class="company-panel">
         <header class="cp-head" @click="collapsed = !collapsed">
-            <span class="cp-title">企业总览</span>
+            <span class="cp-title">合作社总览</span>
             <button :title="collapsed ? '展开' : '折叠'" class="cp-toggle">{{ collapsed ? '▸' : '▾' }}</button>
         </header>
         <template v-if="!collapsed">
@@ -159,7 +161,7 @@ watch(
                 <div class="cp-stats-row">
                     <span class="cs-item">正式就业 <b>{{ stats.employed }}</b></span>
                     <span class="cs-item">失业 <b>{{ stats.unemployed }}</b></span>
-                    <span class="cs-item">企业 <b>{{ stats.companies }}</b></span>
+                    <span class="cs-item">合作社 <b>{{ stats.companies }}</b></span>
                     <span class="cs-item">开放职位 <b>{{ stats.openings }}</b></span>
                 </div>
                 <div class="cp-stats-row">
@@ -170,7 +172,7 @@ watch(
                 </div>
             </div>
 
-            <p v-if="store.companies.length === 0" class="cp-empty">暂无企业</p>
+            <p v-if="store.companies.length === 0" class="cp-empty">暂无合作社</p>
             <div v-else class="cp-list">
                 <div
                     v-for="c in store.companies"
@@ -216,14 +218,14 @@ watch(
                     </button>
                 </nav>
 
-                <!-- 概览: 余额/员工/欠薪/状态/经理 + 今日收入 -->
+                <!-- 概览：余额/员工/欠薪/状态/负责人 + 今日收入 -->
                 <div v-if="activeTab === 'overview'" class="cp-detail">
                     <div class="ov-row"><span>余额</span><b>{{ selectedCompany.money }}</b></div>
                     <div class="ov-row"><span>员工数</span><b>{{ selectedCompany.employee_count }}</b></div>
                     <div class="ov-row"><span>欠薪总额</span><b class="warn">{{ selectedCompany.unpaid_wage_total }}</b>
                     </div>
                     <div class="ov-row"><span>状态</span><b>{{ statusLabel(selectedCompany.status) }}</b></div>
-                    <div class="ov-row"><span>经理</span><b>{{
+                    <div class="ov-row"><span>负责人</span><b>{{
                             selectedCompany.manager_agent_id ? (store.agentById(selectedCompany.manager_agent_id)?.name ?? selectedCompany.manager_agent_id) : '—'
                         }}</b></div>
                     <div class="ov-row"><span>今日收入</span><b>{{ todayIncome(selectedCompany.company_id) }}</b></div>

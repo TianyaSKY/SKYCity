@@ -1,23 +1,23 @@
 {
-  "version": "1.0.0",
+  "version": "1.2.0",
   "stocks": [
     {
       "stock_id": "stock_village_shop",
-      "name": "晨露商店",
+      "name": "晨露商店合作社份额",
       "company_id": "village_shop",
       "issuer_company_id": "company_village_shop",
       "source": "store",
-      "base_price": 20,
-      "outstanding_shares": 1000
+      "base_price": 10,
+      "outstanding_shares": 100
     },
     {
       "stock_id": "stock_village_farm",
-      "name": "晨露农场",
-      "company_id": "job_farm_field",
+      "name": "晨露农场合作社份额",
+      "company_id": "job_farm_production",
       "issuer_company_id": "company_morning_farm",
       "source": "job",
-      "base_price": 15,
-      "outstanding_shares": 1000
+      "base_price": 10,
+      "outstanding_shares": 100
     }
   ]
 }

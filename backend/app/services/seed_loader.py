@@ -218,28 +218,40 @@ def load_stores(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...
 
 @lru_cache(maxsize=4)
 def load_stocks(world_data_dir: Path | None = None) -> tuple[dict[str, Any], ...]:
-    """Stock seeds (M10): listed town companies with base prices.
+    """Load fixed-price cooperative-share issues.
 
-    Each entry: (stock_id, name, company_id, source, base_price,
-    outstanding_shares). ``source`` is "store" or "job" — it selects which
-    business events move the price (item_purchased vs work_completed).
+    Every issue must identify an operating source and an issuer company. The
+    service verifies that issuer against the newly seeded company rows before
+    any share can be created.
     """
     base = world_data_dir or Path(get_settings().world_data_dir)
     data = _load_json(base / "stocks" / "stocks.json")
-    stocks = tuple(
-        {
-            "stock_id": str(entry["stock_id"]),
-            "name": str(entry.get("name") or entry["stock_id"]),
-            "company_id": str(entry.get("company_id") or ""),
-            # A2: the real Company backing the listing (None -> treasury).
-            "issuer_company_id": entry.get("issuer_company_id"),
-            "source": str(entry.get("source") or "store"),
-            "base_price": int(entry.get("base_price") or 0),
-            "outstanding_shares": int(entry.get("outstanding_shares") or 0),
-        }
-        for entry in data.get("stocks", [])
-    )
-    return stocks
+    stocks: list[dict[str, Any]] = []
+    for entry in data.get("stocks", []):
+        stock_id = str(entry.get("stock_id") or "")
+        company_id = str(entry.get("company_id") or "")
+        issuer_company_id = str(entry.get("issuer_company_id") or "")
+        source = str(entry.get("source") or "")
+        unit_price = int(entry.get("base_price") or 0)
+        outstanding_shares = int(entry.get("outstanding_shares") or 0)
+        if not stock_id or not company_id or not issuer_company_id:
+            raise ValueError("合作社份额必须包含 stock_id、company_id 和 issuer_company_id")
+        if source not in {"store", "job"}:
+            raise ValueError(f"合作社份额 {stock_id} 的 source 必须是 store 或 job")
+        if unit_price <= 0 or outstanding_shares <= 0:
+            raise ValueError(f"合作社份额 {stock_id} 的单价和发行量必须为正整数")
+        stocks.append(
+            {
+                "stock_id": stock_id,
+                "name": str(entry.get("name") or stock_id),
+                "company_id": company_id,
+                "issuer_company_id": issuer_company_id,
+                "source": source,
+                "base_price": unit_price,
+                "outstanding_shares": outstanding_shares,
+            }
+        )
+    return tuple(stocks)
 
 
 @lru_cache(maxsize=4)

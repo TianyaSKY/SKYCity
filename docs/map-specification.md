@@ -1,6 +1,6 @@
 # 地图规范 (map-specification)
 
-版本：1.0.0 ｜ 对应文件：`world_data/maps/tiny_world.tmj`、`tiny_farm.tsj`、`markers.tsj`
+版本：1.2.0 ｜ 对应文件：`world_data/maps/tiny_world.tmj`、`tiny_farm.tsj`、`markers.tsj`
 
 ## 1. 文件与坐标
 
@@ -50,7 +50,7 @@ cell_walkable(col, row) =
 |-----------------|--------|-----------------------------------------------------------|
 | `location_id`   | string | 稳定 ID，全局唯一（如 `village_shop`）                    |
 | `name`          | string | 中文显示名（如 `村庄杂货店`）                             |
-| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` / `stall`（M18：个人商店空摊位）/ `field`（M19：野外采集点） |
+| `location_type` | string | `plaza` / `store` / `farm` / `office` / `house` / `hotel` / `stall`（预设居民合作社摊位）/ `field`（野外采集点） |
 | `capacity`      | int    | 同时容纳的最大智能体数                                    |
 | `open_hour`     | int    | 开门小时（世界时 0..24，`0` 表示 24 小时开放）            |
 | `close_hour`    | int    | 关门小时（`24` 表示整日开放）                             |
@@ -79,9 +79,11 @@ cell_walkable(col, row) =
 | `zhoushen_home`  | house  | 0-24 | 4    |
 | `limujiang_home` | house  | 0-24 | 4    |
 | `sunshen_home`   | house  | 0-24 | 4    |
+| `laozhang_home` | house  | 0-24 | 4    |
+| `touzi_home`    | house  | 0-24 | 4    |
 
 > `hotel`（小镇旅店）与 `house`/`plaza` 一样全天开放（R8）；无家智能体的
-> 睡觉地点（R14），入住收取每晚 85 金币房费（`HOTEL_NIGHTLY_FEE`，见 `backend/app/config/gameplay.py`）。
+> 睡觉地点（R14），每日首晚收取 30 金币房费（`HOTEL_NIGHTLY_FEE`，见 `backend/app/config/gameplay.py`）。
 
 ## 4. `interactables` 对象层
 

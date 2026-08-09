@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.config.gameplay import (
     ATTENDANCE_ABSENT_PENALTY,
     ATTENDANCE_LATE_PENALTY,
+    LOW_ENERGY_ACTION_THRESHOLD,
     MAX_ABSENT_SHIFTS,
     SHIFT_EARLY_WINDOW,
     SHIFT_LATE_LIMIT,
@@ -1216,6 +1217,10 @@ class CompanyEmploymentService:
                 raise CompanyEmploymentError("劳动合同或岗位无效")
             if company.status != "active":
                 raise CompanyEmploymentError("企业未在经营")
+            if agent.energy <= LOW_ENERGY_ACTION_THRESHOLD:
+                raise CompanyEmploymentError(
+                    f"精力不高于 {LOW_ENERGY_ACTION_THRESHOLD}，请先休息"
+                )
             if agent.action_type is not None:
                 raise CompanyEmploymentError("当前行动未完成")
             if agent.location_id != company.location_id:
@@ -1412,7 +1417,7 @@ class CompanyEmploymentService:
                     "employment_id": shift.employment_id,
                     "company_id": shift.company_id,
                     "agent_id": shift.agent_id,
-                    "reason": "经理解雇",
+                    "reason": "负责人解雇",
                 })
             for request in session.scalars(
                     select(LeaveRequest).where(
@@ -1916,6 +1921,10 @@ class CompanyEmploymentService:
         shift.worked_minutes = max(world.world_time - (shift.actual_start or world.world_time), 0)
         scheduled_minutes = max(shift.scheduled_end - shift.scheduled_start, 1)
         shift.wage_due = contract.wage_per_shift * min(shift.worked_minutes, scheduled_minutes) // scheduled_minutes
+        energy_spent = max(
+            int(job.energy_cost_per_hour * shift.worked_minutes / 60), 0
+        )
+        agent.energy = max(0, agent.energy - energy_spent)
         trace_id = str((action.payload or {}).get("trace_id") or uuid.uuid4().hex)
         # M16 R37: settle production against the static recipe. The recipe
         # (inputs + outputs) comes from world_data at runtime; a shift whose
@@ -2001,10 +2010,18 @@ class CompanyEmploymentService:
         agent.action_started_at = None
         agent.action_ends_at = None
         agent.action_data = None
+        self._publish(session, world, "needs_changed", {
+            "agent_id": agent.agent_id,
+            "satiety": agent.satiety,
+            "energy": agent.energy,
+            "mood": agent.mood,
+            "loneliness": agent.loneliness,
+        }, trace_id)
         self._publish(session, world, "shift_completed", {
             "shift_id": shift.shift_id, "employment_id": contract.employment_id,
             "company_id": company.company_id, "agent_id": agent.agent_id,
             "worked_minutes": shift.worked_minutes, "products": produced,
+            "energy_spent": energy_spent,
         }, trace_id)
         if shift.wage_due > 0:
             self._publish(session, world, payroll_event, {

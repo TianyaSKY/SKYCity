@@ -3,43 +3,40 @@ import {computed, ref} from 'vue';
 import {useWorldStore} from '../stores/worldStore';
 
 /**
- * 小镇股市: read-only quote board + shareholder list (M10). All data comes
- * from the store — REST-loaded on snapshot, kept live by the WS events
- * (stock_price_changed / stock_bought / stock_sold / dividend_paid).
+ * Cooperative-share board: fixed unit prices, available issuance, transparent
+ * operating volume, and resident holdings. Data is REST-loaded then kept live
+ * by stock_price_changed / stock_volume_changed / stock_bought / stock_sold.
  */
 
 const store = useWorldStore();
 const collapsed = ref(false);
 
-/** One quote row: name, live price, delta vs 昨收, today's business, last dividend. */
 const rows = computed(() =>
-    store.stocks.map((s) => {
-        const delta = s.price - s.prev_price;
-        return {
-            stock_id: s.stock_id,
-            name: s.name,
-            price: s.price,
-            delta,
-            day_business: s.day_business,
-            last_div: s.last_div_per_share,
-        };
-    }),
+    store.stocks.map((share) => ({
+        stock_id: share.stock_id,
+        name: share.name,
+        unitPrice: share.unit_price,
+        availableShares: share.available_shares,
+        outstandingShares: share.outstanding_shares,
+        operatingVolume: share.operating_volume,
+        holdingCap: share.holding_cap,
+    })),
 );
 
 /** Flatten store.holdings (agent_id → stock_id → shares) into display rows. */
 const holdingsRows = computed(() => {
     const stockName = (stockId: string): string =>
         store.stocks.find((s) => s.stock_id === stockId)?.name ?? stockId;
-    const rows: { agentName: string; stockName: string; shares: number; value: number }[] = [];
+    const rows: { agentName: string; shareName: string; shares: number; value: number }[] = [];
     for (const [agentId, byStock] of Object.entries(store.holdings)) {
         for (const [stockId, shares] of Object.entries(byStock)) {
             if (shares <= 0) continue;
-            const price = store.stocks.find((s) => s.stock_id === stockId)?.price ?? 0;
+            const unitPrice = store.stocks.find((s) => s.stock_id === stockId)?.unit_price ?? 0;
             rows.push({
                 agentName: store.agentById(agentId)?.name ?? agentId,
-                stockName: stockName(stockId),
+                shareName: stockName(stockId),
                 shares,
-                value: shares * price,
+                value: shares * unitPrice,
             });
         }
     }
@@ -49,42 +46,38 @@ const holdingsRows = computed(() => {
 </script>
 
 <template>
-    <aside aria-label="小镇股市" class="stock-panel">
+    <aside aria-label="合作社份额" class="stock-panel">
         <header class="sp-head" @click="collapsed = !collapsed">
-            <span class="sp-title">小镇股市</span>
+            <span class="sp-title">合作社份额</span>
             <button :title="collapsed ? '展开' : '折叠'" class="sp-toggle">{{ collapsed ? '▸' : '▾' }}</button>
         </header>
         <template v-if="!collapsed">
-            <p v-if="rows.length === 0" class="sp-empty">暂无股票行情</p>
+            <p v-if="rows.length === 0" class="sp-empty">暂无可认购份额</p>
             <table v-else class="sp-table">
                 <thead>
                 <tr>
-                    <th>名称</th>
-                    <th class="num">现价</th>
-                    <th class="num">涨跌</th>
-                    <th class="num">今日业绩</th>
-                    <th class="num">每股分红</th>
+                    <th>经营单元</th>
+                    <th class="num">单价</th>
+                    <th class="num">余量</th>
+                    <th class="num">今日经营</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr v-for="row in rows" :key="row.stock_id">
                     <td class="sp-name">{{ row.name }}</td>
-                    <td class="num">{{ row.price }}</td>
-                    <td :style="{ color: row.delta > 0 ? '#81c784' : row.delta < 0 ? '#ff8a65' : 'inherit' }"
-                        class="num">
-                        {{ row.delta > 0 ? `+${row.delta}` : row.delta }}
-                    </td>
-                    <td class="num">{{ row.day_business }}</td>
-                    <td class="num">{{ row.last_div }}</td>
+                    <td class="num">{{ row.unitPrice }}</td>
+                    <td class="num">{{ row.availableShares }}/{{ row.outstandingShares }}</td>
+                    <td class="num">{{ row.operatingVolume }}</td>
                 </tr>
                 </tbody>
             </table>
-            <div class="sp-section">股东持仓</div>
-            <p v-if="holdingsRows.length === 0" class="sp-empty">暂无股东</p>
+            <p class="sp-note">固定单价；每位居民每种最多认购 {{ rows[0]?.holdingCap ?? 20 }} 份。</p>
+            <div class="sp-section">居民持有</div>
+            <p v-if="holdingsRows.length === 0" class="sp-empty">暂无居民认购</p>
             <ul v-else class="sp-holdings">
                 <li v-for="(h, i) in holdingsRows" :key="i" class="sp-holding">
                     <span class="sp-holder">{{ h.agentName }}</span>
-                    <span class="sp-held">{{ h.stockName }} {{ h.shares }}股</span>
+                    <span class="sp-held">{{ h.shareName }} {{ h.shares }}份</span>
                     <span class="sp-value">{{ h.value }} 金币</span>
                 </li>
             </ul>
@@ -173,6 +166,14 @@ const holdingsRows = computed(() => {
 .sp-name {
     font-weight: 600;
     color: #e8f5e9;
+}
+
+.sp-note {
+    margin: 0;
+    padding: 5px 8px;
+    color: rgba(205, 232, 213, 0.58);
+    font-size: 10.5px;
+    line-height: 1.4;
 }
 
 .sp-section {

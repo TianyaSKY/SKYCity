@@ -32,6 +32,7 @@ from app.config.gameplay import (
     DEGRADE_WAIT_MINUTES,
     FORCED_REST_MINUTES,
     IDLE_DELAY,
+    LOW_ENERGY_ACTION_THRESHOLD,
     MAX_CONSECUTIVE_FAILURES,
     RETRY_DELAY,
     SKIP_DECIDE_DELAY,
@@ -237,19 +238,18 @@ class DecisionService:
                 session.close()
 
     async def _run_cycle(self, world_id: str, agent_id: str, trace_id: str) -> None:
-        # M5 R12: forced rest — an exhausted agent (energy <= 0) may not move
-        # or work, so skip the LLM entirely and start a recovery wait. No
-        # llm_run row is recorded; the wait_completed handler re-arms the
-        # decision loop at the end of the rest.
+        # Residents at or below the action threshold skip the LLM entirely and
+        # start recovery wait. The wait-completed handler re-arms the decision
+        # loop after the resident can safely act again.
         session = self._session_factory()
         try:
             agent = session.get(Agent, {"world_id": world_id, "agent_id": agent_id})
-            if agent is not None and agent.energy <= 0:
+            if agent is not None and agent.energy <= LOW_ENERGY_ACTION_THRESHOLD:
                 ok, _, _ = self.engine.action_service.execute_wait(
                     world_id,
                     agent_id,
                     minutes=FORCED_REST_MINUTES,
-                    reason="精力耗尽，强制休息",
+                    reason="精力不足，强制休息",
                     trace_id=trace_id,
                 )
                 runtime = self.engine.get_runtime(world_id)
@@ -260,7 +260,7 @@ class DecisionService:
                         "world_event_created",
                         {
                             "agent_id": agent_id,
-                            "text": f"{agent.name} 精力耗尽，正在休息",
+                            "text": f"{agent.name} 精力不足，正在休息",
                             "importance": "normal",
                         },
                     )
@@ -691,7 +691,7 @@ class DecisionService:
                 return shop_service.open_shop(
                     world_id,
                     agent_id,
-                    arguments.get("location"),
+                    arguments.get("stall_id"),
                     arguments.get("products"),
                     reason=arguments.get("reason"),
                     trace_id=trace_id,
@@ -729,7 +729,7 @@ class DecisionService:
         if result.tool_name in ("buy_stock", "sell_stock"):
             stock_service = self.engine.stock_service
             if stock_service is None:
-                return False, None, "股票服务未初始化"
+                return False, None, "合作社份额服务未初始化"
             shares = arguments.get("shares")
             shares = 1 if shares is None else max(1, min(int(shares), 9999))
             fn = (

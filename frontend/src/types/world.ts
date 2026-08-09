@@ -448,10 +448,10 @@ export type WorldEventType =
     | 'item_spawned'
     | 'store_stock_changed'
     | 'stock_price_changed'
+    | 'stock_volume_changed'
     | 'stock_bought'
     | 'stock_sold'
-    | 'dividend_paid'
-    | 'manager_profit_paid'
+    | 'leader_stipend_paid'
     | 'money_transferred'
     | 'item_given'
     | 'build_started'
@@ -605,24 +605,25 @@ export interface StoreStockChangedPayload {
     quantity: number;
 }
 
-/** One listed stock quote (GET .../stocks entry, M10). */
+/** One fixed-price cooperative share issue (GET .../stocks entry). */
 export interface StockItem {
     stock_id: string;
     name: string;
-    price: number;
-    prev_price: number;
-    day_business: number;
-    last_div_per_share: number;
+    unit_price: number;
+    operating_volume: number;
     source: string;
     company_id: string;
+    issuer_company_id: string;
+    outstanding_shares: number;
+    available_shares: number;
+    holding_cap: number;
 }
 
-/** One holding row (GET .../stocks → holdings, M10). */
+/** One resident's cooperative-share holding. */
 export interface StockHolding {
     agent_id: string;
     stock_id: string;
     shares: number;
-    avg_cost: number;
 }
 
 /** Response of GET .../stocks (M10): all quotes + all holdings. */
@@ -665,16 +666,22 @@ export interface EventStatsResponse {
     }[];
 }
 
-/** Payload of the WS stock_price_changed event (M10). */
-export interface StockPriceChangedPayload {
+/** Payload of the administrator-adjusted cooperative-share unit price. */
+export interface CooperativeShareUnitPriceChangedPayload {
     stock_id: string;
     stock_name: string;
-    price: number;
-    prev_price: number;
-    day_business: number;
+    unit_price: number;
+    operating_volume: number;
 }
 
-/** Payload of the WS stock_bought event (M10). */
+/** Payload of the transparent daily operating-volume event. */
+export interface CooperativeShareVolumeChangedPayload {
+    stock_id: string;
+    stock_name: string;
+    operating_volume: number;
+}
+
+/** Payload of the WS cooperative-share subscription event. */
 export interface StockBoughtPayload {
     agent_id: string;
     stock_id: string;
@@ -684,7 +691,7 @@ export interface StockBoughtPayload {
     total: number;
 }
 
-/** Payload of the WS stock_sold event (M10). */
+/** Payload of the WS cooperative-share redemption event. */
 export interface StockSoldPayload {
     agent_id: string;
     stock_id: string;
@@ -692,14 +699,6 @@ export interface StockSoldPayload {
     shares: number;
     unit_price: number;
     total: number;
-}
-
-/** Payload of the WS dividend_paid event (M10). */
-export interface DividendPaidPayload {
-    stock_id: string;
-    stock_name: string;
-    div_per_share: number;
-    payouts: { agent_id: string; shares: number; amount: number }[];
 }
 
 /** Payload of the WS money_transferred event (M11). */
