@@ -12,6 +12,6 @@ async function requireUrl(name: string, url: string): Promise<void> {
 }
 
 export default async function globalSetup(): Promise<void> {
-    await requireUrl('Backend', 'http://127.0.0.1:8000/health');
-    await requireUrl('Frontend', 'http://127.0.0.1:5173');
+    await requireUrl('Backend', `${process.env.E2E_API_URL ?? 'http://127.0.0.1:8000'}/health`);
+    await requireUrl('Frontend', process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173');
 }

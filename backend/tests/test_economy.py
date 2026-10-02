@@ -759,7 +759,7 @@ def test_exhausted_agent_forced_to_rest(world_config: ParsedWorldConfig) -> None
     world_id = runtime.world_id
     set_agent(eng, world_id, "agent_linxia", energy=0)
 
-    advance_minutes(eng, world_id, 10)
+    advance_minutes(eng, world_id, 20)
 
     session = SessionLocal()
     try:
@@ -902,7 +902,7 @@ def test_hungry_agent_eats_bread_first(world_config) -> None:
     finally:
         session.close()
 
-    advance_minutes(eng, world_id, 6)
+    advance_minutes(eng, world_id, 16)
 
     session = SessionLocal()
     try:
@@ -935,7 +935,7 @@ def test_hungry_agent_buys_bread_at_shop(world_config) -> None:
     finally:
         session.close()
 
-    advance_minutes(eng, world_id, 6)
+    advance_minutes(eng, world_id, 16)
 
     session = SessionLocal()
     try:

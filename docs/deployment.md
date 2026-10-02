@@ -37,7 +37,7 @@ curl http://localhost:8000/health
 期望返回：
 
 ```json
-{"status":"ok","map_version":"..."}
+{"status":"ok","app_version":"0.2.0","database_revision":"0001","map_version":"..."}
 ```
 
 然后访问 `http://localhost:8000`。
@@ -102,29 +102,24 @@ docker compose logs -f skycity
 docker volume inspect skycity_skycity-data
 ```
 
-也可以临时复制数据库：
+停止服务后复制数据库，避免备份正在写入的 SQLite 文件：
 
 ```bash
-docker compose cp skycity:/data/ai_tiny_world.db ./ai_tiny_world.backup.db
+mkdir -p backups
+docker compose stop skycity
+docker compose cp skycity:/data/ai_tiny_world.db ./backups/ai_tiny_world.before-upgrade.db
+docker compose start skycity
 ```
+
+每次备份使用独立文件名并记录当前版本。
 
 ## 6. 升级
 
-```bash
-git pull
-docker compose build --pull
-docker compose up -d
-```
+0.2.0 起引入 Alembic：启动会迁移到当前版本的数据库修订，失败时拒绝启动。升级前停止服务并备份，再切换到经过验证的发布 tag。
 
-当前项目尚未接入 Alembic 等正式迁移框架，因此涉及数据库模型的大版本升级前必须先备份。
+详细命令、旧库兼容范围、失败恢复和版本发布流程见 [升级指南](upgrading.md)。
 
-如果新版本明确声明数据库结构不兼容，最稳妥的处理方式是：
-
-1. 备份旧数据库。
-2. 停止服务。
-3. 按发布说明决定是否保留旧库或新建 volume。
-4. 启动新版本。
-5. 验证健康检查、页面、世界创建和 WebSocket 实时更新。
+健康接口返回 `app_version` 和 `database_revision`，用于核对升级结果。
 
 ## 7. 验收清单
 

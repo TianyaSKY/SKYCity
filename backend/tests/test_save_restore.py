@@ -373,7 +373,7 @@ def test_replay_endpoint(client: TestClient) -> None:
     assert set(snapshot["world"]) >= {
         "world_id", "world_time", "speed", "paused", "weather", "day",
     }
-    assert len(snapshot["agents"]) == 9
+    assert len(snapshot["agents"]) == 19
     events = replay["events"]
     sequences = [event["sequence"] for event in events]
     assert sequences == sorted(sequences)
@@ -427,8 +427,8 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
     try:
         agent = session.get(Agent, {"world_id": world_id, "agent_id": "agent_linxia"})
         agent.money = 200
-        agent.location_id = None
-        agent.col, agent.row = 31, 20
+        agent.location_id = "stall_plaza_1"
+        agent.col, agent.row = 30, 19
         session.add(
             Inventory(
                 world_id=world_id, agent_id="agent_linxia",
@@ -440,8 +440,8 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
         session.close()
 
     ok, envelope, reason = eng.shop_service.open_shop(
-        world_id, "agent_linxia", {"col": 31, "row": 21},
-        [{"item_id": "wheat", "price": 6}], reason="荒地摆摊",
+        world_id, "agent_linxia", "stall_plaza_1",
+        [{"item_id": "wheat", "price": 6}], reason="合作社摆摊",
     )
     assert ok is True, reason
     store_id = envelope.payload["store_id"]
@@ -461,12 +461,12 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
         store = session.get(Store, {"world_id": new_id, "store_id": store_id})
         assert store is not None
         assert store.owner_agent_id == "agent_linxia"
-        assert store.name == "林夏的小麦摊"
+        assert store.name == "林夏的合作社摊"
         location = session.get(
             WorldLocation, {"world_id": new_id, "location_id": location_id}
         )
         assert location is not None
-        assert (location.col, location.row) == (31, 21)
+        assert (location.col, location.row) == (30, 19)
         assert location.location_type == "stall"
         listing = session.scalars(
             select(Stock).where(
@@ -475,7 +475,7 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
                 Stock.source == "store",
             )
         ).first()
-        assert listing is not None
+        assert listing is None  # cooperative stalls do not issue company shares
         product = session.get(
             StoreProduct,
             {"world_id": new_id, "store_id": store_id, "item_id": "wheat"},
@@ -496,7 +496,7 @@ def test_save_restore_personal_shop(world_config: ParsedWorldConfig) -> None:
             Agent, {"world_id": new_id, "agent_id": "agent_zhangming"}
         )
         buyer.location_id = location_id
-        buyer.col, buyer.row = 31, 21
+        buyer.col, buyer.row = 30, 19
         session.commit()
     finally:
         session.close()

@@ -6,8 +6,13 @@ must be set before any app module is imported (settings are cached).
 """
 
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-os.environ["DATABASE_URL"] = "sqlite:///./test_ai_tiny_world.db"
+# Each pytest process owns its database, so a targeted run cannot wipe the
+# schema or rows of another running suite (or of a user's development world).
+_test_directory = TemporaryDirectory(prefix="skycity-tests-")
+os.environ["DATABASE_URL"] = f"sqlite:///{Path(_test_directory.name) / 'world.db'}"
 
 import pytest  # noqa: E402
 from sqlalchemy import delete

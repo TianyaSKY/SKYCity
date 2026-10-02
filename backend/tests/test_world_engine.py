@@ -185,7 +185,7 @@ def test_create_world_seeds_agents_and_locations(engine: WorldEngine) -> None:
     finally:
         session.close()
 
-    assert len(agents) == 9
+    assert len(agents) == 19
     by_id = {a.agent_id: a for a in agents}
     assert by_id["agent_linxia"].col == LINXIA_SPAWN[0]
     assert by_id["agent_linxia"].row == LINXIA_SPAWN[1]

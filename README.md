@@ -220,3 +220,29 @@ docker-compose.yml
 - `docs/company-employment.md` — 合作社 / 雇佣系统
 
 素材：Kenney Tiny Farm（CC0）。
+
+
+## 升级与发布
+
+当前待发布版本：**0.2.0**。应用启动时自动执行 Alembic 迁移；升级前停止服务并备份数据库。
+
+- [升级、恢复和版本发布](docs/upgrading.md)
+- [版本变更记录](CHANGELOG.md)
+- [交付验证结果](docs/delivery-validation.md)
+
+GitHub Actions 自动验证后端、前端、Docker、E2E 和重启持久化；所有检查通过后才能发布。
+隔离的 Docker 验收使用独立项目及端口，强制 fake provider：
+
+```bash
+export SKYCITY_PORT=18000 LLM_PROVIDER=fake OPENAI_API_KEY= OPENAI_BASE_URL=
+docker compose -p skycity-delivery up --build -d --wait --wait-timeout 120
+python3 tools/verify_delivery.py
+cd frontend
+E2E_BASE_URL=http://127.0.0.1:18000 E2E_API_URL=http://127.0.0.1:18000 npm run test:e2e
+cd ..
+# 仅删除此次验收项目的数据卷
+docker compose -p skycity-delivery down -v
+```
+
+本机 E2E 首次运行需在 `frontend/` 执行 `npx playwright install chromium`。
+`SKYCITY_PORT` 可修改宿主机端口，默认仍为 8000。

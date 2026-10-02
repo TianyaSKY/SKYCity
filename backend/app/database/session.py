@@ -1,10 +1,8 @@
-"""Database session plumbing (M2 adds models; the world engine is sync + SQLite)."""
+"""Database sessions for the synchronous SQLite world engine."""
 
 from collections.abc import Generator
 
-from loguru import logger
-from sqlalchemy import create_engine, text as _text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config.settings import get_settings
@@ -33,73 +31,12 @@ SessionLocal = sessionmaker(
 class Base(DeclarativeBase):
     """Declarative base for all ORM models (imported by models package)."""
 
+
 def initialize_database() -> None:
-    """Create every table required by the current ORM model set.
+    """Upgrade to the packaged Alembic head before accepting requests."""
+    from app.database.migrations import upgrade_database
 
-    Migration history is intentionally not supported: a database must be
-    created with the current application version.
-    """
-    from app.database import models  # noqa: F401 - registers all ORM models
-
-    Base.metadata.create_all(engine)
-    # A2: existing databases pre-date the partial unique index; create_all
-    # never alters old tables, so backfill it here (best-effort — dirty
-    # legacy data would fail the DDL and is skipped, the UoW check remains
-    # the primary defence).
-    with engine.connect() as conn:
-        try:
-            conn.execute(_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_employment_contract_active_agent "
-                "ON employment_contracts (world_id, agent_id) "
-                "WHERE status IN ('active', 'on_leave')"
-            ))
-            conn.commit()
-        except Exception:  # noqa: BLE001 - 存量脏数据时跳过，UoW 仍是主防线
-            logger.exception("active-contract unique index creation failed")
-        # M18: existing databases pre-date the personal-store columns;
-        # create_all never alters old tables, so backfill them here
-        # (best-effort — a fresh DB already has the columns via the model).
-        for alter in (
-            "ALTER TABLE stores ADD COLUMN owner_agent_id VARCHAR(64)",
-            "ALTER TABLE stores ADD COLUMN name VARCHAR(128)",
-            # M19: per-job tool bonuses (JSON object {job_id: bonus}).
-            "ALTER TABLE items ADD COLUMN work_bonus_jobs VARCHAR(256)",
-            # Treasury and job-kind cutover: historical reserves stay public,
-            # and casual/public/formal work settle from distinct sources.
-            "ALTER TABLE worlds ADD COLUMN treasury INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE worlds ADD COLUMN public_work_budget_day INTEGER NOT NULL DEFAULT -1",
-            "ALTER TABLE worlds ADD COLUMN public_work_budget_remaining INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE worlds ADD COLUMN public_work_escrow INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE jobs ADD COLUMN work_kind VARCHAR(16) NOT NULL DEFAULT 'independent'",
-            "ALTER TABLE store_products ADD COLUMN supply_kind VARCHAR(16) NOT NULL DEFAULT 'local'",
-            "ALTER TABLE store_products ADD COLUMN import_unit_cost INTEGER NOT NULL DEFAULT 0",
-            # A2: stocks are backed by a real company (or the treasury).
-            "ALTER TABLE stocks ADD COLUMN issuer_company_id VARCHAR(64)",
-            "ALTER TABLE agents ADD COLUMN goals JSON NOT NULL DEFAULT '[]'",
-        ):
-            try:
-                conn.execute(_text(alter))
-                conn.commit()
-            except OperationalError:
-                conn.rollback()  # column already exists (fresh DB) — fine
-        # Cooperative stalls have one operator per preset stall and one stall
-        # per resident. Service checks give readable errors; indexes are the
-        # concurrent-write backstop.
-        try:
-            conn.execute(_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_location_personal "
-                "ON stores (world_id, location_id) "
-                "WHERE owner_agent_id IS NOT NULL"
-            ))
-            conn.execute(_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_store_owner_personal "
-                "ON stores (world_id, owner_agent_id) "
-                "WHERE owner_agent_id IS NOT NULL"
-            ))
-            conn.commit()
-        except Exception:  # noqa: BLE001 - service checks remain the primary defence
-            conn.rollback()
-            logger.exception("cooperative-stall unique index creation failed")
+    upgrade_database(engine)
 
 
 def get_db() -> Generator[Session, None, None]:

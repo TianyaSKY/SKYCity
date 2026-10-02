@@ -1,7 +1,7 @@
 [project]
 name = "ai-tiny-world-backend"
-version = "0.1.0"
-description = "AI Tiny World — FastAPI backend skeleton"
+version = "0.2.0"
+description = "AI Tiny World — FastAPI backend"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -11,6 +11,7 @@ dependencies = [
     "loguru>=0.7",
     "sqlalchemy>=2.0.43",
     "openai-agents>=0.19.3",
+    "alembic>=1.13,<2",
 ]
 
 [dependency-groups]

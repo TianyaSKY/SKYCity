@@ -119,7 +119,7 @@ def world_treasury(engine: WorldEngine, world_id: str) -> int:
 def test_upkeep_lands_in_treasury_and_returns_cooperative_allocation(
         engine: WorldEngine,
 ) -> None:
-    """A 900-coin maintenance pool allocates 450 UBI and 180 public reserve."""
+    """A 1900-coin maintenance pool allocates 950 UBI and caps public reserve at 180."""
     runtime = engine.create_world()
     world_id = runtime.world_id
 
@@ -135,7 +135,7 @@ def test_upkeep_lands_in_treasury_and_returns_cooperative_allocation(
             )
         ).all()
         assert ubi, "UBI must be paid at the day boundary"
-        assert all(t.amount == 50 for t in ubi)  # 900 * 50% // 9
+        assert all(t.amount == 50 for t in ubi)  # 1900 * 50% // 19
         assert all(t.reason == "村庄基本收入" for t in ubi)
         # The upkeep itself still hit the ledger (debt semantics preserved).
         upkeep = session.scalars(
@@ -144,11 +144,11 @@ def test_upkeep_lands_in_treasury_and_returns_cooperative_allocation(
                 Transaction.type == "upkeep",
             )
         ).all()
-        assert len(upkeep) == 9
+        assert len(upkeep) == 19
         world = session.get(World, world_id)
         assert world is not None
         assert world.public_work_budget_remaining == 180
-        assert world.treasury == 450
+        assert world.treasury == 950
     finally:
         session.close()
 
@@ -237,9 +237,9 @@ def test_daily_fiscal_distribution_excludes_historical_treasury(
             )
         ).all()
         world = session.get(World, world_id)
-        assert len(ubi) == 9 and {row.amount for row in ubi} == {50}
+        assert len(ubi) == 19 and {row.amount for row in ubi} == {50}
         assert len(subsidy) == 1 and subsidy[0].amount == 20
-        assert world is not None and world.treasury == 10_430
+        assert world is not None and world.treasury == 10_930
     finally:
         session.close()
 
@@ -257,13 +257,13 @@ def test_daily_payroll_subsidy_uses_only_thirty_percent_pool(
             Company, {"world_id": world_id, "company_id": "company_morning_farm"}
         )
         assert company is not None
-        company.money -= 450
+        company.money -= 700
         session.add(
             CompanyTransaction(
                 world_id=world_id,
                 company_id=company.company_id,
                 type="wage_payment",
-                amount=-450,
+                amount=-700,
                 balance_after=company.money,
                 related_agent_id="agent_linxia",
                 reason="测试正式工资池",
@@ -285,10 +285,10 @@ def test_daily_payroll_subsidy_uses_only_thirty_percent_pool(
             )
         )
         world = session.get(World, world_id)
-        assert subsidy is not None and subsidy.amount == 270
+        assert subsidy is not None and subsidy.amount == 570
         assert world is not None
         assert world.public_work_budget_remaining == 180
-        assert world.treasury == 180
+        assert world.treasury == 380
     finally:
         session.close()
 

@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "${SKYCITY_PORT:-8000}:8000"
     environment:
       DATABASE_URL: sqlite:////data/ai_tiny_world.db
       LOG_DIR: /data/logs

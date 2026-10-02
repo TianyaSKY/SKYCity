@@ -7,7 +7,7 @@ restocked at the store's daily open hour (R15).
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, ForeignKeyConstraint, Integer, String
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
@@ -17,6 +17,12 @@ class Store(Base):
     """A shop: one per location (location_id soft reference to locations)."""
 
     __tablename__ = "stores"
+    __table_args__ = (
+        Index("uq_store_location_personal", "world_id", "location_id", unique=True,
+              sqlite_where=text("owner_agent_id IS NOT NULL")),
+        Index("uq_store_owner_personal", "world_id", "owner_agent_id", unique=True,
+              sqlite_where=text("owner_agent_id IS NOT NULL")),
+    )
 
     world_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("worlds.world_id", ondelete="CASCADE"), primary_key=True

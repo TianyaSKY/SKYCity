@@ -68,13 +68,13 @@ def _open_stall_with_buy(
         agent_id: str = "agent_linxia",
         buy_price: int = 3,
 ) -> str:
-    place_agent(engine, world_id, agent_id, STALL_1, *STALL_1_ANCHOR)
-    set_agent(engine, world_id, agent_id, money=200)
-    add_inventory(engine, world_id, agent_id, "wheat", 10)
+    place_agent(world_id, agent_id, STALL_1, *STALL_1_ANCHOR)
+    set_agent(world_id, agent_id, money=200)
+    add_inventory(world_id, agent_id, "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id,
         agent_id,
-        {"stall_id": STALL_1},
+        STALL_1,
         [{"item_id": "wheat", "price": 6, "buy_price": buy_price}],
         reason="摆摊兼收购",
     )
@@ -135,13 +135,13 @@ def test_open_shop_sets_buy_price(engine: WorldEngine) -> None:
 def test_open_shop_defaults_buy_price_zero(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    place_agent(engine, world_id, "agent_linxia", STALL_1, *STALL_1_ANCHOR)
-    set_agent(engine, world_id, "agent_linxia", money=200)
-    add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
+    place_agent(world_id, "agent_linxia", STALL_1, *STALL_1_ANCHOR)
+    set_agent(world_id, "agent_linxia", money=200)
+    add_inventory(world_id, "agent_linxia", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id,
         "agent_linxia",
-        {"stall_id": STALL_1},
+        STALL_1,
         [{"item_id": "wheat", "price": 6}],
         reason="摆摊",
     )
@@ -152,13 +152,13 @@ def test_open_shop_defaults_buy_price_zero(engine: WorldEngine) -> None:
 def test_open_shop_rejects_buy_price_above_base(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
-    place_agent(engine, world_id, "agent_linxia", STALL_1, *STALL_1_ANCHOR)
-    set_agent(engine, world_id, "agent_linxia", money=200)
-    add_inventory(engine, world_id, "agent_linxia", "wheat", 10)
+    place_agent(world_id, "agent_linxia", STALL_1, *STALL_1_ANCHOR)
+    set_agent(world_id, "agent_linxia", money=200)
+    add_inventory(world_id, "agent_linxia", "wheat", 10)
     ok, envelope, reason = engine.shop_service.open_shop(
         world_id,
         "agent_linxia",
-        {"stall_id": STALL_1},
+        STALL_1,
         [{"item_id": "wheat", "price": 6, "buy_price": 10}],  # 收购价上限 min(3, 4)=3
         reason="摆摊",
     )
@@ -216,8 +216,8 @@ def test_sell_to_personal_store_settles_from_owner(engine: WorldEngine) -> None:
     world_id = runtime.world_id
     store_id = _open_stall_with_buy(engine, world_id, buy_price=3)
     # seller arrives at the stall with 5 wheat
-    place_agent(engine, world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
-    add_inventory(engine, world_id, "agent_zhangming", "wheat", 5)
+    place_agent(world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
+    add_inventory(world_id, "agent_zhangming", "wheat", 5)
 
     ok, envelope, reason = engine.economy_service.sell(
         world_id, "agent_zhangming", "wheat", quantity=2, reason="卖小麦给林夏的摊"
@@ -228,11 +228,11 @@ def test_sell_to_personal_store_settles_from_owner(engine: WorldEngine) -> None:
 
     # seller: +6 coins, 3 wheat left
     seller = agent_row(engine, world_id, "agent_zhangming")
-    assert seller.money == 3006  # 3000 + 6
+    assert seller.money == 606  # 600 + 6
     assert _inventory(engine, world_id, "agent_zhangming") == {"wheat": 3}
     # owner: -6 coins, shelf +2
     owner = agent_row(engine, world_id, "agent_linxia")
-    assert owner.money == 200 - 6
+    assert owner.money == 200 - 60 - 6
     assert _product(engine, world_id, store_id).stock == 5 + 2  # 5 initial + 2 bought
     # purchase event + owner expense transaction
     purchase = [
@@ -259,10 +259,10 @@ def test_sell_to_personal_store_rejects_poor_owner(engine: WorldEngine) -> None:
     runtime = engine.create_world()
     world_id = runtime.world_id
     store_id = _open_stall_with_buy(engine, world_id, buy_price=3)
-    set_agent(engine, world_id, "agent_linxia", money=2)  # cannot cover 3×2
+    set_agent(world_id, "agent_linxia", money=2)  # cannot cover 3×2
 
-    place_agent(engine, world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
-    add_inventory(engine, world_id, "agent_zhangming", "wheat", 5)
+    place_agent(world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
+    add_inventory(world_id, "agent_zhangming", "wheat", 5)
 
     ok, _, reason = engine.economy_service.sell(
         world_id, "agent_zhangming", "wheat", quantity=2, reason="卖小麦"
@@ -289,8 +289,8 @@ def test_sell_to_personal_store_respects_shelf_cap(engine: WorldEngine) -> None:
     finally:
         session.close()
 
-    place_agent(engine, world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
-    add_inventory(engine, world_id, "agent_zhangming", "wheat", 5)
+    place_agent(world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
+    add_inventory(world_id, "agent_zhangming", "wheat", 5)
 
     ok, _, reason = engine.economy_service.sell(
         world_id, "agent_zhangming", "wheat", quantity=2, reason="卖小麦"
@@ -304,8 +304,8 @@ def test_personal_store_buy_price_zero_still_rejects(engine: WorldEngine) -> Non
     world_id = runtime.world_id
     _open_stall_with_buy(engine, world_id, buy_price=0)
 
-    place_agent(engine, world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
-    add_inventory(engine, world_id, "agent_zhangming", "wheat", 5)
+    place_agent(world_id, "agent_zhangming", STALL_1, *STALL_1_ANCHOR)
+    add_inventory(world_id, "agent_zhangming", "wheat", 5)
 
     ok, _, reason = engine.economy_service.sell(
         world_id, "agent_zhangming", "wheat", quantity=1, reason="卖小麦"

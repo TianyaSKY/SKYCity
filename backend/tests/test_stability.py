@@ -193,7 +193,7 @@ def test_backoff_escalates_after_repeated_failures(world_config: ParsedWorldConf
     finally:
         session.close()
 
-    advance_minutes(eng, world_id, 8)  # first (seeded) failure -> cf=2 -> backoff 40
+    advance_minutes(eng, world_id, 18)  # first (seeded) failure -> cf=2 -> backoff 40
 
     session = SessionLocal()
     try:
@@ -228,7 +228,7 @@ def test_daily_counters_reset_at_day_boundary(world_config: ParsedWorldConfig) -
     runtime = eng.create_world("计数世界", autonomous=True)
     world_id = runtime.world_id
 
-    advance_minutes(eng, world_id, 20)
+    advance_minutes(eng, world_id, 60)
 
     session = SessionLocal()
     try:
@@ -243,7 +243,7 @@ def test_daily_counters_reset_at_day_boundary(world_config: ParsedWorldConfig) -
 
     # cross into day 2: counters reset by the hourly tick, then only a few
     # new decisions accumulate in the first minutes of the new day
-    advance_minutes(eng, world_id, (1440 - 500) + 5)  # just past midnight
+    advance_minutes(eng, world_id, (1440 - runtime.clock.world_time) + 5)  # just past midnight
 
     session = SessionLocal()
     try:

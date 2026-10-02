@@ -18,7 +18,9 @@ from app.api.saves import router as saves_router
 from app.api.websocket import router as websocket_router
 from app.api.worlds import router as worlds_router
 from app.config.settings import get_settings
-from app.database.session import SessionLocal, initialize_database
+from app.database.session import SessionLocal, initialize_database, engine as database_engine
+from app.database.migrations import database_revision
+from app.version import APP_VERSION
 from app.services.action_execution_service import ActionExecutionService
 from app.services.agent_decision_service import DecisionService
 from app.services.build_service import BuildService
@@ -197,7 +199,7 @@ async def lifespan(app: FastAPI):
     await engine.stop()
 
 
-app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version=APP_VERSION, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -239,6 +241,8 @@ def health() -> dict[str, str]:
     """Liveness probe; reports the loaded world map version."""
     return {
         "status": "ok",
+        "app_version": APP_VERSION,
+        "database_revision": database_revision(database_engine) or "unversioned",
         "map_version": app.state.world_config.map_version,
     }
 

@@ -1,0 +1,79 @@
+name: Delivery checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      LLM_PROVIDER: fake
+      OPENAI_API_KEY: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.1'
+          python-version: '3.12'
+      - run: uv sync --frozen
+      - run: uv run python ../tools/check_release.py
+      - run: uv run pytest tests/ -q --junitxml=backend-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-results
+          path: backend/backend-results.xml
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm run test
+      - run: npm run build
+  delivery:
+    runs-on: ubuntu-latest
+    env:
+      SKYCITY_PORT: '18000'
+      LLM_PROVIDER: fake
+      OPENAI_API_KEY: ''
+      OPENAI_BASE_URL: ''
+      E2E_BASE_URL: http://127.0.0.1:18000
+      E2E_API_URL: http://127.0.0.1:18000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: docker compose -p skycity-delivery build
+      - run: docker compose -p skycity-delivery up -d --wait --wait-timeout 120
+      - run: python3 tools/verify_delivery.py
+      - run: npm ci && npx playwright install --with-deps chromium && npm run test:e2e
+        working-directory: frontend
+      - run: docker compose -p skycity-delivery logs --no-color > delivery.log
+        if: always()
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-results
+          path: |
+            delivery.log
+            frontend/test-results/
+      - run: docker compose -p skycity-delivery down -v
+        if: always()

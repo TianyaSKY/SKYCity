@@ -217,8 +217,9 @@ def test_gid_to_tileset(world: ParsedWorldConfig) -> None:
 
 def test_health_endpoint() -> None:
     from app.main import app
+    from app.version import APP_VERSION
 
     with TestClient(app) as client:
         response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "map_version": "1.2.0"}
+    assert response.json() == {"status": "ok", "map_version": "1.2.0", "app_version": APP_VERSION, "database_revision": "0001"}

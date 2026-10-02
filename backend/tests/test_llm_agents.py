@@ -65,7 +65,7 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
     session = SessionLocal()
     try:
         # initial decisions scheduled staggered
-        assert pending_decides(session, world_id) == 9
+        assert pending_decides(session, world_id) == 19
     finally:
         session.close()
 
@@ -85,7 +85,7 @@ def test_autonomous_world_agents_follow_scripts(world_config: ParsedWorldConfig)
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang", "agent_touzi",
             "agent_zhoushen", "agent_limujiang", "agent_sunshen",
-        }
+        } | {f"agent_homeless_{i:02d}" for i in range(1, 11)}
         # linxia moved to the shop per script (first decision)
         linxia_runs = sorted(by_agent["agent_linxia"],
                              key=lambda r: r.created_at)
@@ -174,27 +174,34 @@ def test_t310_llm_failure_degrades_to_wait(world_config: ParsedWorldConfig) -> N
     runtime = eng.create_world("故障世界", autonomous=True)
     world_id = runtime.world_id
 
-    advance_minutes(eng, world_id, 10)
+    advance_minutes(eng, world_id, 20)
 
     session = SessionLocal()
     try:
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) == 9, "every agent degraded"
+        assert len({run.agent_id for run in runs}) == 19, "every agent degraded (early agents may already retry)"
         assert all(r.success == 0 for r in runs)
         assert all(r.error_type for r in runs)
         assert all(r.tool_result["success"] is False for r in runs)
         assert all("LLM 无响应" in r.tool_result["reason"] for r in runs)
-        # every agent fell back to a wait action (world kept ticking)
+        # Every resident started a fallback wait. With 19 staggered residents,
+        # early waits may have ended by the time the last decision executes;
+        # those residents remain idle until their scheduled backoff retry.
+        waits = {
+            event.payload["agent_id"] for event in eng.events_after(world_id, 0)
+            if event.type == "agent_wait_started"
+        }
         agents = session.scalars(
             select(Agent).where(Agent.world_id == world_id)
         ).all()
+        assert waits == {agent.agent_id for agent in agents}
         for agent in agents:
-            assert agent.action_type == "wait", f"{agent.agent_id} not degraded to wait"
+            assert agent.action_type in {"wait", None}
             assert agent.consecutive_failures >= 1
         # next decisions still scheduled (recovery path)
-        assert pending_decides(session, world_id) >= 9
+        assert pending_decides(session, world_id) >= 19
     finally:
         session.close()
     eng._runtimes.clear()
@@ -281,12 +288,12 @@ def test_paused_autonomous_world_frozen(world_config: ParsedWorldConfig) -> None
         runs = session.scalars(
             select(LLMRun).where(LLMRun.world_id == world_id)
         ).all()
-        assert len(runs) >= 9, "resume re-armed decisions"
+        assert len(runs) >= 19, "resume re-armed decisions"
         assert {r.agent_id for r in runs} == {
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang", "agent_touzi",
             "agent_zhoushen", "agent_limujiang", "agent_sunshen",
-        }
+        } | {f"agent_homeless_{i:02d}" for i in range(1, 11)}
     finally:
         session.close()
     eng._runtimes.clear()

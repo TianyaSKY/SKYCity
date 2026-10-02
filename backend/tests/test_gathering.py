@@ -125,7 +125,7 @@ def test_woodcutting_yields_wood_for_sale(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 181)  # 480 -> 661: completes at 660
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3000  # independent work earns only through a sale
+    assert row.money == 600  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "wood", "quantity": 3}]
@@ -145,7 +145,7 @@ def test_fishing_yields_fish_for_sale(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 181)
 
     row = agent_row(engine, world_id, "agent_zhangming")
-    assert row.money == 3000  # independent work earns only through a sale
+    assert row.money == 600  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "fish", "quantity": 2}]
@@ -165,7 +165,7 @@ def test_honey_collect_yields_honey_for_sale(engine: WorldEngine) -> None:
     advance_minutes(engine, world_id, 121)  # completes at 600
 
     row = agent_row(engine, world_id, "agent_chenyu")
-    assert row.money == 3000  # independent work earns only through a sale
+    assert row.money == 600  # independent work earns only through a sale
     completed = work_completed(engine, world_id)
     assert completed
     assert completed[0].payload["products"] == [{"item_id": "honey", "quantity": 1}]
@@ -192,7 +192,7 @@ def test_gathered_products_sell_to_shop(engine: WorldEngine) -> None:
     assert envelope.payload["total"] == 18  # 2 × 9 (M19 buy price)
 
     row = agent_row(engine, world_id, "agent_linxia")
-    assert row.money == 3036  # 3000 + 36
+    assert row.money == 636  # 600 + 36
 
 
 # --------------------------------------------------------------------------- #

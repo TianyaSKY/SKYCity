@@ -19,7 +19,8 @@ export interface MapBundle {
 /** Resolve a possibly-relative URL against a base URL (URL-join semantics). */
 function joinUrl(baseUrl: string, rel: string): string {
     if (/^[a-z][a-z0-9+.-]*:/i.test(rel) || rel.startsWith('//')) return rel;
-    return new URL(rel, baseUrl).toString();
+    const absoluteBase = new URL(baseUrl, window.location.href);
+    return new URL(rel, absoluteBase).toString();
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {

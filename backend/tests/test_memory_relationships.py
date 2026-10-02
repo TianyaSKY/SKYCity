@@ -553,19 +553,19 @@ def test_daily_reflection_fires_once_per_day(world_config: ParsedWorldConfig) ->
         assert semantic[0].text == REFLECTION_SUMMARY_ZERO
 
     events = [e for e in eng.events_after(world_id, 0) if e.type == "daily_reflection"]
-    assert len(events) == 9, "one reflection per agent on day 1"
+    assert len(events) == 19, "one reflection per agent on day 1"
     assert {e.payload["agent_id"] for e in events} == {
         "agent_linxia", "agent_zhangming", "agent_chenyu",
         "agent_wangfang", "agent_laozhang",
         "agent_touzi", "agent_zhoushen", "agent_limujiang", "agent_sunshen",
-    }
+    } | {f"agent_homeless_{i:02d}" for i in range(1, 11)}
     assert all(e.payload["summary"] == REFLECTION_SUMMARY_ZERO for e in events)
 
     # Day 2: the re-armed action fires exactly once more.
     advance_minutes(eng, world_id, 1440)
     assert world_time(world_id) == 2850
     events = [e for e in eng.events_after(world_id, 0) if e.type == "daily_reflection"]
-    assert len(events) == 18  # 9 agents x 2 days
+    assert len(events) == 38  # 19 agents x 2 days
     for agent_id in (
             "agent_linxia", "agent_zhangming", "agent_chenyu",
             "agent_wangfang", "agent_laozhang",

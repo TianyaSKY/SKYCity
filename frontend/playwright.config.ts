@@ -5,6 +5,7 @@ import {defineConfig} from '@playwright/test';
  *   - frontend vite dev server on http://localhost:5173 (`npm run dev` in frontend/)
  *   - backend API on http://localhost:8000 (uvicorn / python main.py in backend/)
  *
+ * For Docker, set E2E_BASE_URL and E2E_API_URL to the same single-port URL.
  * Playwright does NOT manage a webServer: the global setup pings both and
  * fails fast with a clear message when either is down.
  */
@@ -14,7 +15,7 @@ export default defineConfig({
     fullyParallel: false,
     globalSetup: './e2e/global-setup.ts',
     use: {
-        baseURL: 'http://localhost:5173',
+        baseURL: process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5173',
         trace: 'retain-on-failure',
     },
     projects: [
