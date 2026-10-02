@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 from loguru import logger
 
 from app.api.companies import router as companies_router
@@ -254,3 +255,15 @@ app.mount(
     StaticFiles(directory=str(settings.world_data_dir), check_dir=False, html=False),
     name="world_data",
 )
+
+
+# Optional production UI hosting. The mount happens last so API, WebSocket and
+# world-data routes keep precedence. In development, frontend/dist usually does
+# not exist and Vite serves the UI separately.
+_frontend_dist = settings.frontend_dist_dir
+if _frontend_dist.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=str(_frontend_dist), html=True),
+        name="frontend",
+    )
