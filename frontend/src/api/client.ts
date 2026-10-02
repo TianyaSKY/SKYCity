@@ -36,7 +36,7 @@ export interface HealthResponse {
     map_version: string;
 }
 
-export const apiBase: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+export const apiBase: string = import.meta.env.VITE_API_BASE ?? '';
 
 /** Join a world_data-relative path onto the backend static mount. */
 export function mapAssetUrl(rel: string, base: string = apiBase): string {
