@@ -11,7 +11,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
 from loguru import logger
 
 from app.api.companies import router as companies_router
