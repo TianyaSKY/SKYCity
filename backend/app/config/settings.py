@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_ignore_empty=True,
         extra="ignore",
     )
 
@@ -30,6 +31,7 @@ class Settings(BaseSettings):
     # Durable log output dir; categorized sinks write app.log / warning.log /
     # error.log there (rotated + retained). Override with LOG_DIR.
     log_dir: Path = Path("logs")
+    # When this directory exists, FastAPI serves the built frontend at /.\n    # Local development can keep using Vite; production/Docker can build once\n    # and expose a single HTTP port.\n    frontend_dist_dir: Path = Path("../frontend/dist")
 
     # LLM agent decisions (M3).
     llm_provider: str = "auto"  # "auto" | "openai" | "fake"
