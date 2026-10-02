@@ -1,0 +1,36 @@
+services:
+  skycity:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/ai_tiny_world.db
+      LOG_DIR: /data/logs
+      WORLD_DATA_DIR: /app/world_data
+      FRONTEND_DIST_DIR: /app/frontend/dist
+      LLM_PROVIDER: ${LLM_PROVIDER:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      LLM_REFLECT_MODEL: ${LLM_REFLECT_MODEL:-gpt-4o-mini}
+      LLM_USE_RESPONSES: ${LLM_USE_RESPONSES:-false}
+      LLM_MAX_CONCURRENT: ${LLM_MAX_CONCURRENT:-2}
+      WORLD_DAILY_TOKEN_BUDGET: ${WORLD_DAILY_TOKEN_BUDGET:-0}
+    volumes:
+      - skycity-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  skycity-data:
