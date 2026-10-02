@@ -382,6 +382,7 @@ export class AgentActionError extends Error {
 
 /** WebSocket URL for a world (http(s) base -> ws(s) endpoint). */
 export function wsUrl(worldId: string): string {
-    const wsBase = baseUrl().replace(/^http/, 'ws');
+    const httpBase = baseUrl() || window.location.origin;
+    const wsBase = httpBase.replace(/^http/, 'ws');
     return `${wsBase}/ws/worlds/${encodeURIComponent(worldId)}`;
 }
