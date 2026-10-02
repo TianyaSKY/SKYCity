@@ -36,7 +36,7 @@ export interface HealthResponse {
     map_version: string;
 }
 
-export const apiBase: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
+export const apiBase: string = import.meta.env.VITE_API_BASE ?? '';
 
 /** Join a world_data-relative path onto the backend static mount. */
 export function mapAssetUrl(rel: string, base: string = apiBase): string {
@@ -382,6 +382,7 @@ export class AgentActionError extends Error {
 
 /** WebSocket URL for a world (http(s) base -> ws(s) endpoint). */
 export function wsUrl(worldId: string): string {
-    const wsBase = baseUrl().replace(/^http/, 'ws');
+    const httpBase = baseUrl() || window.location.origin;
+    const wsBase = httpBase.replace(/^http/, 'ws');
     return `${wsBase}/ws/worlds/${encodeURIComponent(worldId)}`;
 }

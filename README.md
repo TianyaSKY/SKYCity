@@ -1,151 +1,222 @@
-# AI Tiny World（AI 小世界）
+# SKYCity / AI Tiny World（AI 小世界）
 
-一个采用 **Tiny Farm 像素素材**的 2D 上帝视角 AI 世界。每个居民由身份卡、状态、记忆、关系和真实 LLM
-驱动，通过工具完成移动、对话、工作、消费等行为；玩家负责观察、控制时间和干预世界。
+一个采用 **Tiny Farm 像素素材**的 2D 上帝视角 AI 世界。居民由身份卡、状态、记忆、关系和 LLM 驱动，通过工具完成移动、对话、工作、消费、经营等行为；玩家负责观察、控制时间和干预世界。
 
-项目按 10 个里程碑（M0~M9）推进，每个里程碑都有可运行、可观察、可验收的版本。完整的架构与规则契约见 `docs/`。
+## 适合直接交付的运行方式
+
+推荐使用 Docker。前端会在构建阶段打包，并由 FastAPI 直接托管，因此最终只需要暴露 **8000** 一个端口。
+
+### 1. 无 LLM Key 直接体验
+
+```bash
+docker compose up --build -d
+```
+
+打开：
+
+```text
+http://localhost:8000
+```
+
+未配置 `OPENAI_API_KEY` 时，系统自动使用内置 fake provider，仍可体验完整世界流程。
+
+### 2. 启用真实 LLM
+
+复制配置模板：
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+官方 OpenAI：
+
+```env
+OPENAI_API_KEY=你的密钥
+OPENAI_BASE_URL=
+LLM_MODEL=gpt-4o-mini
+LLM_REFLECT_MODEL=gpt-4o-mini
+```
+
+第三方 OpenAI 兼容服务：
+
+```env
+OPENAI_API_KEY=你的密钥
+OPENAI_BASE_URL=https://your-provider.example/v1
+LLM_MODEL=你的模型名
+LLM_REFLECT_MODEL=你的模型名
+```
+
+然后：
+
+```bash
+docker compose --env-file backend/.env up --build -d
+```
+
+> 不要把真实密钥提交到 Git。项目已忽略 `backend/.env`。
+
+## 本地开发
+
+### 后端
+
+要求 Python 3.12+ 与 uv。
+
+```bash
+cd backend
+uv sync
+cp .env.example .env
+uv run uvicorn app.main:app --port 8000
+```
+
+### 前端
+
+要求 Node.js 20+，推荐 Node.js 22。
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+打开 `http://127.0.0.1:5173`。
+
+开发环境下 Vite 会自动代理以下后端路径：
+
+- `/api`
+- `/health`
+- `/assets/world_data`
+- `/ws`
+
+因此默认不需要配置 `VITE_API_BASE`。
 
 ## 功能一览
 
 - 64×40 瓦片小镇地图（Tiled JSON），PixiJS 整数倍缩放渲染
-- 世界时钟（游戏分钟制）：暂停 / 恢复 / 1× / 2× / 5× / 10×
-- 9 位居民（每人一份角色卡，可自行添加），由 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品
-- 真实对话：气泡、历史面板、交谈高亮、防无限对聊
-- 合作社经济闭环：生产 → 合作社商店 → 居民消费；居民每日缴纳维护费，按全民基本收入、公共工程和工资保障分配
-- 夜间作息：精力/心情按小时消耗，`wait` 每小时恢复 3 精力，睡觉恢复 5 精力 / 3 心情；有家回自己家睡，无家去小镇旅店（每日首晚 30 金币，余额不足不赊账）
-- 合作社份额：两种有限认购、固定单价的合作社份额；经营量公开，不设投机价格或每日股息
-- 合作社摊位：居民只能在广场三个预设摊位经营一摊，开摊使用费进入公共金库
-- 记忆系统（工作/情节/语义记忆 + 加权检索）与方向性人际关系
-- 每日反思（独立限频调用）
-- 上帝视角：暂停/调速/改天气/发钱/给物品/传送/公共事件/改商店库存/调份额单价，全程审计
-- 稳定性：LLM 并发信号量、超时重试、故障降级、Token 预算、观察缓存、trace_id 全程可溯
+- 世界时钟：暂停 / 恢复 / 1× / 2× / 5× / 10×
+- 多居民 LLM 自主决策：移动、等待、对话、工作、购买、出售、使用物品等
+- 对话气泡、历史面板、交谈高亮、防无限对聊
+- 合作社经济闭环、正式雇佣、个人摊位、合作社份额
+- 睡眠、精力、心情、饱食、孤独等生活状态
+- 工作记忆 / 情节记忆 / 语义记忆与方向性关系
+- 每日反思与 LLM 调用稳定性控制
+- 上帝视角干预与审计
 - 存档 / 恢复 / 事件重放
+- 数据看板与 LLM / 事件统计
 
-## 快速开始
+## 常用配置
 
-### 1. 后端（FastAPI + SQLite）
+| 环境变量 | 默认 | 说明 |
+|---|---|---|
+| `DATABASE_URL` | `sqlite:///./ai_tiny_world.db` | SQLite 数据库地址 |
+| `WORLD_DATA_DIR` | `../world_data` | 世界静态数据目录 |
+| `FRONTEND_DIST_DIR` | `../frontend/dist` | 构建后的前端目录；存在时由 FastAPI 托管 |
+| `LOG_DIR` | `logs` | 日志目录 |
+| `OPENAI_API_KEY` | 空 | 真实 LLM 密钥 |
+| `OPENAI_BASE_URL` | 空 | 第三方 OpenAI 兼容服务地址；官方 OpenAI 保持为空 |
+| `LLM_PROVIDER` | `auto` | `auto` / `openai` / `fake` |
+| `LLM_MODEL` | `gpt-4o-mini` | 普通决策模型 |
+| `LLM_REFLECT_MODEL` | `gpt-4o-mini` | 每日反思模型 |
+| `LLM_USE_RESPONSES` | `false` | 是否使用 Responses API |
+| `LLM_MAX_CONCURRENT` | `2` | 全局 LLM 并发上限 |
+| `WORLD_DAILY_TOKEN_BUDGET` | `0` | 每世界每日 Token 预算，0 为不限 |
 
-```bash
-cd backend
-export PATH="$HOME/.local/bin:$PATH"   # 若 uv 不在 PATH
-uv sync                                 # 安装依赖（自动下载 Python）
-cp .env.example .env                    # 按需修改（可选）
-```
-
-```bash
-cd backend
-uv run uvicorn app.main:app --port 8000
-```
-
-### 2. 前端（Vue 3 + Vite + PixiJS）
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-打开 http://localhost:5173 即可看到小镇。页面会自动创建/加入一个世界；想开启 LLM 自主行动，可在后端创建自主世界：
-
-```bash
-curl -X POST localhost:8000/api/worlds \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"晨露村庄","autonomous":true}'
-curl -X POST localhost:8000/api/worlds/world_001/speed \
-  -H 'Content-Type: application/json' -d '{"speed":10}'
-```
-
-注意：SDK 默认走 Responses API，而第三方服务通常只实现 `/chat/completions`，因此本项目固定走 chat completions（
-`LLM_USE_RESPONSES=false`）。若你的服务商明确支持 `/responses`，可改为 `true`。
-
-### 合作社规则版本升级
-
-本版本的合作社份额与旧版股票表不兼容，项目没有数据库迁移脚本。升级已有部署时，先停止后端并备份
-`backend/ai_tiny_world.db`，再删除该数据库文件后启动服务，让 SQLAlchemy 按当前模型创建新表；随后在前端创建新世界。
-只删除 `world_001` 不会更新旧表结构，不能替代重建数据库。
-
-| 环境变量                   | 默认          | 说明                                                |
-|----------------------------|---------------|-----------------------------------------------------|
-| `OPENAI_API_KEY`           | —             | 真实 LLM 密钥（第三方兼容 key 亦可）                |
-| `OPENAI_BASE_URL`          | —             | 第三方 API 地址（OpenAI 兼容）；不设则连官方 OpenAI |
-| `LLM_PROVIDER`             | `auto`        | `auto` / `openai` / `fake`                          |
-| `LLM_MODEL`                | `gpt-4o-mini` | 普通行动模型（第三方填服务商模型名）                |
-| `LLM_REFLECT_MODEL`        | `gpt-4o-mini` | 每日反思模型                                        |
-| `LLM_USE_RESPONSES`        | `false`       | 是否用 Responses API（第三方兼容服务保持 `false`）  |
-| `LLM_MAX_CONCURRENT`       | `2`           | 全局并发上限                                        |
-| `WORLD_DAILY_TOKEN_BUDGET` | `0`           | 每世界每日 Token 预算（0=不限）                     |
-
-## 添加新智能体
-
-每个智能体只有一份数据：`world_data/identities/agent_xxx.json` 角色卡，包含身份（姓名/年龄/职业/背景/五因素）、`spawn`
-出生点和可选的 `home`。出生点与住宅由 `tools/build_map.py` 从角色卡派生到地图，引擎也只读角色卡——加一个智能体只需写一个文件：
-
-1. 新建 `world_data/identities/agent_xxx.json`（参考现有角色卡）：
-
-   ```json
-   {
-     "id": "agent_xxx",
-     "name": "名字", "age": 30, "occupation": "职业",
-     "background": "背景故事", "values": [], "long_term_goals": [],
-     "speaking_style": "说话风格",
-     "personality": {
-       "openness": 0.5, "conscientiousness": 0.5, "extraversion": 0.5,
-       "agreeableness": 0.5, "emotional_stability": 0.5
-     },
-     "initial_money": 50,
-     "spawn": { "col": 33, "row": 20, "direction": "down" },
-     "home": { "location_id": "xxx_home", "name": "XXX的家", "col": 33, "row": 19 }
-   }
-   ```
-
-   `home` 可省略（无家的智能体出生在出生点格）；`initial_money` 未设置时默认 600。`spawn` 必填，`id` 必须等于文件名。
-
-2. 重新生成地图（可选，仅同步 tmj 里的可视化出生点/住宅；引擎只读角色卡，不跑也能建世界）：
-
-   ```bash
-   uv run --with pillow python tools/build_map.py
-   ```
-
-3. 重建世界让新智能体入场（智能体只在建世界时播种）：
-
-   ```bash
-   curl -X DELETE localhost:8000/api/worlds/world_001
-   curl -X POST localhost:8000/api/worlds \
-     -H 'Content-Type: application/json' \
-     -d '{"name":"晨露村庄","autonomous":true}'
-   ```
-
-   前端无需改动：精灵、名牌、气泡都按快照动态渲染。新智能体自动使用现有的工作 / 商店 / 物品（要新工种就加
-   `world_data/jobs/jobs.json`，`location_id` 必须指向地图上存在的地点）。
+SDK 默认可走 Responses API，而大量第三方兼容服务只实现 `/chat/completions`，因此默认使用 `LLM_USE_RESPONSES=false`。
 
 ## 测试
 
+后端：
+
 ```bash
-cd backend && uv run pytest tests/ -q          # 全部后端测试
-cd frontend && npm run test                    # Vitest 单元测试
-cd frontend && npm run test:e2e                # Playwright 冒烟（需前后端已启动）
+cd backend
+uv run pytest tests/ -q
 ```
 
-真实模型冒烟测试（`test_llm_smoke.py`）在无 `OPENAI_API_KEY` 时自动跳过。
+前端：
+
+```bash
+cd frontend
+npm ci
+npm run test
+npm run build
+```
+
+浏览器冒烟测试：
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+E2E 需要先启动本地后端 `127.0.0.1:8000` 和前端 `127.0.0.1:5173`。
+
+真实模型冒烟测试 `backend/tests/test_llm_smoke.py` 在没有 `OPENAI_API_KEY` 时会跳过。
+
+## 添加新智能体
+
+每个智能体由 `world_data/identities/agent_xxx.json` 定义。新增角色后重新创建世界即可播种。
+
+示例：
+
+```json
+{
+  "id": "agent_xxx",
+  "name": "名字",
+  "age": 30,
+  "occupation": "职业",
+  "background": "背景故事",
+  "values": [],
+  "long_term_goals": [],
+  "speaking_style": "说话风格",
+  "personality": {
+    "openness": 0.5,
+    "conscientiousness": 0.5,
+    "extraversion": 0.5,
+    "agreeableness": 0.5,
+    "emotional_stability": 0.5
+  },
+  "initial_money": 600,
+  "spawn": {"col": 33, "row": 20, "direction": "down"}
+}
+```
+
+如需同步 Tiled 地图中的可视化出生点/住宅：
+
+```bash
+uv run --with pillow python tools/build_map.py
+```
+
+## 数据升级注意
+
+当前项目仍没有正式数据库迁移框架。代码会对部分旧字段执行启动时兼容补丁，但跨大版本升级前仍建议备份数据库。
+
+全新交付推荐直接使用 Docker volume。升级已有实例前请先备份：
+
+- SQLite 数据库
+- `/data/logs`（如需保留排障记录）
+- 自定义 `world_data`
+
+更完整的部署、升级、备份与排障说明见 `docs/deployment.md`。
 
 ## 目录结构
 
+```text
+backend/       FastAPI + SQLAlchemy + 世界引擎 + LLM 智能体
+frontend/      Vue 3 + Vite + Pinia + PixiJS 8
+world_data/    地图、角色卡、物品、工作、商店、合作社等种子数据
+tools/         地图生成器
+docs/          架构、世界规则、协议、部署文档
+Dockerfile     前后端一体化生产镜像
+docker-compose.yml
 ```
-backend/     FastAPI + SQLAlchemy + 世界引擎 + LLM 智能体
-frontend/    Vue3 + Vite + Pinia + PixiJS 8
-world_data/  地图(tmj/tsj)、角色卡(身份+出生点+家)、物品、工作、合作社、商店和份额种子数据
-tools/       地图生成器（build_map.py，确定性）
-docs/        架构、世界规则、事件协议、地图规范、智能体约定
-```
-
-地图由 `tools/build_map.py` 确定性生成（固定随机种子），可直接在 Tiled 中打开 `world_data/maps/tiny_world.tmj`。
 
 ## 文档
 
-- `docs/architecture.md` — 三大边界（LLM 只出意图 / 引擎唯一真值 / 前端只观察）
-- `docs/world-rules.md` — 世界规则契约（R1~R44，程序实现）
-- `docs/event-protocol.md` — 统一事件协议与全部事件类型
-- `docs/map-specification.md` — 图层与对象层规范
-- `docs/agent-prompt.md` — 提示词与工具约定
+- `docs/deployment.md` — 面向交付的部署、升级、备份与排障
+- `docs/architecture.md` — 架构边界
+- `docs/world-rules.md` — 世界规则
+- `docs/event-protocol.md` — 事件协议
+- `docs/map-specification.md` — 地图规范
+- `docs/agent-prompt.md` — 智能体提示词与工具约定
+- `docs/company-employment.md` — 合作社 / 雇佣系统
 
-素材：Kenney Tiny Farm（CC0，www.kenney.nl）。
+素材：Kenney Tiny Farm（CC0）。
